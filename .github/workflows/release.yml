@@ -91,9 +91,12 @@ jobs:
         run: |
           set -euo pipefail
           for archive in dist/*.tar.gz; do
-            tar -tzf "$archive" | grep -qx '.*/install.sh'
-            tar -tzf "$archive" | grep -qx '.*/bin/x-node'
-            tar -tzf "$archive" | grep -qx '.*/deploy/systemd/x-node.service'
+            # Read the whole listing first: grep -q closes the pipe early and
+            # tar then fails with "stdout: write error" under pipefail.
+            listing="$(tar -tzf "$archive")"
+            printf '%s\n' "$listing" | grep -qx '.*/install.sh'
+            printf '%s\n' "$listing" | grep -qx '.*/bin/x-node'
+            printf '%s\n' "$listing" | grep -qx '.*/deploy/systemd/x-node.service'
           done
 
       - name: publish
