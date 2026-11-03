@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags-ignore: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: vet, tests and shell scripts
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          # The probe is a separate module with the newer language requirement.
+          go-version-file: cmd/x-node-peerprobe/go.mod
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            cmd/x-node-peerprobe/go.sum
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test -race
+        run: go test -race ./...
+
+      - name: vet the probe module
+        run: |
+          cd cmd/x-node-peerprobe
+          go vet ./...
+          go build ./...
+
+      - name: shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends shellcheck
+          shellcheck -S warning install.sh uninstall.sh build.sh
+
+  build:
+    name: build linux/${{ matrix.goarch }}${{ matrix.goarm }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goarch: amd64
+            goarm: ""
+          - goarch: arm64
+            goarm: ""
+          - goarch: arm
+            goarm: "7"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          # The probe is a separate module with the newer language requirement.
+          go-version-file: cmd/x-node-peerprobe/go.mod
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            cmd/x-node-peerprobe/go.sum
+
+      - name: build
+        env:
+          GOOS: linux
+          GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm }}
+        run: |
+          set -euo pipefail
+          version="$(git describe --tags --always)"
+          version="${version#v}"
+          mkdir -p dist
+          ldflags="-s -w -X main.daemonVersion=${version}"
+          go build -trimpath -ldflags "$ldflags" -o dist/x-node ./cmd/x-node
+          (
+            cd cmd/x-node-peerprobe
+            go build -trimpath -ldflags "-s -w" -o "$GITHUB_WORKSPACE/dist/x-node-peerprobe" .
+          )
+          file dist/x-node dist/x-node-peerprobe
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: x-node-linux-${{ matrix.goarch }}${{ matrix.goarm }}
+          path: dist/
+          if-no-files-found: error

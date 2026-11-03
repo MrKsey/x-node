@@ -1,0 +1,55 @@
+# X-Node: example nginx site.
+#
+# install.sh generates this file as /etc/nginx/sites-available/x-node.conf and
+# fills in the real paths and ports. Copy it only when the peering front is
+# configured by hand.
+#
+# The same TLS port carries two things:
+#   /ygg                 the Yggdrasil WebSocket peering, proxied to ws://127.0.0.1:13338
+#   /<random>/web        the X-Node web interface, proxied to 127.0.0.1:8443
+# Everything else serves the neutral stub page from /var/www/x-node.
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name exit.example.com;
+
+    # A self-signed pair is enough for the peering: Yggdrasil pins the node key
+    # and does not verify the CA chain. Browsers need a real certificate, so
+    # replace both paths with /etc/letsencrypt/live/<name>/... once the web
+    # interface is used. See README section 3.4.
+    ssl_certificate     /etc/x-node/tls/x-node.crt;
+    ssl_certificate_key /etc/x-node/tls/x-node.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    root  /var/www/x-node;
+    index index.html;
+
+    # The web interface. Keep the Host header: the daemon compares it with
+    # Origin. X-Forwarded-For is believed only for web.trustedProxies.
+    location /k3f9x2m8q1w7z4ab/web {
+        proxy_pass http://127.0.0.1:8443;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 60s;
+        proxy_send_timeout 60s;
+    }
+
+    location / {
+        try_files $uri $uri/ =404;
+    }
+
+    # Yggdrasil peering. The path must match peerURI, e.g.
+    # wss://exit.example.com:443/ygg?key=<public key>.
+    location /ygg {
+        proxy_pass http://127.0.0.1:13338;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+}

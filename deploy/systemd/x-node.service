@@ -1,0 +1,43 @@
+[Unit]
+Description=X-Node — Yggdrasil exit node
+Documentation=file:/usr/local/share/doc/x-node/README.md
+After=network-online.target yggdrasil.service
+Wants=network-online.target
+Requires=yggdrasil.service
+PartOf=yggdrasil.service
+
+[Service]
+Type=simple
+User=x-node
+Group=x-node
+# The Yggdrasil admin socket is root:yggdrasil 0660; the supervisor adds and
+# removes public peers through it, so the service needs that group.
+SupplementaryGroups=yggdrasil
+ExecStart=/usr/local/bin/x-node serve -config /etc/x-node/config.json
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=10s
+
+# The daemon only reads its config, writes its state and talks to the
+# Yggdrasil admin socket. It never needs root: the sockets are bound to the
+# Yggdrasil address, not to a privileged port.
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+ReadWritePaths=/var/lib/x-node
+UMask=0077
+LimitNOFILE=8192
+
+[Install]
+WantedBy=multi-user.target

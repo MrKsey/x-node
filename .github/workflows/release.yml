@@ -1,0 +1,111 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: package linux/${{ matrix.goarch }}${{ matrix.goarm }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - goarch: amd64
+            goarm: ""
+          - goarch: arm64
+            goarm: ""
+          - goarch: arm
+            goarm: "7"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          # The probe is a separate module with the newer language requirement.
+          go-version-file: cmd/x-node-peerprobe/go.mod
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            cmd/x-node-peerprobe/go.sum
+
+      - name: package
+        env:
+          GOOS: linux
+          GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm }}
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          root="$PWD"
+          name="x-node-${version}-linux-${{ matrix.goarch }}"
+          stage="$root/dist/${name}"
+          mkdir -p "$stage/bin"
+
+          ldflags="-s -w -X main.daemonVersion=${version}"
+          go build -trimpath -ldflags "$ldflags" -o "$stage/bin/x-node" ./cmd/x-node
+          (
+            cd cmd/x-node-peerprobe
+            go build -trimpath -ldflags "-s -w" -o "$stage/bin/x-node-peerprobe" .
+          )
+
+          install -m 0755 install.sh uninstall.sh "$stage/"
+          install -m 0644 config.example.json README.md README.ru.md LICENSE SECURITY.md CHANGELOG.md "$stage/"
+          cp -r deploy "$stage/deploy"
+          find "$stage/deploy" -type d -exec chmod 0755 {} +
+          find "$stage/deploy" -type f -exec chmod 0644 {} +
+
+          tar -C dist -czf "dist/${name}.tar.gz" "$name"
+          rm -rf "$stage"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.goarch }}${{ matrix.goarm }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  publish:
+    name: publish the release
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+
+      - name: checksums
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum ./*.tar.gz > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: verify the archives
+        run: |
+          set -euo pipefail
+          for archive in dist/*.tar.gz; do
+            tar -tzf "$archive" | grep -qx '.*/install.sh'
+            tar -tzf "$archive" | grep -qx '.*/bin/x-node'
+            tar -tzf "$archive" | grep -qx '.*/deploy/systemd/x-node.service'
+          done
+
+      - name: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/*.tar.gz dist/SHA256SUMS.txt --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist/*.tar.gz dist/SHA256SUMS.txt \
+              --title "X-Node ${version}" \
+              --generate-notes
+          fi

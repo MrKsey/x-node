@@ -1,0 +1,15 @@
+[Unit]
+Description=X-Node firewall rules
+Documentation=file:/usr/local/share/doc/x-node/README.md
+After=network-online.target nftables.service
+Wants=network-online.target
+Before=x-node.service
+
+[Service]
+Type=oneshot
+# The unit can be restarted: drop the old table before loading the file.
+ExecStart=/bin/sh -c '/usr/sbin/nft delete table inet x-node 2>/dev/null || true; exec /usr/sbin/nft -f /etc/nftables.d/x-node.nft'
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

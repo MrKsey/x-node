@@ -1,0 +1,21 @@
+# Build output
+/bin/
+/dist/
+/x-node
+/x-node-peerprobe
+*.exe
+cmd/x-node-peerprobe/peerprobe
+
+# Local scratch space used by the developer (test configs, state directories)
+/.tmp/
+
+# Editor and OS noise
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+# A real configuration may contain the peer key and the API tokens
+/config.json
+*.local.json

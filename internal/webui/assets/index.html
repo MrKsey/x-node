@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="robots" content="noindex, nofollow">
+<title>X-Node</title>
+<link rel="icon" href="static/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="static/app.css">
+</head>
+<body>
+<div id="boot" class="boot"><div class="spinner"></div></div>
+
+<div id="login" class="login hidden">
+  <form class="card login-card" id="login-form" autocomplete="on">
+    <div class="brand">
+      <img src="static/favicon.svg" alt="" width="40" height="40">
+      <div>
+        <h1>X-Node</h1>
+        <p class="muted">Yggdrasil exit node</p>
+      </div>
+    </div>
+    <label class="field">
+      <span>Username</span>
+      <input id="login-user" name="username" type="text" autocomplete="username" value="admin" required>
+    </label>
+    <label class="field">
+      <span>Password</span>
+      <input id="login-password" name="password" type="password" autocomplete="current-password" required>
+    </label>
+    <p id="login-error" class="error hidden"></p>
+    <button class="btn primary" type="submit" id="login-submit">Sign in</button>
+    <p class="muted small">Sessions expire automatically. Repeated failures block the address.</p>
+  </form>
+</div>
+
+<div id="app" class="app hidden">
+  <aside class="sidebar">
+    <div class="brand">
+      <img src="static/favicon.svg" alt="" width="32" height="32">
+      <div>
+        <strong>X-Node</strong>
+        <span class="muted small" id="side-name"></span>
+      </div>
+    </div>
+    <nav id="nav">
+      <a href="#dashboard" data-view="dashboard"><span class="ico">◈</span>Dashboard</a>
+      <a href="#clients" data-view="clients"><span class="ico">☰</span>Clients</a>
+      <a href="#invites" data-view="invites"><span class="ico">＋</span>Invites</a>
+      <a href="#quotas" data-view="quotas"><span class="ico">▤</span>Quotas</a>
+      <a href="#settings" data-view="settings"><span class="ico">⚙</span>Settings</a>
+      <a href="#logs" data-view="logs"><span class="ico">≡</span>Logs</a>
+    </nav>
+    <div class="sidebar-foot">
+      <div class="theme-switch" role="group" aria-label="Theme">
+        <button data-theme-set="auto" title="Follow the system">Auto</button>
+        <button data-theme-set="light" title="Light">Day</button>
+        <button data-theme-set="dark" title="Dark">Night</button>
+      </div>
+      <button class="btn ghost small" id="logout">Sign out</button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <button class="btn ghost icon-only" id="menu" aria-label="Menu">☰</button>
+      <h2 id="view-title">Dashboard</h2>
+      <div class="topbar-right">
+        <span id="health" class="pill">connecting…</span>
+        <span id="clock" class="muted small"></span>
+      </div>
+    </header>
+    <div id="view" class="view"></div>
+  </main>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+<script src="static/app.js"></script>
+</body>
+</html>

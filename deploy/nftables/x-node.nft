@@ -1,0 +1,27 @@
+#!/usr/sbin/nft -f
+#
+# Optional hardening for a X-Node server.
+#
+# The daemon already binds its SOCKS5 and registration sockets to the
+# Yggdrasil address, so the clearnet cannot reach them. This table is a second
+# line of defence: if the bind address is ever changed by mistake, only
+# Yggdrasil sources may still connect.
+#
+# The installer replaces the two defines with the configured ports.
+
+define socks_port = 1080
+define api_port = 1081
+
+table inet x-node {
+    chain input {
+        type filter hook input priority filter; policy accept;
+
+        # Health checks and the admin CLI connect over loopback.
+        iifname "lo" accept
+
+        # Yggdrasil node addresses live in 200::/7. Traffic from the mesh
+        # arrives with such a source.
+        ip6 saddr 200::/7 accept
+        tcp dport { $socks_port, $api_port } drop
+    }
+}

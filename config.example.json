@@ -1,0 +1,64 @@
+{
+  "name": "X-Node",
+  "listenAddress": "200::1",
+  "socksPort": 1080,
+  "apiPort": 1081,
+  "allowAll": false,
+  "registration": true,
+  "inviteTTL": "24h",
+  "inviteUses": 1,
+  "maxClients": 64,
+  "maxConnsPerClient": 64,
+  "maxConnsTotal": 512,
+  "dialTimeout": "15s",
+  "idleTimeout": "5m",
+  "udpEnabled": true,
+  "udpIdleTimeout": "2m",
+  "maxUDPAssociations": 64,
+  "apiToken": "required",
+  "apiRateLimit": 120,
+  "blockedPorts": [
+    25
+  ],
+  "logLevel": "info",
+  "stateDir": "/var/lib/x-node",
+  "peers": [
+    "tls://a.example:13338",
+    "tls://b.example:13338"
+  ],
+  "peerCount": 3,
+  "peerAutoReplace": true,
+  "peerDeadTimeout": "90s",
+  "peerCheckInterval": "30s",
+  "peerRefreshInterval": "6h",
+  "peerImprovementPercent": 25,
+  "adminSocket": "unix:///var/run/yggdrasil/yggdrasil.sock",
+  "peerProbePath": "/usr/local/bin/x-node-peerprobe",
+  "peerURI": "wss://203.0.113.10:443/ygg?key=0000000000000000000000000000000000000000000000000000000000000000",
+  "ipv6": "auto",
+  "domainResolution": true,
+  "web": {
+    "enabled": true,
+    "listen": "loopback",
+    "port": 8443,
+    "path": "/0123456789abcdef/web",
+    "tls": "off",
+    "sessionTTL": "12h",
+    "maxFailedLogins": 5,
+    "lockout": "15m",
+    "trustedProxies": [
+      "127.0.0.1",
+      "::1"
+    ]
+  },
+  "quotas": {
+    "monthlyBytes": 0,
+    "dailyBytes": 0,
+    "downKbps": 0,
+    "upKbps": 0
+  },
+  "usage": {
+    "enabled": true,
+    "timezone": "UTC"
+  }
+}
