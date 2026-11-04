@@ -4,6 +4,14 @@ All notable changes to X-Node are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.5.2] — 2026-11-04
+
+### Fixed
+
+- `--upgrade` restarts the service, so the new binary actually runs. `systemctl
+  enable --now` left an already running daemon untouched, and the node kept
+  reporting the previous version after an upgrade.
+
 ## [1.5.1] — 2026-11-04
 
 ### Fixed
@@ -57,6 +65,7 @@ First public release: SOCKS5 over Yggdrasil with TCP and UDP, IPv6 modes and
 Happy Eyeballs, invites and the allowlist, traffic accounting and quotas, the
 web interface, peer supervision, `x-node doctor` and the installer.
 
+[1.5.2]: https://github.com/MrKsey/x-node/releases/tag/v1.5.2
 [1.5.1]: https://github.com/MrKsey/x-node/releases/tag/v1.5.1
 [1.5.0]: https://github.com/MrKsey/x-node/releases/tag/v1.5.0
 [1.4.0]: https://github.com/MrKsey/x-node/releases/tag/v1.4.0

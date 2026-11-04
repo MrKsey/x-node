@@ -1464,7 +1464,17 @@ fi
 systemctl daemon-reload
 
 log "Starting x-node"
-if ! systemctl enable --now x-node; then
+# enable --now starts a stopped service but leaves a running one alone, so an
+# upgrade would keep the old process with the old binary. The restart is what
+# makes the new version actually run.
+started=0
+if [ "$UPGRADE" -eq 1 ]; then
+    systemctl enable x-node >/dev/null 2>&1 || true
+    systemctl restart x-node && started=1
+else
+    systemctl enable --now x-node && started=1
+fi
+if [ "$started" -ne 1 ]; then
     systemctl status x-node --no-pager 2>/dev/null || true
     journalctl -u x-node -n 40 --no-pager 2>/dev/null || true
     die "x-node failed to start"
