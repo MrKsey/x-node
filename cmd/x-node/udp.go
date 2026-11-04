@@ -119,9 +119,11 @@ func dialUDPDestination(ip net.IP, port int) (udpFlowSocket, error) {
 // address, a set of destination flows, and the control connection that keeps it
 // alive.
 type udpAssociation struct {
-	cfg     Config
-	relay   udpRelaySocket
-	source  net.IP
+	cfg    Config
+	relay  udpRelaySocket
+	source net.IP
+	// name is the source address with the client label, used in log lines.
+	name    string
 	idle    time.Duration
 	tracker *runtimeTracker
 	usage   *usageStore
@@ -216,7 +218,7 @@ func (a *udpAssociation) run(reader *bufio.Reader) {
 				default:
 				}
 				if time.Since(last) >= a.idle {
-					a.log.debug("client %s: UDP association idle timeout", a.source)
+					a.log.debug("client %s: UDP association idle timeout", a.clientName())
 					return
 				}
 				continue
@@ -224,7 +226,7 @@ func (a *udpAssociation) run(reader *bufio.Reader) {
 			return
 		}
 		if !a.acceptSource(from) {
-			a.log.debug("client %s: UDP datagram from %s dropped: source mismatch", a.source, from)
+			a.log.debug("client %s: UDP datagram from %s dropped: source mismatch", a.clientName(), from)
 			continue
 		}
 		last = time.Now()
@@ -233,6 +235,15 @@ func (a *udpAssociation) run(reader *bufio.Reader) {
 			a.report()
 		}
 	}
+}
+
+// clientName is the source address with the label the operator set. It is
+// filled by serveUDPAssociate and falls back to the bare address in tests.
+func (a *udpAssociation) clientName() string {
+	if a.name != "" {
+		return a.name
+	}
+	return a.source.String()
 }
 
 // acceptSource enforces RFC 1928: only the address that owns the control
@@ -258,35 +269,35 @@ func (a *udpAssociation) acceptSource(from *net.UDPAddr) bool {
 func (a *udpAssociation) handle(packet []byte) {
 	frag, host, port, payload, ok := parseSocksUDPDatagram(packet)
 	if !ok {
-		a.log.debug("client %s: malformed UDP datagram", a.source)
+		a.log.debug("client %s: malformed UDP datagram", a.clientName())
 		return
 	}
 	if frag != 0 {
 		// Fragment reassembly is not implemented: a client that needs large
 		// datagrams must let the transport do the fragmentation.
-		a.log.debug("client %s: UDP FRAG=%d is not supported", a.source, frag)
+		a.log.debug("client %s: UDP FRAG=%d is not supported", a.clientName(), frag)
 		return
 	}
 	destination := net.ParseIP(host)
 	if destination == nil {
 		if !a.cfg.DomainResolution || a.dialer == nil {
-			a.log.debug("client %s: UDP domain %q is not accepted", a.source, host)
+			a.log.debug("client %s: UDP domain %q is not accepted", a.clientName(), host)
 			return
 		}
 		resolved, err := a.dialer.resolveHost(context.Background(), host,
 			func(ip net.IP) bool { return a.policy(ip, port) })
 		if err != nil {
-			a.log.info("client %s: UDP %s:%d: %v", a.source, host, port, err)
+			a.log.info("client %s: UDP %s:%d: %v", a.clientName(), host, port, err)
 			return
 		}
 		destination = resolved
 	}
 	if !a.policy(destination, port) {
-		a.log.info("client %s: UDP destination %s refused by policy", a.source, joinHostPort(destination, port))
+		a.log.info("client %s: UDP destination %s refused by policy", a.clientName(), joinHostPort(destination, port))
 		return
 	}
 	if portBlocked(port, a.cfg.BlockedPorts) {
-		a.log.info("client %s: UDP port %d is blocked", a.source, port)
+		a.log.info("client %s: UDP port %d is blocked", a.clientName(), port)
 		return
 	}
 	flow := a.flowFor(destination, port)
@@ -295,7 +306,7 @@ func (a *udpAssociation) handle(packet []byte) {
 	}
 	a.up.wait(len(payload))
 	if _, err := flow.conn.Write(payload); err != nil {
-		a.log.debug("client %s: UDP send to %s: %v", a.source, flow.key, err)
+		a.log.debug("client %s: UDP send to %s: %v", a.clientName(), flow.key, err)
 		a.dropFlow(flow)
 		return
 	}
@@ -312,13 +323,13 @@ func (a *udpAssociation) flowFor(destination net.IP, port int) *udpFlow {
 	}
 	if len(a.flows) >= udpRelayMaxFlows {
 		a.mu.Unlock()
-		a.log.warn("client %s: UDP flow limit reached, dropping %s", a.source, key)
+		a.log.warn("client %s: UDP flow limit reached, dropping %s", a.clientName(), key)
 		return nil
 	}
 	conn, err := a.dial(destination, port)
 	if err != nil {
 		a.mu.Unlock()
-		a.log.debug("client %s: UDP dial %s: %v", a.source, key, err)
+		a.log.debug("client %s: UDP dial %s: %v", a.clientName(), key, err)
 		return nil
 	}
 	flow := &udpFlow{

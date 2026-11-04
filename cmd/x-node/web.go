@@ -58,6 +58,9 @@ type webServer struct {
 	guard      *loginGuard
 	assets     fs.FS
 	startedAt  time.Time
+	// supervisor is the peer supervisor of the daemon. It is set by main and
+	// used only to list the probed candidates the operator can pin by hand.
+	supervisor *peerSupervisor
 	// configPath is the file the service was started with. It is compared with
 	// the start time to report a configuration change that needs a restart.
 	configPath string
@@ -1246,7 +1249,27 @@ func (w *webServer) handlePeers(rw http.ResponseWriter, r *http.Request) {
 		"peers":          rows,
 		"self":           self,
 		"selfOk":         selfErr == nil,
+		"candidates":     w.peerCandidates(manualList),
+		"probing":        w.supervisor != nil && w.supervisor.Probing(),
 	})
+}
+
+// peerCandidates is the probed list the operator can pin by hand. Peers that
+// are already configured (automatic or manual) are left out: adding them again
+// would only duplicate a link.
+func (w *webServer) peerCandidates(manual []string) []probeResult {
+	if w.supervisor == nil {
+		return []probeResult{}
+	}
+	used := peerKeySet(manual)
+	out := make([]probeResult, 0, 16)
+	for _, candidate := range w.supervisor.Candidates() {
+		if used[peerKeyOfURI(candidate.URI)] {
+			continue
+		}
+		out = append(out, candidate)
+	}
+	return out
 }
 
 type peersPatch struct {
@@ -1284,6 +1307,9 @@ func (w *webServer) handlePeersUpdate(rw http.ResponseWriter, r *http.Request) {
 		if err := os.WriteFile(path, []byte(time.Now().Format(time.RFC3339)+"\n"), 0o600); err != nil {
 			writeJSON(rw, http.StatusInternalServerError, errorResponse{Error: "refresh_failed", Message: err.Error()})
 			return
+		}
+		if w.supervisor != nil {
+			w.supervisor.Notify()
 		}
 	}
 	writeJSON(rw, http.StatusOK, map[string]any{"ok": true})

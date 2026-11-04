@@ -175,7 +175,7 @@ func (s *socksServer) serveConn(conn net.Conn) {
 
 	cfg := s.config()
 	if !cfg.AllowAll && !s.store.Allowed(source) {
-		s.log.info("client %s is not in the allowlist", source)
+		s.log.info("client %s is not in the allowlist", s.clientName(source))
 		// The SOCKS reply is sent after the request is parsed, so the client
 		// gets a proper "not allowed" instead of a reset.
 		_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
@@ -187,7 +187,7 @@ func (s *socksServer) serveConn(conn net.Conn) {
 		return
 	}
 	if allowed, reason := s.quotas.allow(source, s.usage); !allowed {
-		s.log.info("client %s refused: %s", source, reason)
+		s.log.info("client %s refused: %s", s.clientName(source), reason)
 		if s.usage != nil {
 			s.usage.addRefused(source)
 		}
@@ -209,7 +209,7 @@ func (s *socksServer) serveConn(conn net.Conn) {
 
 	_ = conn.SetDeadline(time.Now().Add(15 * time.Second))
 	if err := readGreeting(reader); err != nil {
-		s.log.debug("client %s: greeting: %v", source, err)
+		s.log.debug("client %s: greeting: %v", s.clientName(source), err)
 		return
 	}
 	if err := writeMethod(conn); err != nil {
@@ -217,7 +217,7 @@ func (s *socksServer) serveConn(conn net.Conn) {
 	}
 	request, err := readRequest(reader)
 	if err != nil {
-		s.log.debug("client %s: request: %v", source, err)
+		s.log.debug("client %s: request: %v", s.clientName(source), err)
 		return
 	}
 	switch request.cmd {
@@ -226,7 +226,7 @@ func (s *socksServer) serveConn(conn net.Conn) {
 	case socksCmdUDPAssociate:
 		s.serveUDPAssociate(conn, reader, source, request)
 	default:
-		s.log.debug("client %s: unsupported command %d", source, request.cmd)
+		s.log.debug("client %s: unsupported command %d", s.clientName(source), request.cmd)
 		_ = writeReply(conn, socksReplyCommandNotSupp, nil, 0)
 	}
 }
@@ -234,6 +234,7 @@ func (s *socksServer) serveConn(conn net.Conn) {
 // serveConnect carries one TCP stream to its destination.
 func (s *socksServer) serveConnect(conn net.Conn, source net.IP, request socksRequest) {
 	cfg := s.config()
+	name := s.clientName(source)
 	if request.atyp == socksAtypDomain && !cfg.DomainResolution {
 		_ = writeReply(conn, socksReplyAddrNotSupported, net.IPv4zero, 0)
 		return
@@ -243,7 +244,7 @@ func (s *socksServer) serveConnect(conn net.Conn, source net.IP, request socksRe
 		policy = destinationAllowed
 	}
 	if portBlocked(request.port, cfg.BlockedPorts) {
-		s.log.info("client %s: port %d is blocked", source, request.port)
+		s.log.info("client %s: port %d is blocked", name, request.port)
 		_ = writeReply(conn, socksReplyNotAllowed, net.IPv4zero, 0)
 		return
 	}
@@ -254,7 +255,7 @@ func (s *socksServer) serveConnect(conn net.Conn, source net.IP, request socksRe
 		return
 	}
 	if request.atyp != socksAtypDomain && !allow(request.ip) {
-		s.log.info("client %s: destination %s refused by policy", source, joinHostPort(request.ip, request.port))
+		s.log.info("client %s: destination %s refused by policy", name, joinHostPort(request.ip, request.port))
 		_ = writeReply(conn, socksReplyNotAllowed, net.IPv4zero, 0)
 		return
 	}
@@ -283,16 +284,16 @@ func (s *socksServer) serveConnect(conn net.Conn, source net.IP, request socksRe
 			code = socksReplyHostUnreach
 		}
 		if errors.Is(err, errNoRoute) {
-			s.log.info("client %s: %s: %v (IPv6 mode %s)", source, target, err, cfg.ipv6Mode())
+			s.log.info("client %s: %s: %v (IPv6 mode %s)", name, target, err, cfg.ipv6Mode())
 		} else {
-			s.log.debug("client %s: dial %s: %v", source, target, err)
+			s.log.debug("client %s: dial %s: %v", name, target, err)
 		}
 		_ = writeReply(conn, byte(code), net.IPv4zero, 0)
 		return
 	}
 	defer upstream.Close()
 	if usedIP != nil && !usedIP.Equal(request.ip) {
-		s.log.debug("client %s -> %s resolved to %s", source, host, usedIP)
+		s.log.debug("client %s -> %s resolved to %s", name, host, usedIP)
 	}
 
 	if tcp, ok := upstream.(*net.TCPConn); ok {
@@ -310,7 +311,7 @@ func (s *socksServer) serveConnect(conn net.Conn, source net.IP, request socksRe
 	_ = conn.SetDeadline(time.Time{})
 
 	idle, _ := cfg.idleTimeout()
-	s.log.debug("client %s -> %s established", source, target)
+	s.log.debug("client %s -> %s established", name, target)
 	if s.tracker != nil {
 		s.tracker.open(source, target)
 		defer s.tracker.close(source)
@@ -327,7 +328,7 @@ func (s *socksServer) serveConnect(conn net.Conn, source net.IP, request socksRe
 			s.usage.addTraffic(source, rx, tx)
 		}
 	})
-	s.log.debug("client %s -> %s closed", source, target)
+	s.log.debug("client %s -> %s closed", name, target)
 }
 
 // serveUDPAssociate starts one RFC 1928 UDP relay for the client. The TCP
@@ -335,8 +336,9 @@ func (s *socksServer) serveConnect(conn net.Conn, source net.IP, request socksRe
 // ends the relay, and its source address is what authorises the datagrams.
 func (s *socksServer) serveUDPAssociate(conn net.Conn, reader *bufio.Reader, source net.IP, request socksRequest) {
 	cfg := s.config()
+	name := s.clientName(source)
 	if !cfg.UDPEnabled {
-		s.log.info("client %s: UDP ASSOCIATE refused: UDP is disabled", source)
+		s.log.info("client %s: UDP ASSOCIATE refused: UDP is disabled", name)
 		_ = writeReply(conn, socksReplyCommandNotSupp, nil, 0)
 		return
 	}
@@ -345,7 +347,7 @@ func (s *socksServer) serveUDPAssociate(conn net.Conn, reader *bufio.Reader, sou
 		return
 	}
 	if !s.udp.acquire(source) {
-		s.log.warn("client %s: UDP ASSOCIATE refused: association limit", source)
+		s.log.warn("client %s: UDP ASSOCIATE refused: association limit", name)
 		if s.tracker != nil {
 			s.tracker.refused(source)
 		}
@@ -363,7 +365,7 @@ func (s *socksServer) serveUDPAssociate(conn net.Conn, reader *bufio.Reader, sou
 	bindIP := net.ParseIP(cfg.ListenAddress)
 	relay, err := net.ListenUDP("udp", &net.UDPAddr{IP: bindIP, Port: 0})
 	if err != nil {
-		s.log.warn("client %s: UDP relay bind on %s: %v", source, cfg.ListenAddress, err)
+		s.log.warn("client %s: UDP relay bind on %s: %v", name, cfg.ListenAddress, err)
 		_ = writeReply(conn, socksReplyGeneralFailure, nil, 0)
 		return
 	}
@@ -377,10 +379,11 @@ func (s *socksServer) serveUDPAssociate(conn net.Conn, reader *bufio.Reader, sou
 
 	idle, _ := cfg.udpIdleTimeout()
 	association := newUDPAssociation(cfg, relay, source, request, idle, s.udp, s.tracker, s.log)
+	association.name = name
 	association.usage = s.usage
 	association.dialer = s.dialer
 	association.up, association.down = s.quotas.Limiters(source)
-	s.log.info("client %s: UDP association on %s", source, local)
+	s.log.info("client %s: UDP association on %s", name, local)
 	if s.tracker != nil {
 		s.tracker.udpOpen(source)
 		defer s.tracker.udpClose(source)
@@ -390,7 +393,21 @@ func (s *socksServer) serveUDPAssociate(conn net.Conn, reader *bufio.Reader, sou
 	}
 	association.run(reader)
 	s.log.info("client %s: UDP association closed (%d datagram(s) in, %d out)",
-		source, association.datagramsIn.Load(), association.datagramsOut.Load())
+		name, association.datagramsIn.Load(), association.datagramsOut.Load())
+}
+
+// clientName renders the address with the label the operator set. A log line
+// that only carries the Yggdrasil address is hard to follow once more than one
+// client is connected.
+func (s *socksServer) clientName(source net.IP) string {
+	if s.store == nil {
+		return source.String()
+	}
+	client, ok := s.store.Get(source)
+	if !ok {
+		return source.String()
+	}
+	return clientName(source.String(), client.Label)
 }
 
 // trackSource records that a client is alive. Only a client the exit would

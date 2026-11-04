@@ -4,6 +4,49 @@ All notable changes to X-Node are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.6.2] — 2026-11-05
+
+### Added
+
+- Every client connection and UDP association in the log carries the client's
+  label next to the Yggdrasil address, including the `UDP association closed`
+  line.
+- The web interface has a separate **Configuration** tab between Settings and
+  Logs: it edits `config.json` and `yggdrasil.conf`, validates them, keeps a
+  backup and restarts the services.
+- Settings is split into cards with their own **Save** button, which appears
+  only after something on that card has changed.
+- The usage timezone is a list instead of a free-text field, and the open mode
+  (`allowAll`) asks for confirmation with a warning.
+- Manual Yggdrasil peers can be picked from the probed public candidates, with
+  country, city and latency, and refreshed with **Find peers**.
+- The dashboard shows the IPv6 source address, a legend for the traffic chart
+  and a **Clients** tile that opens the Clients page.
+- The client list shows live details (UDP, volume, destinations, refusals) in a
+  popover behind the ⓘ icon.
+
+### Changed
+
+- A client row keeps the label next to the address and shows only the device,
+  the app version and the registration time; the rest is in the popover.
+- Limits are shown as separate client slots and connections instead of one
+  summary line; **Max clients** moved from Access to Limits.
+- UDP relay and IPv6 outbound are separate settings cards.
+- Invite defaults (devices allowed and lifetime) live only on the Invites page;
+  Settings no longer duplicates them.
+- The QR code panel can be closed, and "Uses" is explained as the number of
+  devices that may register with one invite.
+- Quotas and the web interface block share a row on the dashboard.
+- Form rows and table cells no longer overflow on phones.
+- The README describes the Linux and Windows setup, `--public-host`,
+  `--upgrade`, removal and the files in `/var/lib/x-node`.
+
+### Fixed
+
+- The app version of an already allowlisted client is updated when the app
+  reconnects, instead of staying at the version from the first registration.
+- Peer candidates keep the country and city reported by the probe.
+
 ## [1.6.1] — 2026-11-04
 
 ### Fixed

@@ -80,24 +80,39 @@ The main flags (`./install.sh --help` lists them all):
 
 | Flag | What it does |
 | --- | --- |
-| `--name TEXT` | node name in the app and in the QR code |
-| `--public-host HOST` | public address of the server for the peer link |
-| `--ygg-proto wss\|tls` | peering transport: WebSocket behind nginx (default) or direct TLS |
-| `--ygg-port N` | peering port; `0` means outbound connections only |
-| `--socks-port N` | SOCKS5 port on the Yggdrasil address (default 1080) |
-| `--api-port N` | registration port; `0` shares the SOCKS5 port |
-| `--peer-count N` | public peers to keep (default 3) |
+| `--name TEXT` | node name in the app, in the QR code and on the dashboard |
+| `--public-host HOST` | external address of the server (IP or domain) for the peer link and the QR code |
+| `--ygg-proto wss\|tls` | how to accept incoming peering: WebSocket behind nginx (default) or direct TLS |
+| `--ygg-port N` | incoming peering port; `0` means outbound connections only |
+| `--socks-port N` | SOCKS5 port on the Yggdrasil address (default 1080; `443` disguises the traffic as HTTPS) |
+| `--api-port N` | registration and status port; `0` shares the SOCKS5 port under `/v1/...` |
+| `--peers LIST\|auto\|keep` | a peer list, automatic choice from the public catalogue, or "leave `yggdrasil.conf` alone" |
+| `--peer-count N` | public peers to keep (default 3, from 1 to 50) |
 | `--no-peer-replace` | keep dead and slow peers instead of replacing them |
-| `--allow-all` | let any Yggdrasil node in without an invite |
+| `--allow-all` | let any Yggdrasil node in without an invite (see the warning below) |
 | `--no-registration` | disable registration |
+| `--no-invite` | do not create the first invite with a QR code |
 | `--ipv6 auto\|prefer\|off` | outbound IPv6 policy |
 | `--web` / `--no-web` | enable or disable the web interface |
 | `--web-port N` | web interface port |
 | `--web-password PASS` | set the password instead of generating one |
 | `--firewall` | install nftables rules |
 | `--upgrade` | replace the binaries, keep settings and clients |
-| `--uninstall` | remove the installation |
+| `--uninstall` | hand over to `uninstall.sh` |
 | `--yes` | ask no questions |
+
+`--public-host` is the address **other nodes** will use to connect to this
+server. It goes into the `Peer:` link and into the invite QR code. The installer
+usually detects the external IP itself; behind NAT, on a non-standard port or
+when the server has a domain name, set it by hand:
+
+```bash
+sudo ./install.sh --yes --public-host exit.example.com --ygg-port 443
+```
+
+If incoming peering is not needed, run with `--ygg-port 0`: the node only
+connects to public peers itself. No `Peer:` link is created in that case, and
+Y-Node clients reach the exit node through the Yggdrasil network.
 
 A few flags that are not needed every day:
 
@@ -108,13 +123,41 @@ A few flags that are not needed every day:
 - `--bin-dir DIR` — directory to take `x-node` and `x-node-peerprobe` from when
   they are not next to the installer.
 
+`--allow-all` turns on the open mode: invites and the access list stop working
+and the node lets in any Yggdrasil address. That is handy for a test of a few
+minutes, but on a public server it means anyone can use your uplink. In the web
+interface this mode is enabled only after a confirmation with a warning.
+
 ### Upgrade and removal
 
 ```bash
-sudo ./install.sh --upgrade --yes   # new version, settings and clients kept
+sudo ./install.sh --upgrade --yes
+```
+
+`--upgrade` replaces only the `x-node` and `x-node-peerprobe` binaries (and
+`x-node-helper`), restarts the services and **asks no questions**:
+
+- `yggdrasil.conf` is not touched;
+- `/etc/x-node/config.json` is only extended with new keys, existing values stay;
+- clients, invites, quotas, traffic counters and the peer list are kept;
+- the web interface, the password and the helper service stay as they were.
+
+Run it from the unpacked archive of the new version (it holds `install.sh` and
+the binaries). On a machine without X-Node, `--upgrade` stops and says that
+`config.json` was not found.
+
+```bash
 sudo ./uninstall.sh                 # remove X-Node, keep the state
 sudo ./uninstall.sh --purge         # remove everything, Yggdrasil included
+sudo ./uninstall.sh --purge --keep-yggdrasil --yes
 ```
+
+Without `--purge` the services, the binaries, the systemd units, the helper and
+the configuration in `/etc` are removed, while `/var/lib/x-node` (clients,
+invites, quotas, counters) stays: after a reinstall every device keeps working
+without new invites. `--purge` also removes the state and the Yggdrasil package
+with its configuration; `--keep-yggdrasil` leaves Yggdrasil in place when other
+services on the host need it.
 
 ## Ports and access
 
@@ -134,19 +177,27 @@ prints that URL instead of the local listen address.
 
 ## Web interface
 
-The interface has five pages:
+The interface has six pages:
 
-- **Dashboard** — X-Node health, a traffic chart in bit/s, the Yggdrasil peers
-  with a ready-to-copy `Peer: wss://…/ygg?key=…` link, quotas and the service
-  restart buttons.
-- **Clients** — everyone in the allowlist with the device name, app version,
-  live TCP and UDP counters, refusals, traffic and the quota editor. A client
-  can be added by address, renamed, limited, reset or removed here.
-- **Invites** — create an invite with a note, show its QR code again, copy the
-  `yggnode://` link or the token, and remove an invite that is no longer needed.
-- **Settings** — node name, log level and time zone; access, limits, UDP and
-  IPv6; public peers and manual Yggdrasil peers; the public web URL; the admin
-  password; the configuration editor for `config.json` and `yggdrasil.conf`.
+- **Dashboard** — X-Node health, a traffic chart in bit/s with an in/out legend,
+  the Yggdrasil peers with a ready-to-copy `Peer: wss://…/ygg?key=…` link,
+  quotas, the web interface address and the service restart buttons. The
+  **Clients** tile opens the page of the same name.
+- **Clients** — everyone in the allowlist: the label next to the address, the
+  device, the app version and the registration time. Live counters (UDP, volume,
+  visited addresses, refusals) are hidden behind the ⓘ icon next to the client.
+  A client can be added by address, renamed, limited, reset or removed here.
+- **Invites** — create an invite with a note, a number of devices and a lifetime,
+  show its QR code again, copy the `yggnode://` link or the token, and remove an
+  invite that is no longer needed. Invite defaults are set only here; the
+  Settings page does not duplicate them.
+- **Settings** — separate cards for Node, Access, Limits, UDP relay, IPv6
+  outbound, Public peers, Manual Yggdrasil peers, Web interface and Admin
+  password. Each card has its own **Save** button, which appears only after
+  something on that card has changed.
+- **Configuration** — an editor for `/etc/x-node/config.json` and
+  `yggdrasil.conf` with validation before saving, a backup in `/var/backups` and
+  the service restart buttons.
 - **Logs** — the latest log lines, with a refresh button.
 
 ```bash
@@ -159,6 +210,9 @@ The login and password from the installation are in
 **Settings** page. Restarting a service and saving a configuration file need the
 helper from the installer. Without it the page says so and the rest of the
 interface keeps working.
+
+The open mode (`allowAll`) is enabled on the Settings page only after a
+confirmation: the interface warns that invites and quotas stop applying.
 
 ## Command line
 
@@ -182,6 +236,43 @@ the same person is recognisable in `clients`, `usage`, `quota` and the web
 interface. `keygen` explains what the private key, the public key and the
 derived address are for, and `keygen -json` is convenient for scripts.
 
+## State and files
+
+The service keeps its state in `/var/lib/x-node` (the `stateDir` setting in the
+configuration). The files belong to the `x-node` user and are readable only by
+it and root, so use `sudo` to look at them.
+
+| File | What is inside |
+| --- | --- |
+| `allowlist.json` | clients: address, label, device, app version, source, registration and last seen time, API token hash |
+| `invites.json` | active invites: hash, note, expiry, how many devices have registered, token for showing the QR code again |
+| `quotas.json` | per-client limits: monthly and daily volume, speed |
+| `usage.json` | traffic counters: day, month and total per address |
+| `runtime.json` | live counters: open TCP connections and UDP associations, limit and quota refusals |
+| `peers.json` | the current public peer list managed by the supervisor |
+| `settings.json` | settings changed in the web interface; they override `config.json` |
+| `web.json` | the web interface login and PBKDF2 password hash |
+| `install.json` | installation manifest: version, `install.sh` arguments, paths |
+| `tls/web.crt`, `tls/web.key` | the self-signed certificate of the web interface |
+
+Looking at them without editing anything by hand:
+
+```bash
+sudo ls -l /var/lib/x-node
+sudo jq '.clients[] | {address, label, deviceName, appVersion, registeredAt}' \
+  /var/lib/x-node/allowlist.json
+sudo jq '.clients | length' /var/lib/x-node/allowlist.json
+sudo jq . /var/lib/x-node/usage.json
+sudo jq . /var/lib/x-node/quotas.json
+sudo x-node status
+```
+
+`jq` is convenient but not required: this is plain JSON and can be read by eye.
+Editing the files by hand is possible, but the service keeps a copy in memory
+and rereads the file on the next change; using `x-node` and the web interface is
+safer. `settings.json` can be deleted, and `config.json` starts applying again —
+the save button for the main config on the **Configuration** page does the same.
+
 ## Clients
 
 ### Y-Node
@@ -198,22 +289,84 @@ The invite is one-time. If a phone is lost, remove its address:
 
 ### Linux
 
+First take two values: the node's Yggdrasil address and the SOCKS5 port.
+`sudo x-node status` prints them (the **Yggdrasil** and **SOCKS5** blocks) and
+the web dashboard shows them too. The address looks like
+`200:1234:5678:9abc:def0:1234:5678:9abc` and exists only inside Yggdrasil, so a
+Yggdrasil client must be running on the machine (the `yggdrasil` package or a
+service of the same name). Check it with:
+
 ```bash
-curl --socks5-hostname "[200:1234:5678:9abc:def0:1234:5678:9abc]:1080" https://ifconfig.me
-export ALL_PROXY="socks5h://[200:1234:5678:9abc:def0:1234:5678:9abc]:1080"
+ip -6 addr show | grep '200:'
 ```
 
-The `socks5h` scheme resolves names on the exit node.
+The node address then goes in square brackets, because it is IPv6:
+`[200:1234:5678:9abc:def0:1234:5678:9abc]:1080`.
+
+**Checking access.** `curl` here only verifies that the node answers and lets
+this address in; it is not how you use the internet through it:
+
+```bash
+curl --socks5-hostname "[200:1234:5678:9abc:def0:1234:5678:9abc]:1080" https://ifconfig.me
+```
+
+The command should return the server's external IP. `--socks5-hostname` means
+the exit node resolves the site name, not your machine; other programs call the
+same scheme `socks5h`. Without it the DNS query bypasses the tunnel.
+
+**A proxy for the terminal and most programs.** Environment variables are
+enough:
+
+```bash
+export ALL_PROXY="socks5h://[200:1234:5678:9abc:def0:1234:5678:9abc]:1080"
+curl https://ifconfig.me
+```
+
+This lasts until the terminal is closed. To make it permanent, add the line to
+`~/.profile` (for your user) or `/etc/environment` (for everyone). systemd
+services read neither: they need a drop-in:
+
+```bash
+sudo systemctl edit my-service
+# in the file that opens:
+[Service]
+Environment="ALL_PROXY=socks5h://[200:...]:1080"
+```
+
+**A proxy for the graphical desktop.**
+
+- **GNOME**: Settings → Network → Network Proxy → Manual → Socks Host: the
+  address without brackets, port `1080`, leave the HTTP and HTTPS fields empty.
+  GNOME applies this to applications that ask for system settings.
+- **KDE**: System Settings → Network → Proxy → SOCKS5, same address and port.
+- **Firefox** does not use the system proxy: Settings → Network Settings →
+  Manual proxy configuration → SOCKS Host, SOCKS v5, enable "Proxy DNS when
+  using SOCKS v5".
+- **Chromium and Chrome** use the system proxy by default. A separate launch:
+  `chromium --proxy-server="socks5://[200:...]:1080"` (names are resolved by the
+  node when `domainResolution` is enabled in the settings).
+
+The easiest way to confirm the traffic really goes through the node is the
+external IP: it must match the server's address, not your provider's.
+
+If the machine is the exit node itself, it needs no proxy: it goes to the
+internet directly.
 
 ### Windows
 
-Install the Yggdrasil client for Windows, start the service and point any
-SOCKS5 client (Nekoray, v2rayN, Proxifier) at `[address]:1080` without
-authentication. `curl.exe` can do it directly:
+Install the Yggdrasil client for Windows, start the service and take the node
+address from `x-node status` or the dashboard. Then point any SOCKS5 client
+(Nekoray, v2rayN, Proxifier) at `[address]:1080` without authentication.
+`curl.exe` can do it itself — that is a check, not regular use:
 
 ```powershell
 curl.exe --socks5-hostname "[200:1234:5678:9abc:def0:1234:5678:9abc]:1080" https://ifconfig.me
 ```
+
+For a system proxy in Windows 11: Settings → Network & Internet → Proxy →
+Manual proxy setup → Use a proxy server → Address: the address without
+brackets, Port: `1080`. Applications that do not read system settings are
+configured separately, the same way as on Linux.
 
 A machine is added the same way as a phone: with an invite or
 `sudo x-node allow add <address>`.

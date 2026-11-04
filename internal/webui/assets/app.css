@@ -191,6 +191,11 @@ input[type="checkbox"] { width: auto; accent-color: var(--accent); }
 .kpi-card .label { font-size: 12.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
 .kpi-card .value { font-size: 26px; font-weight: 650; letter-spacing: -.02em; }
 .kpi-card .sub { font-size: 12.5px; color: var(--muted); }
+/* A KPI card that opens another tab. It keeps the card look and only reacts
+   to the pointer, so it does not read as a button. */
+.link-card { color: inherit; cursor: pointer; transition: border-color .15s, transform .05s; }
+.link-card:hover { text-decoration: none; border-color: var(--accent); }
+.link-card:active { transform: translateY(1px); }
 
 .section { padding: 18px 20px; display: grid; gap: 14px; }
 .section > header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
@@ -213,7 +218,9 @@ tr:last-child td { border-bottom: 0; }
 .row > .grow { flex: 1; }
 .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; align-items: end; }
 .form-grid .full { grid-column: 1 / -1; }
-.switch { display: flex; align-items: center; gap: 10px; min-height: 41px; padding: 0; }
+.form-grid > * { min-width: 0; }
+.switch { display: flex; align-items: center; gap: 10px; min-height: 41px; padding: 0; flex-wrap: nowrap; }
+.switch > span { flex: 1 1 auto; min-width: 0; }
 .switch input { width: 40px; height: 22px; appearance: none; background: var(--bg-soft); border-radius: 999px; position: relative; cursor: pointer; transition: background .15s; }
 .switch input::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: var(--bg-elev); box-shadow: var(--shadow); transition: transform .15s; }
 .switch input:checked { background: var(--accent); }
@@ -229,9 +236,14 @@ pre.logs .warn { color: var(--warn); }
 pre.logs .error { color: var(--bad); }
 pre.logs .debug { color: var(--muted); }
 
-canvas.chart { width: 100%; height: 200px; display: block; }
+canvas.chart { width: 100%; height: 250px; display: block; }
 
 .chart-wrap { position: relative; }
+.chart-legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12.5px; color: var(--muted); }
+.legend-item { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.legend-swatch { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+.legend-swatch.in { background: var(--accent); }
+.legend-swatch.out { background: var(--ok); }
 .chart-tip {
   position: absolute; z-index: 2; pointer-events: none;
   padding: 6px 9px; border-radius: 8px; font-size: 12px; line-height: 1.45;
@@ -263,6 +275,22 @@ canvas.chart { width: 100%; height: 200px; display: block; }
 }
 .manual-peer:last-child { border-bottom: 0; }
 
+/* The client row keeps the address and the label on one line. The popover with
+   the live counters sits under it and is opened by the icon button. */
+.client-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.client-line .mono { max-width: 100%; }
+.stats-btn { padding: 2px 7px; font-size: 13px; line-height: 1.2; }
+.client-stats {
+  margin-top: 6px; padding: 8px 10px; border: 1px solid var(--border);
+  border-radius: 10px; background: var(--bg-soft);
+  font-size: 12.5px; line-height: 1.5; word-break: break-word;
+}
+
+/* A settings card owns its Save button: the button appears only after the
+   card is edited, so there is no page-wide save that hides which form it
+   applies to. */
+.settings-card > header .save-btn { flex: 0 0 auto; }
+
 .empty { padding: 28px; text-align: center; color: var(--muted); }
 
 /* mobile */
@@ -280,7 +308,7 @@ canvas.chart { width: 100%; height: 200px; display: block; }
   #menu { display: inline-flex; }
   .view { padding: 16px; }
   .topbar { padding: 12px 16px; }
-  th, td { padding: 9px 6px; }
+  th, td { padding: 9px 6px; overflow-wrap: anywhere; }
   .hide-sm { display: none; }
 }
 
@@ -297,12 +325,15 @@ canvas.chart { width: 100%; height: 200px; display: block; }
   #clock { display: none; }
   .range-switch { order: 3; width: 100%; }
   .range-switch button { flex: 1; }
-  canvas.chart { height: 188px; }
+  canvas.chart { height: 235px; }
+  .chart-legend { width: 100%; }
   .actions .btn { flex: 1 1 auto; }
   .login { padding: 16px; }
   .login-card { padding: 22px; }
   .row { gap: 8px; }
-  .row > input, .row > .btn { width: 100%; }
+  .row > input, .row > select, .row > .btn { width: 100%; }
+  .settings-card > header { align-items: flex-start; }
+  .settings-card > header .save-btn { width: 100%; }
 
   /* Tables become cards: a wide table is unusable on a phone. */
   .table-wrap { overflow: visible; }
@@ -326,8 +357,9 @@ canvas.chart { width: 100%; height: 200px; display: block; }
   }
   .table-wrap table.cards td[data-label=""]::before { content: ""; min-width: 0; }
   .table-wrap table.cards td .bar { min-width: 0; margin-top: 4px; }
-  .table-wrap table.cards td .mono { display: inline-block; max-width: calc(100% - 96px); }
+  .table-wrap table.cards td .mono { display: inline; max-width: 100%; word-break: break-all; }
   .table-wrap table.cards td.nowrap { white-space: normal; }
   .table-wrap table.cards td.nowrap .btn { margin: 2px 4px 2px 0; }
+  .client-line { gap: 6px; }
 }
 

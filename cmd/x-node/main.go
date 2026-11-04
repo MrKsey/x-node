@@ -170,6 +170,7 @@ func cmdServe(args []string) error {
 		if err != nil {
 			return err
 		}
+		web.supervisor = supervisor
 	}
 
 	errs := make(chan error, 3)

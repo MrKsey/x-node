@@ -508,12 +508,11 @@ func (s *Store) ListInvites() []Invite {
 
 // Register consumes an invite and adds the source address to the allowlist.
 // Registering an address that is already allowed succeeds without consuming
-// the invite: a lost HTTP response must not burn the token.
+// the invite: a lost HTTP response must not burn the token. An already allowed
+// address may also register with an empty token, which is how a client updates
+// its device name and app version after an upgrade.
 func (s *Store) Register(token string, client Client, maxClients int) (Client, bool, error) {
 	token = strings.TrimSpace(token)
-	if token == "" {
-		return Client{}, false, errInviteInvalid
-	}
 	ip := net.ParseIP(client.Address)
 	if ip == nil || !isYggAddress(ip) {
 		return Client{}, false, fmt.Errorf("address must be a Yggdrasil node address")
@@ -525,9 +524,6 @@ func (s *Store) Register(token string, client Client, maxClients int) (Client, b
 	if client.Label == "" {
 		client.Label = client.Address
 	}
-
-	sum := sha256.Sum256([]byte(token))
-	hash := hex.EncodeToString(sum[:])
 
 	release, err := s.beginWrite()
 	if err != nil {
@@ -552,6 +548,13 @@ func (s *Store) Register(token string, client Client, maxClients int) (Client, b
 		}
 		return existing, true, nil
 	}
+
+	if token == "" {
+		return Client{}, false, errInviteInvalid
+	}
+
+	sum := sha256.Sum256([]byte(token))
+	hash := hex.EncodeToString(sum[:])
 
 	invite, ok := s.invites[hash]
 	if !ok {

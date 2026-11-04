@@ -209,10 +209,14 @@ func isNotConfigured(err error) bool {
 	return err != nil && strings.Contains(strings.ToLower(err.Error()), "not configured")
 }
 
-// probeResult is one line of x-node-peerprobe output.
+// probeResult is one line of x-node-peerprobe output. Country and city come
+// from the public peer catalogue, so the operator can pick a peer by place
+// instead of reading host names.
 type probeResult struct {
 	URI       string  `json:"uri"`
 	LatencyMs float64 `json:"latencyMs"`
+	Country   string  `json:"country,omitempty"`
+	City      string  `json:"city,omitempty"`
 }
 
 // peerSettings is the part of the config the supervisor applies. It is
@@ -263,6 +267,11 @@ type peerSupervisor struct {
 	warnMu   sync.Mutex
 	lastWarn time.Time
 	warnText string
+
+	// wake asks the run loop for an immediate check instead of waiting for the
+	// next tick. A refresh request from the web interface must not sit for the
+	// whole check interval.
+	wake chan struct{}
 }
 
 func newPeerSupervisor(cfg Config, cfgPath string, log *logger) *peerSupervisor {
@@ -276,6 +285,7 @@ func newPeerSupervisor(cfg Config, cfgPath string, log *logger) *peerSupervisor 
 		deadSince: map[string]time.Time{},
 		addedAt:   map[string]time.Time{},
 		penalised: map[string]time.Time{},
+		wake:      make(chan struct{}, 1),
 	}
 	s.loadState(cfg.Peers)
 	return s
@@ -346,8 +356,18 @@ func (s *peerSupervisor) run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
+		case <-s.wake:
 		case <-time.After(wait):
 		}
+	}
+}
+
+// Notify asks the supervisor to run a check right now. A pending notification
+// is not queued twice: one immediate check is enough.
+func (s *peerSupervisor) Notify() {
+	select {
+	case s.wake <- struct{}{}:
+	default:
 	}
 }
 
@@ -895,12 +915,36 @@ func (s *peerSupervisor) filterPoolLocked(results []probeResult) []probeResult {
 			continue
 		}
 		usedHosts[host] = true
-		out = append(out, probeResult{URI: uri, LatencyMs: result.LatencyMs})
+		out = append(out, probeResult{
+			URI:       uri,
+			LatencyMs: result.LatencyMs,
+			Country:   result.Country,
+			City:      result.City,
+		})
 	}
 	sort.SliceStable(out, func(i, j int) bool {
 		return out[i].LatencyMs < out[j].LatencyMs
 	})
 	return out
+}
+
+// Candidates returns the probed peers that are not in use, best first. The web
+// interface shows them as a list, so an operator can pin one by hand instead of
+// typing a URI from a browser tab.
+func (s *peerSupervisor) Candidates() []probeResult {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]probeResult, len(s.pool))
+	copy(out, s.pool)
+	return out
+}
+
+// Probing reports whether a probe is running right now, so the web interface
+// can show a spinner instead of an empty list.
+func (s *peerSupervisor) Probing() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.probing
 }
 
 // takeRefreshRequest consumes the marker written by "x-node peers refresh".

@@ -51,11 +51,14 @@ type candidate struct {
 	City    string
 }
 
-// probedPeer is one result line: the URI that completed a handshake and the
-// Yggdrasil round-trip measured for it.
+// probedPeer is one result line: the URI that completed a handshake, the
+// Yggdrasil round-trip measured for it and the catalogue location, so a person
+// can pick a peer by country instead of reading host names.
 type probedPeer struct {
 	URI       string  `json:"uri"`
 	LatencyMs float64 `json:"latencyMs"`
+	Country   string  `json:"country,omitempty"`
+	City      string  `json:"city,omitempty"`
 }
 
 type silentLogger struct{}
@@ -328,6 +331,10 @@ func rankByTCP(peers []candidate, pool int) []candidate {
 
 func probeUntil(peers []candidate, count, batch int, timeout time.Duration) []probedPeer {
 	alive := make([]probedPeer, 0, count)
+	byURI := make(map[string]candidate, len(peers))
+	for _, item := range peers {
+		byURI[item.URI] = item
+	}
 	for start := 0; start < len(peers) && len(alive) < count; start += batch {
 		end := start + batch
 		if end > len(peers) {
@@ -341,7 +348,12 @@ func probeUntil(peers []candidate, count, batch int, timeout time.Duration) []pr
 		results := probeBatch(uris, timeout)
 		for _, uri := range uris {
 			if latency := results[uri]; latency > 0 {
-				alive = append(alive, probedPeer{URI: uri, LatencyMs: latency})
+				entry := probedPeer{URI: uri, LatencyMs: latency}
+				if item, ok := byURI[uri]; ok {
+					entry.Country = item.Country
+					entry.City = item.City
+				}
+				alive = append(alive, entry)
 			}
 		}
 	}
