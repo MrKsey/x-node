@@ -4,6 +4,18 @@ All notable changes to X-Node are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.5.1] — 2026-11-04
+
+### Fixed
+
+- The installer no longer restarts Yggdrasil on `--upgrade`: the configuration
+  is not touched there, and a restart dropped every runtime peer and the
+  connected clients for no reason. A fresh install still restarts it.
+- The installer waits longer for the Yggdrasil address after a restart, so a
+  slow start does not abort the installation.
+- The `--migrate` and `--no-migrate` flags left over from the old name were
+  removed; they were parsed but did nothing.
+
 ## [1.5.0] — 2026-11-04
 
 ### Added
@@ -45,5 +57,6 @@ First public release: SOCKS5 over Yggdrasil with TCP and UDP, IPv6 modes and
 Happy Eyeballs, invites and the allowlist, traffic accounting and quotas, the
 web interface, peer supervision, `x-node doctor` and the installer.
 
+[1.5.1]: https://github.com/MrKsey/x-node/releases/tag/v1.5.1
 [1.5.0]: https://github.com/MrKsey/x-node/releases/tag/v1.5.0
 [1.4.0]: https://github.com/MrKsey/x-node/releases/tag/v1.4.0

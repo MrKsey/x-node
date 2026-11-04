@@ -1069,14 +1069,23 @@ fi
 
 log "Starting Yggdrasil"
 systemctl enable yggdrasil >/dev/null 2>&1 || true
-systemctl restart yggdrasil
-for _ in $(seq 1 60); do
+# An upgrade does not touch yggdrasil.conf, so the running node is left alone:
+# a restart would drop every runtime peer and the connected clients for no
+# reason. A fresh install or a changed configuration does need the restart.
+if [ "$SKIP_YGG_CONFIG" -eq 1 ]; then
+    systemctl start yggdrasil
+else
+    systemctl restart yggdrasil
+fi
+assigned=0
+for _ in $(seq 1 90); do
     if ip -6 addr show 2>/dev/null | grep -qF "$ADDRESS"; then
+        assigned=1
         break
     fi
     sleep 1
 done
-if ! ip -6 addr show 2>/dev/null | grep -qF "$ADDRESS"; then
+if [ "$assigned" -ne 1 ]; then
     journalctl -u yggdrasil -n 30 --no-pager 2>/dev/null || true
     die "Yggdrasil did not assign $ADDRESS; check the log above"
 fi
