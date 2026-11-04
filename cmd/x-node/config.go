@@ -293,11 +293,6 @@ func configPath(flagValue string) string {
 	if env := os.Getenv("X_NODE_CONFIG"); strings.TrimSpace(env) != "" {
 		return env
 	}
-	// A leftover variable from a ygg-exit installation keeps working during
-	// the migration; the new name wins when both are set.
-	if env := os.Getenv("YGG_EXIT_CONFIG"); strings.TrimSpace(env) != "" {
-		return env
-	}
 	return defaultConfigPath
 }
 

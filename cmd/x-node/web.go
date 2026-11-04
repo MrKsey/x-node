@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -44,6 +45,7 @@ type webServer struct {
 	quotas  *quotaStore
 	family  *ipv6Monitor
 	log     *logger
+	history *trafficHistory
 
 	credsPath  string
 	sessionTTL time.Duration
@@ -71,6 +73,7 @@ func newWebServer(cfg Config, configPath string, live *settings, store *Store, t
 		quotas:     quotas,
 		family:     family,
 		log:        log,
+		history:    newTrafficHistory(usage),
 		credsPath:  cfg.statePath(webCredentialsFileName),
 		assets:     webui.Assets(),
 		startedAt:  time.Now(),
@@ -294,6 +297,8 @@ func (w *webServer) serveAPI(rw http.ResponseWriter, r *http.Request, route stri
 		w.handleClientAdd(rw, r)
 	case strings.HasPrefix(route, "clients/") && strings.HasSuffix(route, "/token") && r.Method == http.MethodPost:
 		w.handleClientToken(rw, r, strings.TrimSuffix(strings.TrimPrefix(route, "clients/"), "/token"))
+	case strings.HasPrefix(route, "clients/") && r.Method == http.MethodPut:
+		w.handleClientUpdate(rw, r, strings.TrimPrefix(route, "clients/"))
 	case strings.HasPrefix(route, "clients/") && r.Method == http.MethodDelete:
 		w.handleClientRemove(rw, r, strings.TrimPrefix(route, "clients/"))
 	case route == "invites" && r.Method == http.MethodGet:
@@ -314,6 +319,8 @@ func (w *webServer) serveAPI(rw http.ResponseWriter, r *http.Request, route stri
 		w.handleSettingsPut(rw, r)
 	case route == "peers" && r.Method == http.MethodGet:
 		w.handlePeers(rw, r)
+	case route == "traffic" && r.Method == http.MethodGet:
+		w.handleTraffic(rw, r)
 	case route == "peers" && r.Method == http.MethodPost:
 		w.handlePeersUpdate(rw, r)
 	case route == "logs" && r.Method == http.MethodGet:
@@ -491,6 +498,7 @@ type webStatus struct {
 	TotalTx           uint64   `json:"totalTx"`
 	PeersUp           int      `json:"peersUp"`
 	PeersManaged      int      `json:"peersManaged"`
+	PeersInbound      int      `json:"peersInbound"`
 }
 
 func (w *webServer) handleStatus(rw http.ResponseWriter, r *http.Request) {
@@ -526,30 +534,41 @@ func (w *webServer) handleStatus(rw http.ResponseWriter, r *http.Request) {
 		status.TotalRx += row.Rx
 		status.TotalTx += row.Tx
 	}
-	managed, up := peerSummary(cfg)
+	managed, up, inbound := peerSummary(cfg)
 	status.PeersManaged = managed
 	status.PeersUp = up
+	status.PeersInbound = inbound
 	writeJSON(rw, http.StatusOK, status)
 }
 
 // peerSummary reads the managed peer list and asks the admin socket which of
 // them are up. A failure to reach the socket is not an error for the dashboard.
-func peerSummary(cfg Config) (managed int, up int) {
+// Inbound links are clients of the exit node, not public peers, so they are
+// counted separately and never mixed into the managed total.
+func peerSummary(cfg Config) (managed int, up int, inbound int) {
 	list := cleanPeerList(cfg.Peers)
 	if state, err := readPeersState(cfg.statePath(peersStateFile)); err == nil && len(state.Managed) > 0 {
 		list = cleanPeerList(state.Managed)
 	}
 	managed = len(list)
+	wanted := make(map[string]bool, len(list))
+	for _, uri := range list {
+		wanted[peerKeyOfURI(uri)] = true
+	}
 	live, err := newAdminSocket(cfg.AdminSocket, 2*time.Second).Peers()
 	if err != nil {
-		return managed, 0
+		return managed, 0, 0
 	}
 	for _, peer := range live {
-		if peer.Up {
+		if peer.Inbound {
+			inbound++
+			continue
+		}
+		if peer.Up && wanted[peerKeyOfURI(peer.URI)] {
 			up++
 		}
 	}
-	return managed, up
+	return managed, up, inbound
 }
 
 /* ---------- clients ---------- */
@@ -626,6 +645,31 @@ func (w *webServer) handleClientAdd(rw http.ResponseWriter, r *http.Request) {
 	}
 	w.log.info("web: client %s %s", client.Address, map[bool]string{true: "updated", false: "added"}[existed])
 	writeJSON(rw, http.StatusOK, map[string]any{"ok": true, "client": client, "existed": existed})
+}
+
+func (w *webServer) handleClientUpdate(rw http.ResponseWriter, r *http.Request, address string) {
+	ip := net.ParseIP(strings.TrimSpace(address))
+	if ip == nil || !isYggAddress(ip) {
+		writeJSON(rw, http.StatusBadRequest, errorResponse{Error: "bad_address"})
+		return
+	}
+	r.Body = http.MaxBytesReader(rw, r.Body, 4<<10)
+	var request clientRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		writeJSON(rw, http.StatusBadRequest, errorResponse{Error: "bad_request"})
+		return
+	}
+	client, err := w.store.UpdateClient(ip, request.Label)
+	if err != nil {
+		if errors.Is(err, errNotAllowed) {
+			writeJSON(rw, http.StatusNotFound, errorResponse{Error: "not_found"})
+			return
+		}
+		writeJSON(rw, http.StatusInternalServerError, errorResponse{Error: "store_failed", Message: err.Error()})
+		return
+	}
+	w.log.info("web: client %s updated", ip)
+	writeJSON(rw, http.StatusOK, map[string]any{"ok": true, "client": client})
 }
 
 func (w *webServer) handleClientRemove(rw http.ResponseWriter, r *http.Request, address string) {
@@ -1003,46 +1047,82 @@ func (w *webServer) handleSettingsPut(rw http.ResponseWriter, r *http.Request) {
 
 /* ---------- peers and logs ---------- */
 
+type webPeer struct {
+	URI           string  `json:"uri"`
+	Up            bool    `json:"up"`
+	Inbound       bool    `json:"inbound"`
+	Managed       bool    `json:"managed"`
+	Address       string  `json:"address"`
+	Key           string  `json:"key"`
+	Port          int     `json:"port"`
+	Priority      int     `json:"priority"`
+	Cost          int     `json:"cost"`
+	BytesRecv     uint64  `json:"bytesRecv"`
+	BytesSent     uint64  `json:"bytesSent"`
+	UptimeSeconds float64 `json:"uptimeSeconds"`
+	LatencyMs     float64 `json:"latencyMs"`
+}
+
 func (w *webServer) handlePeers(rw http.ResponseWriter, r *http.Request) {
 	cfg := w.live.get()
 	list := cleanPeerList(cfg.Peers)
 	if state, err := readPeersState(cfg.statePath(peersStateFile)); err == nil && len(state.Managed) > 0 {
 		list = cleanPeerList(state.Managed)
 	}
-	live, err := newAdminSocket(cfg.AdminSocket, 3*time.Second).Peers()
-	byKey := make(map[string]adminPeer, len(live))
-	for _, peer := range live {
-		byKey[peer.URI] = peer
-		byKey[peerKeyOfURI(peer.URI)] = peer
-	}
-	rows := make([]peerRow, 0, len(list))
-	up := 0
+	wanted := make(map[string]bool, len(list))
 	for _, uri := range list {
-		row := peerRow{URI: uri}
-		if state, ok := byKey[uri]; ok {
-			row.Up = state.Up
-			if state.Latency > 0 {
-				row.LatencyMs = float64(state.Latency) / float64(time.Millisecond)
-			}
-		} else if state, ok := byKey[peerKeyOfURI(uri)]; ok {
-			row.Up = state.Up
-			if state.Latency > 0 {
-				row.LatencyMs = float64(state.Latency) / float64(time.Millisecond)
-			}
+		wanted[peerKeyOfURI(uri)] = true
+	}
+	socket := newAdminSocket(cfg.AdminSocket, 3*time.Second)
+	live, err := socket.Peers()
+	self, selfErr := socket.Self()
+	rows := make([]webPeer, 0, len(live))
+	up, inbound := 0, 0
+	for _, peer := range live {
+		row := webPeer{
+			URI:           peer.URI,
+			Up:            peer.Up,
+			Inbound:       peer.Inbound,
+			Managed:       wanted[peerKeyOfURI(peer.URI)],
+			Address:       peer.Address,
+			Key:           peer.Key,
+			Port:          peer.Port,
+			Priority:      peer.Priority,
+			Cost:          peer.Cost,
+			BytesRecv:     peer.BytesRecv,
+			BytesSent:     peer.BytesSent,
+			UptimeSeconds: peer.Uptime,
 		}
-		if row.Up {
+		if peer.Latency > 0 {
+			row.LatencyMs = float64(peer.Latency) / float64(time.Millisecond)
+		}
+		if peer.Inbound {
+			inbound++
+		} else if peer.Up {
 			up++
 		}
 		rows = append(rows, row)
 	}
+	sort.SliceStable(rows, func(i, j int) bool {
+		if rows[i].Inbound != rows[j].Inbound {
+			return !rows[i].Inbound
+		}
+		if rows[i].Up != rows[j].Up {
+			return rows[i].Up
+		}
+		return rows[i].LatencyMs < rows[j].LatencyMs
+	})
 	writeJSON(rw, http.StatusOK, map[string]any{
 		"ok":             err == nil,
 		"adminReachable": err == nil,
 		"peerCount":      cfg.PeerCount,
 		"autoReplace":    cfg.PeerAutoReplace,
-		"managed":        len(rows),
+		"managed":        len(list),
 		"up":             up,
+		"inbound":        inbound,
 		"peers":          rows,
+		"self":           self,
+		"selfOk":         selfErr == nil,
 	})
 }
 

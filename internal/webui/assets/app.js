@@ -11,14 +11,15 @@ const state = {
   status: null,
   clients: [],
   invites: [],
-  quotas: [],
   settings: null,
   peers: null,
+  traffic: null,
+  trafficRange: "1h",
   logs: [],
-  samples: [],
   view: "dashboard",
   timer: null,
   logTimer: null,
+  editing: "",
 };
 
 const $ = (selector, root = document) => root.querySelector(selector);
@@ -65,6 +66,10 @@ function bytes(value) {
   return number.toFixed(digits) + " " + units[index];
 }
 
+function speed(bytesPerSecond) {
+  return bytes(bytesPerSecond) + "/s";
+}
+
 function rate(kbps) {
   const value = Number(kbps) || 0;
   if (value <= 0) return "unlimited";
@@ -80,7 +85,8 @@ function duration(seconds) {
   const minutes = Math.floor(value / 60);
   if (days > 0) return days + "d " + hours + "h";
   if (hours > 0) return hours + "h " + minutes + "m";
-  return minutes + "m";
+  if (minutes > 0) return minutes + "m";
+  return value + "s";
 }
 
 function when(value) {
@@ -92,6 +98,12 @@ function when(value) {
   if (diff < 3600) return Math.floor(diff / 60) + " min ago";
   if (diff < 86400) return Math.floor(diff / 3600) + " h ago";
   return date.toLocaleDateString() + " " + date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function clockTime(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
 function escapeHtml(value) {
@@ -123,6 +135,10 @@ async function copy(text) {
   }
 }
 
+function gb(value) {
+  return (Number(value) || 0) / 1073741824;
+}
+
 /* ---------- theme ---------- */
 
 function applyTheme(name) {
@@ -150,7 +166,6 @@ function showApp() {
   $("#app").classList.remove("hidden");
   $("#boot").classList.add("hidden");
   navigate(location.hash.replace("#", "") || "dashboard");
-  refreshStatus();
   clearInterval(state.timer);
   state.timer = setInterval(() => {
     if (!document.hidden) refreshStatus();
@@ -202,7 +217,6 @@ const titles = {
   dashboard: "Dashboard",
   clients: "Clients",
   invites: "Invites",
-  quotas: "Quotas",
   settings: "Settings",
   logs: "Logs",
 };
@@ -210,6 +224,7 @@ const titles = {
 function navigate(view) {
   if (!titles[view]) view = "dashboard";
   state.view = view;
+  state.editing = "";
   $("#view-title").textContent = titles[view];
   $$("#nav a").forEach((link) => link.classList.toggle("active", link.dataset.view === view));
   $("#app").classList.remove("menu-open");
@@ -218,6 +233,12 @@ function navigate(view) {
 
 window.addEventListener("hashchange", () => navigate(location.hash.replace("#", "")));
 $("#menu").addEventListener("click", () => $("#app").classList.toggle("menu-open"));
+$("#app").addEventListener("click", (event) => {
+  // A tap on the dimmed area closes the mobile menu.
+  if (!$("#app").classList.contains("menu-open")) return;
+  if (event.target.closest(".sidebar") || event.target.closest("#menu")) return;
+  $("#app").classList.remove("menu-open");
+});
 $$("[data-theme-set]").forEach((button) => {
   button.addEventListener("click", () => applyTheme(button.dataset.themeSet));
 });
@@ -225,20 +246,28 @@ $$("[data-theme-set]").forEach((button) => {
 /* ---------- data ---------- */
 
 async function refreshStatus() {
+  let status;
   try {
-    const status = await api("GET", "api/status");
-    state.status = status;
-    const health = $("#health");
-    health.textContent = "online · " + duration(status.uptimeSeconds);
-    health.className = "pill ok";
-    $("#side-name").textContent = status.name || "";
-    $("#clock").textContent = new Date().toLocaleTimeString();
-    if (state.view === "dashboard") renderDashboard();
-    if (state.view === "quotas") renderQuotas();
+    status = await api("GET", "api/status");
   } catch (err) {
+    // Only the status endpoint decides whether the node is online. A broken
+    // admin socket or a failed peer/traffic request must not paint it red.
     const health = $("#health");
     health.textContent = "offline";
     health.className = "pill bad";
+    return;
+  }
+  state.status = status;
+  const health = $("#health");
+  health.textContent = "online · " + duration(status.uptimeSeconds);
+  health.className = "pill ok";
+  $("#side-name").textContent = status.name || "";
+  $("#clock").textContent = new Date().toLocaleTimeString();
+  if (state.view === "dashboard") {
+    await Promise.allSettled([loadPeers(), loadTraffic()]);
+    // During the first render the dashboard is not in the DOM yet: render()
+    // builds it right after this call and draws the chart itself.
+    if ($("#chart")) renderDashboard();
   }
 }
 
@@ -254,12 +283,6 @@ async function loadInvites() {
   return state.invites;
 }
 
-async function loadQuotas() {
-  const data = await api("GET", "api/quotas");
-  state.quotas = data.clients || [];
-  return state.quotas;
-}
-
 async function loadSettings() {
   const data = await api("GET", "api/settings");
   state.settings = data;
@@ -269,6 +292,12 @@ async function loadSettings() {
 async function loadPeers() {
   const data = await api("GET", "api/peers");
   state.peers = data;
+  return data;
+}
+
+async function loadTraffic() {
+  const data = await api("GET", "api/traffic?range=" + encodeURIComponent(state.trafficRange));
+  state.traffic = data;
   return data;
 }
 
@@ -284,21 +313,18 @@ async function render() {
   const view = $("#view");
   try {
     if (state.view === "dashboard") {
-      await Promise.all([refreshStatus(), loadPeers()]);
+      await refreshStatus();
       view.innerHTML = dashboardHtml();
+      wireDashboard();
       drawChart();
     } else if (state.view === "clients") {
-      await loadClients();
+      await Promise.all([loadClients(), loadSettings()]);
       view.innerHTML = clientsHtml();
       wireClients();
     } else if (state.view === "invites") {
       await loadInvites();
       view.innerHTML = invitesHtml();
       wireInvites();
-    } else if (state.view === "quotas") {
-      await Promise.all([loadQuotas(), loadClients()]);
-      view.innerHTML = quotasHtml();
-      wireQuotas();
     } else if (state.view === "settings") {
       await loadSettings();
       view.innerHTML = settingsHtml();
@@ -318,18 +344,18 @@ async function render() {
 function dashboardHtml() {
   const status = state.status || {};
   const peers = state.peers || {};
-  const chart = '<canvas class="chart" id="chart"></canvas>';
+  const self = peers.self || {};
   return `
     <div class="grid kpi">
       <div class="card kpi-card">
         <div class="label">Yggdrasil address</div>
-        <div class="value mono" style="font-size:15px;word-break:break-all">${escapeHtml(status.address || "—")}</div>
+        <div class="value mono small-value">${escapeHtml(status.address || "—")}</div>
         <div class="sub">${escapeHtml(status.name || "")}</div>
       </div>
       <div class="card kpi-card">
         <div class="label">Clients</div>
         <div class="value">${status.clients || 0}</div>
-        <div class="sub">${status.activeConnections || 0} TCP · ${status.activeUDP || 0} UDP</div>
+        <div class="sub">${status.activeConnections || 0} TCP · ${status.activeUdp || 0} UDP</div>
       </div>
       <div class="card kpi-card">
         <div class="label">Today</div>
@@ -343,28 +369,57 @@ function dashboardHtml() {
       </div>
     </div>
 
+    <div class="card section">
+      <header>
+        <h3>Traffic</h3>
+        <div class="range-switch" role="group" aria-label="Chart range">
+          ${["15m", "1h", "6h", "24h"].map((value) =>
+            `<button data-range="${value}" class="${state.trafficRange === value ? "active" : ""}">${value}</button>`
+          ).join("")}
+        </div>
+        <span class="muted small" id="chart-legend"></span>
+      </header>
+      <canvas class="chart" id="chart"></canvas>
+      <p class="hint" id="chart-hint">Download and upload through the exit node. Updated every 5 seconds.</p>
+    </div>
+
     <div class="grid two">
       <div class="card section">
-        <header><h3>Traffic</h3><span class="muted small">last 5 minutes</span></header>
-        ${chart}
-      </div>
-      <div class="card section">
         <header><h3>Health</h3></header>
-        <table>
+        <table class="facts">
           <tr><th>Service</th><td class="right"><span class="pill ok">running</span></td></tr>
           <tr><th>Version</th><td class="right">${escapeHtml(status.version || "")}</td></tr>
           <tr><th>SOCKS5</th><td class="right mono">[${escapeHtml(status.address || "")}]:${status.socksPort || ""}</td></tr>
           <tr><th>UDP relay</th><td class="right">${status.udpEnabled ? "enabled" : "disabled"}</td></tr>
           <tr><th>Open mode</th><td class="right">${status.allowAll ? '<span class="pill warn">allowAll</span>' : "allowlist"}</td></tr>
           <tr><th>IPv6 outbound</th><td class="right">${status.ipv6Available ? '<span class="pill ok">' + escapeHtml(status.ipv6Mode) + "</span>" : '<span class="pill warn">IPv4 only</span>'}</td></tr>
-          <tr><th>Public peers</th><td class="right">${peers.up || 0} up · ${peers.managed || 0} managed</td></tr>
+          <tr><th>Public peers</th><td class="right">${peers.up || 0} up · ${peers.managed || 0} managed · ${peers.inbound || 0} inbound</td></tr>
+        </table>
+      </div>
+
+      <div class="card section">
+        <header><h3>Yggdrasil</h3><span class="muted small">${peers.adminReachable ? "admin socket connected" : "admin socket unavailable"}</span></header>
+        <table class="facts">
+          <tr><th>Version</th><td class="right">${escapeHtml(self.build_version || "—")}</td></tr>
+          <tr><th>Address</th><td class="right mono">${escapeHtml(self.address || status.address || "—")}</td></tr>
+          <tr><th>Public key</th><td class="right mono ellipsis" title="${escapeHtml(self.key || "")}">${escapeHtml(self.key || "—")}</td></tr>
+          <tr><th>Routing entries</th><td class="right">${self.routing_entries == null ? "—" : self.routing_entries}</td></tr>
+          <tr><th>Subnet</th><td class="right mono">${escapeHtml(self.subnet || "—")}</td></tr>
+          <tr><th>Public peers</th><td class="right">${peers.peerCount || 0} wanted, ${peers.autoReplace ? "auto replace on" : "auto replace off"}</td></tr>
         </table>
       </div>
     </div>
 
     <div class="card section">
+      <header>
+        <h3>Yggdrasil peers</h3>
+        <span class="muted small">${(peers.peers || []).length} link(s)</span>
+      </header>
+      ${peerTableHtml(peers.peers || [])}
+    </div>
+
+    <div class="card section">
       <header><h3>Web interface</h3><span class="muted small">${escapeHtml(status.webPath || "")}</span></header>
-      <p class="hint">Open this address from a browser that can reach the server. A certificate warning is expected while the node uses a self-signed certificate.</p>
       <div class="actions">
         ${(status.webURLs || []).map((url) => `<button class="btn small" data-copy="${escapeHtml(url)}">${escapeHtml(url)}</button>`).join("")}
       </div>
@@ -373,107 +428,179 @@ function dashboardHtml() {
   `;
 }
 
+function peerTableHtml(peers) {
+  if (!peers.length) {
+    return '<div class="empty">No Yggdrasil links. Check the admin socket and the peer settings.</div>';
+  }
+  const rows = peers.map((peer) => {
+    const statePill = peer.up ? '<span class="pill ok">up</span>' : '<span class="pill bad">down</span>';
+    const direction = peer.inbound ? '<span class="pill warn">in</span>' : '<span class="pill">out</span>';
+    const managed = peer.managed ? '<span class="pill ok">managed</span>' : "";
+    return `
+      <tr>
+        <td data-label="Link"><div class="mono break">${escapeHtml(peer.uri)}</div></td>
+        <td data-label="Direction">${direction}</td>
+        <td data-label="State">${statePill}</td>
+        <td data-label="Address"><div class="mono break">${escapeHtml(peer.address || "—")}</div></td>
+        <td class="right" data-label="RTT">${peer.latencyMs > 0 ? peer.latencyMs.toFixed(1) + " ms" : "—"}</td>
+        <td class="right hide-sm" data-label="Uptime">${peer.uptimeSeconds > 0 ? duration(peer.uptimeSeconds) : "—"}</td>
+        <td class="right hide-sm" data-label="Traffic">↑ ${bytes(peer.bytesRecv)} · ↓ ${bytes(peer.bytesSent)}</td>
+        <td class="right" data-label="Managed">${managed}</td>
+      </tr>`;
+  }).join("");
+  return `<div class="table-wrap"><table class="cards">
+    <thead><tr><th>Link</th><th>Direction</th><th>State</th><th>Address</th>
+      <th class="right">RTT</th><th class="right hide-sm">Uptime</th>
+      <th class="right hide-sm">Traffic</th><th class="right">Managed</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>`;
+}
+
+function wireDashboard() {
+  $$("[data-copy]").forEach((button) => {
+    button.addEventListener("click", () => copy(button.dataset.copy));
+  });
+  $$("[data-range]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      state.trafficRange = button.dataset.range;
+      $$("[data-range]").forEach((item) => item.classList.toggle("active", item === button));
+      try {
+        await loadTraffic();
+        drawChart();
+      } catch (err) { toast(err.message, true); }
+    });
+  });
+}
+
+function renderDashboard() {
+  if (state.view !== "dashboard") return;
+  const view = $("#view");
+  if (!view || state.editing) return;
+  view.innerHTML = dashboardHtml();
+  wireDashboard();
+  drawChart();
+}
+
 function drawChart() {
   const canvas = $("#chart");
-  if (!canvas || !state.status) return;
-  const status = state.status;
-  state.samples.push({
-    at: Date.now(),
-    rx: (status.todayRx || 0) + (status.todayTx || 0),
-  });
-  if (state.samples.length > 120) state.samples.shift();
+  const data = state.traffic;
+  if (!canvas || !data) return;
+  const points = data.points || [];
+  const interval = Math.max(1, parseInt(String(data.interval || "5s").replace("s", ""), 10));
+  const legend = $("#chart-legend");
+  const hint = $("#chart-hint");
+  const last = points.length ? points[points.length - 1] : null;
+  if (legend && last) {
+    legend.textContent = "↓ " + speed(last.tx / interval) + "  ↑ " + speed(last.rx / interval);
+  }
+  if (hint) {
+    hint.textContent = points.length < 3
+      ? "Collecting samples: the chart fills up within a few minutes."
+      : "Download and upload through the exit node. Updated every 5 seconds.";
+  }
 
   const ratio = window.devicePixelRatio || 1;
   const width = canvas.clientWidth || 600;
-  const height = canvas.clientHeight || 160;
+  const height = canvas.clientHeight || 180;
   canvas.width = width * ratio;
   canvas.height = height * ratio;
   const ctx = canvas.getContext("2d");
-  ctx.scale(ratio, ratio);
+  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
   ctx.clearRect(0, 0, width, height);
 
   const style = getComputedStyle(document.documentElement);
   const border = style.getPropertyValue("--border").trim() || "#ddd";
   const accent = style.getPropertyValue("--accent").trim() || "#3d5afe";
+  const ok = style.getPropertyValue("--ok").trim() || "#12805c";
+  const muted = style.getPropertyValue("--muted").trim() || "#888";
+
+  const padLeft = 46;
+  const padBottom = 20;
+  const padTop = 8;
+  const plotW = width - padLeft;
+  const plotH = height - padBottom - padTop;
 
   ctx.strokeStyle = border;
   ctx.lineWidth = 1;
-  for (let i = 1; i < 4; i += 1) {
-    const y = (height / 4) * i;
+  for (let i = 0; i <= 3; i += 1) {
+    const y = padTop + (plotH / 3) * i;
     ctx.beginPath();
-    ctx.moveTo(0, y);
+    ctx.moveTo(padLeft, y);
     ctx.lineTo(width, y);
     ctx.stroke();
   }
 
-  const samples = state.samples;
-  if (samples.length < 2) {
-    ctx.fillStyle = style.getPropertyValue("--muted").trim() || "#888";
+  if (points.length < 2) {
+    ctx.fillStyle = muted;
     ctx.font = "13px sans-serif";
-    ctx.fillText("Collecting samples…", 12, 24);
+    ctx.fillText("Collecting samples…", padLeft + 8, padTop + 24);
     return;
   }
+
   let max = 1;
-  for (let i = 1; i < samples.length; i += 1) {
-    const delta = samples[i].rx - samples[i - 1].rx;
-    if (delta > max) max = delta;
-  }
-  ctx.beginPath();
-  samples.forEach((sample, index) => {
-    const previous = index === 0 ? sample.rx : samples[index - 1].rx;
-    const delta = Math.max(0, sample.rx - previous);
-    const x = (index / (samples.length - 1)) * width;
-    const y = height - (delta / max) * (height - 12) - 6;
-    if (index === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  points.forEach((point) => {
+    max = Math.max(max, point.rx / interval, point.tx / interval);
   });
-  ctx.lineTo(width, height);
-  ctx.lineTo(0, height);
-  ctx.closePath();
-  ctx.fillStyle = accent + "22";
-  ctx.fill();
-  ctx.strokeStyle = accent;
-  ctx.lineWidth = 2;
-  ctx.stroke();
+  max *= 1.15;
+
+  const xAt = (index) => padLeft + (index / (points.length - 1)) * plotW;
+  const yAt = (value) => padTop + plotH - (value / max) * plotH;
+
+  const series = [
+    { key: "tx", color: accent, fill: true },
+    { key: "rx", color: ok, fill: false },
+  ];
+  series.forEach((line) => {
+    ctx.beginPath();
+    points.forEach((point, index) => {
+      const x = xAt(index);
+      const y = yAt((point[line.key] || 0) / interval);
+      if (index === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    if (line.fill) {
+      ctx.lineTo(xAt(points.length - 1), padTop + plotH);
+      ctx.lineTo(xAt(0), padTop + plotH);
+      ctx.closePath();
+      ctx.fillStyle = line.color + "22";
+      ctx.fill();
+    }
+    ctx.strokeStyle = line.color;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  });
+
+  ctx.fillStyle = muted;
+  ctx.font = "11px sans-serif";
+  ctx.fillText(speed(max), 4, padTop + 10);
+  ctx.fillText("0", 4, padTop + plotH);
+
+  const labels = 5;
+  for (let i = 0; i < labels; i += 1) {
+    const index = Math.round((i / (labels - 1)) * (points.length - 1));
+    const x = xAt(index);
+    const text = clockTime(points[index].at);
+    const textWidth = ctx.measureText(text).width;
+    const left = i === 0 ? x : i === labels - 1 ? x - textWidth : x - textWidth / 2;
+    ctx.fillText(text, left, height - 4);
+  }
 }
+
+window.addEventListener("resize", () => {
+  if (state.view === "dashboard") drawChart();
+});
 
 /* clients */
 
 function clientsHtml() {
-  const rows = state.clients.map((client) => {
-    const used = (client.quota && client.quota.monthlyBytes > 0)
-      ? Math.min(100, (client.quota.monthUsed / client.quota.monthlyBytes) * 100)
-      : 0;
-    const barClass = used >= 95 ? "bar bad" : used >= 75 ? "bar warn" : "bar";
-    return `
-      <tr>
-        <td>
-          <div class="mono">${escapeHtml(client.address)}</div>
-          <div class="muted small">${escapeHtml(client.label || "no label")}</div>
-        </td>
-        <td><span class="pill ${client.state === "connected" ? "ok" : ""}">${escapeHtml(client.state)}</span></td>
-        <td class="right">${client.connections || 0}</td>
-        <td class="right">${client.udpAssociations || 0}</td>
-        <td class="right">${bytes((client.dayUsed || 0))}</td>
-        <td class="right">${bytes((client.monthUsed || 0))}</td>
-        <td style="min-width:120px">
-          <div class="${barClass}"><i style="width:${used}%"></i></div>
-          <div class="muted small">${client.quota && client.quota.monthlyBytes > 0 ? bytes(client.quota.monthlyBytes) : "no cap"}</div>
-        </td>
-        <td class="right hide-sm">${when(client.lastSeenAt)}</td>
-        <td class="right nowrap">
-          <button class="btn small" data-token="${escapeHtml(client.address)}">Token</button>
-          <button class="btn small danger" data-remove="${escapeHtml(client.address)}">Remove</button>
-        </td>
-      </tr>`;
-  }).join("");
-
+  const rows = state.clients.map((client) => clientRowHtml(client)).join("");
+  const defaults = (state.settings && state.settings.quotas) || {};
   return `
     <div class="card section">
       <header>
         <h3>Registered clients</h3>
         <span class="muted small">${state.clients.length} total</span>
       </header>
-      ${state.clients.length ? `<div class="table-wrap"><table>
+      ${state.clients.length ? `<div class="table-wrap"><table class="cards">
         <thead><tr>
           <th>Client</th><th>State</th><th class="right">TCP</th><th class="right">UDP</th>
           <th class="right">Today</th><th class="right">Month</th><th>Quota</th>
@@ -481,6 +608,7 @@ function clientsHtml() {
         </tr></thead>
         <tbody>${rows}</tbody>
       </table></div>` : '<div class="empty">No clients yet. Create an invite or add an address.</div>'}
+      <div id="client-editor"></div>
     </div>
 
     <div class="card section">
@@ -492,7 +620,47 @@ function clientsHtml() {
         <button class="btn primary" type="submit">Add</button>
       </form>
     </div>
+
+    <div class="card section">
+      <header><h3>Default quota</h3></header>
+      <p class="hint">Used for every client without its own limits. Zero means no limit.</p>
+      <form id="quota-defaults" class="form-grid">
+        <label class="field"><span>Monthly cap (GiB)</span><input id="def-monthly" type="number" min="0" step="1" value="${gb(defaults.monthlyBytes)}"></label>
+        <label class="field"><span>Daily cap (GiB)</span><input id="def-daily" type="number" min="0" step="1" value="${gb(defaults.dailyBytes)}"></label>
+        <label class="field"><span>Download (Mbps)</span><input id="def-down" type="number" min="0" step="1" value="${(defaults.downKbps || 0) / 1000}"></label>
+        <label class="field"><span>Upload (Mbps)</span><input id="def-up" type="number" min="0" step="1" value="${(defaults.upKbps || 0) / 1000}"></label>
+        <div class="full"><button class="btn primary" type="submit">Save defaults</button></div>
+      </form>
+    </div>
   `;
+}
+
+function clientRowHtml(client) {
+  const quota = client.quota || {};
+  const used = quota.monthlyBytes > 0 ? Math.min(100, (quota.monthUsed / quota.monthlyBytes) * 100) : 0;
+  const barClass = used >= 95 ? "bar bad" : used >= 75 ? "bar warn" : "bar";
+  return `
+    <tr>
+      <td data-label="Client">
+        <div class="mono break">${escapeHtml(client.address)}</div>
+        <div class="muted small">${escapeHtml(client.label || "no label")}${client.source ? " · " + escapeHtml(client.source) : ""}</div>
+      </td>
+      <td data-label="State"><span class="pill ${client.state === "connected" ? "ok" : ""}">${escapeHtml(client.state)}</span></td>
+      <td class="right" data-label="TCP">${client.connections || 0}</td>
+      <td class="right" data-label="UDP">${client.udpAssociations || 0}</td>
+      <td class="right" data-label="Today">${bytes(client.dayUsed || 0)}</td>
+      <td class="right" data-label="Month">${bytes(client.monthUsed || 0)}</td>
+      <td data-label="Quota">
+        <div class="${barClass}"><i style="width:${used}%"></i></div>
+        <div class="muted small">${quota.monthlyBytes > 0 ? bytes(quota.monthUsed) + " of " + bytes(quota.monthlyBytes) : "no cap"}</div>
+      </td>
+      <td class="right hide-sm" data-label="Last seen">${when(client.lastSeenAt)}</td>
+      <td class="right nowrap" data-label="Actions">
+        <button class="btn small" data-edit="${escapeHtml(client.address)}">Edit</button>
+        <button class="btn small" data-token="${escapeHtml(client.address)}">Token</button>
+        <button class="btn small danger" data-remove="${escapeHtml(client.address)}">Remove</button>
+      </td>
+    </tr>`;
 }
 
 function wireClients() {
@@ -507,6 +675,11 @@ function wireClients() {
       render();
     } catch (err) { toast(err.message, true); }
   });
+
+  $$("[data-edit]").forEach((button) => {
+    button.addEventListener("click", () => openClientEditor(button.dataset.edit));
+  });
+
   $$("[data-remove]").forEach((button) => {
     button.addEventListener("click", async () => {
       if (!confirm("Remove " + button.dataset.remove + " from the allowlist?")) return;
@@ -517,6 +690,7 @@ function wireClients() {
       } catch (err) { toast(err.message, true); }
     });
   });
+
   $$("[data-token]").forEach((button) => {
     button.addEventListener("click", async () => {
       if (!confirm("Issue a new API token for " + button.dataset.token + "? The previous token stops working.")) return;
@@ -526,6 +700,79 @@ function wireClients() {
       } catch (err) { toast(err.message, true); }
     });
   });
+
+  $("#quota-defaults").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try {
+      await api("PUT", "api/settings", {
+        quotas: {
+          monthlyBytes: Math.round(Number($("#def-monthly").value) * 1073741824),
+          dailyBytes: Math.round(Number($("#def-daily").value) * 1073741824),
+          downKbps: Math.round(Number($("#def-down").value) * 1000),
+          upKbps: Math.round(Number($("#def-up").value) * 1000),
+        },
+      });
+      toast("Defaults saved");
+      await loadSettings();
+      render();
+    } catch (err) { toast(err.message, true); }
+  });
+}
+
+function openClientEditor(address) {
+  const client = state.clients.find((item) => item.address === address);
+  if (!client) return;
+  state.editing = address;
+  const quota = client.quota || {};
+  const editor = $("#client-editor");
+  editor.innerHTML = `
+    <form class="card section editor" id="client-form">
+      <header><h3>${escapeHtml(client.address)}</h3></header>
+      <div class="form-grid">
+        <label class="field"><span>Label</span><input id="e-label" value="${escapeHtml(client.label || "")}" placeholder="family phone"></label>
+        <label class="field"><span>Monthly cap (GiB, 0 = none)</span><input id="e-monthly" type="number" min="0" step="1" value="${gb(quota.monthlyBytes)}"></label>
+        <label class="field"><span>Daily cap (GiB, 0 = none)</span><input id="e-daily" type="number" min="0" step="1" value="${gb(quota.dailyBytes)}"></label>
+        <label class="field"><span>Download (Mbps, 0 = none)</span><input id="e-down" type="number" min="0" step="1" value="${(quota.downKbps || 0) / 1000}"></label>
+        <label class="field"><span>Upload (Mbps, 0 = none)</span><input id="e-up" type="number" min="0" step="1" value="${(quota.upKbps || 0) / 1000}"></label>
+        <div class="field"><span>Traffic</span><div class="muted">Today ${bytes(client.dayUsed || 0)} · month ${bytes(client.monthUsed || 0)}</div></div>
+      </div>
+      <div class="actions">
+        <button class="btn primary" type="submit">Save</button>
+        <button class="btn" type="button" id="e-reset">Reset traffic</button>
+        <button class="btn" type="button" id="e-cancel">Cancel</button>
+      </div>
+    </form>`;
+  editor.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  $("#e-cancel").addEventListener("click", () => {
+    state.editing = "";
+    editor.innerHTML = "";
+  });
+  $("#e-reset").addEventListener("click", async () => {
+    if (!confirm("Reset the quota and the traffic counters of " + client.address + "?")) return;
+    try {
+      await api("DELETE", "api/quotas/" + encodeURIComponent(client.address));
+      toast("Traffic reset");
+      state.editing = "";
+      render();
+    } catch (err) { toast(err.message, true); }
+  });
+  $("#client-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try {
+      await api("PUT", "api/clients/" + encodeURIComponent(client.address), {
+        label: $("#e-label").value.trim(),
+      });
+      await api("PUT", "api/quotas/" + encodeURIComponent(client.address), {
+        monthlyBytes: Math.round(Number($("#e-monthly").value) * 1073741824),
+        dailyBytes: Math.round(Number($("#e-daily").value) * 1073741824),
+        downKbps: Math.round(Number($("#e-down").value) * 1000),
+        upKbps: Math.round(Number($("#e-up").value) * 1000),
+      });
+      toast("Client saved");
+      state.editing = "";
+      render();
+    } catch (err) { toast(err.message, true); }
+  });
 }
 
 /* invites */
@@ -533,11 +780,11 @@ function wireClients() {
 function invitesHtml() {
   const rows = state.invites.map((invite) => `
     <tr>
-      <td class="mono">${escapeHtml(invite.hash.slice(0, 12))}…</td>
-      <td>${escapeHtml(invite.note || "—")}</td>
-      <td class="right">${invite.used} / ${invite.uses}</td>
-      <td class="right">${new Date(invite.expiresAt).toLocaleString()}</td>
-      <td class="right"><button class="btn small danger" data-invite="${escapeHtml(invite.hash)}">Delete</button></td>
+      <td class="mono" data-label="ID">${escapeHtml(invite.hash.slice(0, 12))}…</td>
+      <td data-label="Note">${escapeHtml(invite.note || "—")}</td>
+      <td class="right" data-label="Used">${invite.used} / ${invite.uses}</td>
+      <td class="right" data-label="Expires">${new Date(invite.expiresAt).toLocaleString()}</td>
+      <td class="right" data-label=""><button class="btn small danger" data-invite="${escapeHtml(invite.hash)}">Delete</button></td>
     </tr>`).join("");
 
   return `
@@ -561,7 +808,7 @@ function invitesHtml() {
 
     <div class="card section">
       <header><h3>Active invites</h3><span class="muted small">${state.invites.length}</span></header>
-      ${state.invites.length ? `<div class="table-wrap"><table>
+      ${state.invites.length ? `<div class="table-wrap"><table class="cards">
         <thead><tr><th>ID</th><th>Note</th><th class="right">Used</th><th class="right">Expires</th><th></th></tr></thead>
         <tbody>${rows}</tbody>
       </table></div>` : '<div class="empty">No active invites.</div>'}
@@ -582,7 +829,7 @@ function wireInvites() {
         <div class="card section" style="margin-top:14px">
           <header><h3>Invite created</h3></header>
           <p class="hint">Expires ${new Date(data.expiresAt).toLocaleString()} · ${data.uses} use(s)</p>
-          <div class="mono" style="word-break:break-all">${escapeHtml(data.link)}</div>
+          <div class="mono break">${escapeHtml(data.link)}</div>
           <div class="actions">
             <button class="btn primary small" id="copy-invite">Copy link</button>
           </div>
@@ -600,123 +847,6 @@ function wireInvites() {
         render();
       } catch (err) { toast(err.message, true); }
     });
-  });
-}
-
-/* quotas */
-
-function quotasHtml() {
-  const rows = state.quotas.map((client) => {
-    const monthly = client.monthlyBytes > 0
-      ? Math.min(100, (client.monthUsed / client.monthlyBytes) * 100) : 0;
-    const barClass = monthly >= 95 ? "bar bad" : monthly >= 75 ? "bar warn" : "bar";
-    return `
-      <tr>
-        <td class="mono">${escapeHtml(client.address)}</td>
-        <td class="right">${bytes(client.dayUsed)}</td>
-        <td class="right">${bytes(client.monthUsed)}</td>
-        <td class="right">${client.dailyBytes > 0 ? bytes(client.dailyBytes) : "—"}</td>
-        <td class="right">${client.monthlyBytes > 0 ? bytes(client.monthlyBytes) : "—"}</td>
-        <td class="right">${rate(client.downKbps)}</td>
-        <td class="right">${rate(client.upKbps)}</td>
-        <td style="min-width:110px"><div class="${barClass}"><i style="width:${monthly}%"></i></div></td>
-        <td class="right nowrap">
-          <button class="btn small" data-quota="${escapeHtml(client.address)}">Edit</button>
-          <button class="btn small danger" data-quota-reset="${escapeHtml(client.address)}">Reset</button>
-        </td>
-      </tr>`;
-  }).join("");
-
-  return `
-    <div class="card section">
-      <header><h3>Per-client quotas</h3><span class="muted small">enforced on new connections</span></header>
-      <p class="hint">Zero means no limit. Quotas are checked when a connection or UDP association starts; open connections are not interrupted.</p>
-      ${state.quotas.length ? `<div class="table-wrap"><table>
-        <thead><tr>
-          <th>Client</th><th class="right">Today</th><th class="right">Month</th>
-          <th class="right">Daily cap</th><th class="right">Monthly cap</th>
-          <th class="right">Down</th><th class="right">Up</th><th></th><th></th>
-        </tr></thead><tbody>${rows}</tbody>
-      </table></div>` : '<div class="empty">No clients.</div>'}
-      <div id="quota-editor"></div>
-    </div>
-
-    <div class="card section">
-      <header><h3>Default quota</h3></header>
-      <p class="hint">Applied to every client without its own entry.</p>
-      <form id="quota-defaults" class="form-grid">
-        <label class="field"><span>Monthly cap (GiB, 0 = none)</span><input id="def-monthly" type="number" min="0" step="1" value="${(state.settings && state.settings.quotas.monthlyBytes ? state.settings.quotas.monthlyBytes / 1073741824 : 0)}"></label>
-        <label class="field"><span>Daily cap (GiB, 0 = none)</span><input id="def-daily" type="number" min="0" step="1" value="${(state.settings && state.settings.quotas.dailyBytes ? state.settings.quotas.dailyBytes / 1073741824 : 0)}"></label>
-        <label class="field"><span>Download (Mbps, 0 = none)</span><input id="def-down" type="number" min="0" step="1" value="${(state.settings ? state.settings.quotas.downKbps / 1000 : 0)}"></label>
-        <label class="field"><span>Upload (Mbps, 0 = none)</span><input id="def-up" type="number" min="0" step="1" value="${(state.settings ? state.settings.quotas.upKbps / 1000 : 0)}"></label>
-        <div class="full"><button class="btn primary" type="submit">Save defaults</button></div>
-      </form>
-    </div>
-  `;
-}
-
-function wireQuotas() {
-  $$("[data-quota]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const client = state.quotas.find((item) => item.address === button.dataset.quota);
-      if (!client) return;
-      $("#quota-editor").innerHTML = `
-        <form class="card section" id="quota-form" style="margin-top:14px">
-          <header><h3>${escapeHtml(client.address)}</h3></header>
-          <div class="form-grid">
-            <label class="field"><span>Monthly cap (GiB, 0 = none)</span><input id="q-monthly" type="number" min="0" step="1" value="${client.monthlyBytes / 1073741824}"></label>
-            <label class="field"><span>Daily cap (GiB, 0 = none)</span><input id="q-daily" type="number" min="0" step="1" value="${client.dailyBytes / 1073741824}"></label>
-            <label class="field"><span>Download (Mbps, 0 = none)</span><input id="q-down" type="number" min="0" step="1" value="${client.downKbps / 1000}"></label>
-            <label class="field"><span>Upload (Mbps, 0 = none)</span><input id="q-up" type="number" min="0" step="1" value="${client.upKbps / 1000}"></label>
-            <div class="full actions">
-              <button class="btn primary" type="submit">Save</button>
-              <button class="btn" type="button" id="q-cancel">Cancel</button>
-            </div>
-          </div>
-        </form>`;
-      $("#q-cancel").addEventListener("click", () => { $("#quota-editor").innerHTML = ""; });
-      $("#quota-form").addEventListener("submit", async (event) => {
-        event.preventDefault();
-        try {
-          await api("PUT", "api/quotas/" + encodeURIComponent(client.address), {
-            monthlyBytes: Math.round(Number($("#q-monthly").value) * 1073741824),
-            dailyBytes: Math.round(Number($("#q-daily").value) * 1073741824),
-            downKbps: Math.round(Number($("#q-down").value) * 1000),
-            upKbps: Math.round(Number($("#q-up").value) * 1000),
-          });
-          toast("Quota saved");
-          render();
-        } catch (err) { toast(err.message, true); }
-      });
-    });
-  });
-
-  $$("[data-quota-reset]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      if (!confirm("Reset the quota and the traffic counters of " + button.dataset.quotaReset + "?")) return;
-      try {
-        await api("DELETE", "api/quotas/" + encodeURIComponent(button.dataset.quotaReset));
-        toast("Quota reset");
-        render();
-      } catch (err) { toast(err.message, true); }
-    });
-  });
-
-  $("#quota-defaults").addEventListener("submit", async (event) => {
-    event.preventDefault();
-    try {
-      await api("PUT", "api/settings", {
-        quotas: {
-          monthlyBytes: Math.round(Number($("#def-monthly").value) * 1073741824),
-          dailyBytes: Math.round(Number($("#def-daily").value) * 1073741824),
-          downKbps: Math.round(Number($("#def-down").value) * 1000),
-          upKbps: Math.round(Number($("#def-up").value) * 1000),
-        },
-      });
-      toast("Defaults saved");
-      await loadSettings();
-      render();
-    } catch (err) { toast(err.message, true); }
   });
 }
 

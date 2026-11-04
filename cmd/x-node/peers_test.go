@@ -97,6 +97,52 @@ func TestPeerSupervisorFillsTheList(t *testing.T) {
 	}
 }
 
+func TestPeerSupervisorAdoptsConfiguredPeersInsteadOfDuplicating(t *testing.T) {
+	cfg := testPeerConfig(t, 3)
+	// The installer writes the same three peers to yggdrasil.conf and to the
+	// managed list; an older release added three more through the admin socket.
+	cfg.Peers = []string{"tls://seed1.example:1", "tls://seed2.example:2", "tls://seed3.example:3"}
+	state := peersState{
+		Seed:    cfg.Peers,
+		Managed: []string{"tcp://managed1.example:1", "tcp://managed2.example:2", "tcp://managed3.example:3"},
+	}
+	if err := writePeersState(cfg.statePath(peersStateFile), state); err != nil {
+		t.Fatal(err)
+	}
+	node := &fakeNode{peers: []adminPeer{
+		{URI: "tls://seed1.example:1", Up: true},
+		{URI: "tls://seed2.example:2", Up: true},
+		{URI: "tls://seed3.example:3", Up: true},
+		{URI: "tcp://managed1.example:1", Up: true},
+		{URI: "tcp://managed2.example:2", Up: true},
+		{URI: "tcp://managed3.example:3", Up: true},
+	}}
+	s := newTestSupervisor(t, cfg, node, nil)
+	s.step(context.Background())
+
+	if len(s.managed) != 3 {
+		t.Fatalf("managed = %v, want peerCount peers", s.managed)
+	}
+	if len(node.removed) != 3 {
+		t.Fatalf("removed = %v, want the three extra links", node.removed)
+	}
+}
+
+func TestPeerSupervisorRestoresPeersAfterYggdrasilRestart(t *testing.T) {
+	cfg := testPeerConfig(t, 2)
+	cfg.Peers = []string{"tls://a.example:1", "tls://b.example:2"}
+	node := &fakeNode{}
+	s := newTestSupervisor(t, cfg, node, nil)
+	s.step(context.Background())
+
+	if len(node.added) != 2 {
+		t.Fatalf("added = %v, want both managed peers re-added", node.added)
+	}
+	if len(s.managed) != 2 {
+		t.Fatalf("managed = %v", s.managed)
+	}
+}
+
 func TestPeerSupervisorReplacesDeadPeer(t *testing.T) {
 	cfg := testPeerConfig(t, 3)
 	cfg.Peers = []string{"tls://a.example:1", "tls://b.example:2", "tls://c.example:3"}

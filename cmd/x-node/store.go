@@ -346,6 +346,30 @@ func (s *Store) AddClient(ip net.IP, label string) (Client, bool, error) {
 	return client, false, nil
 }
 
+// UpdateClient changes the editable fields of one entry. The address is the
+// key and cannot be changed here.
+func (s *Store) UpdateClient(ip net.IP, label string) (Client, error) {
+	if ip == nil || !isYggAddress(ip) {
+		return Client{}, fmt.Errorf("address must be a Yggdrasil node address")
+	}
+	release, err := s.beginWrite()
+	if err != nil {
+		return Client{}, err
+	}
+	defer release()
+	key := ip.String()
+	client, ok := s.clients[key]
+	if !ok {
+		return Client{}, errNotAllowed
+	}
+	client.Label = strings.TrimSpace(label)
+	s.clients[key] = client
+	if err := s.saveAllowlistLocked(); err != nil {
+		return Client{}, err
+	}
+	return client, nil
+}
+
 // RemoveClient deletes one entry. It reports whether anything was removed.
 func (s *Store) RemoveClient(ip net.IP) (bool, error) {
 	if ip == nil {

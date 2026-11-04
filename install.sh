@@ -10,15 +10,10 @@
 # Nothing is exposed to the clearnet: the SOCKS5 and registration sockets are
 # bound to the Yggdrasil address only.
 #
-# The built-in web interface is served by the same binary under a random path.
-# Behind nginx (the default for wss peering) it is proxied on the same TLS port
-# and stays on loopback; without nginx it listens directly with a self-signed
-# certificate. The password is generated once and written to
-# /root/x-node-credentials.txt.
-#
-# An installation made by the old ygg-exit package is migrated automatically:
-# the allowlist, the invites and the peer list are copied, the old service is
-# stopped and removed, and ygg-exit becomes a symlink to x-node.
+# The built-in web interface is served by the same binary. Behind nginx (the
+# default for wss peering) it is proxied on the same TLS port; without nginx it
+# listens directly with a self-signed certificate. The password is generated
+# once and written to /root/x-node-credentials.txt.
 #
 # Run it as root from the directory that contains install.sh, bin/x-node and
 # bin/x-node-peerprobe.
@@ -30,6 +25,51 @@ set -euo pipefail
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin${PATH:+:$PATH}"
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+# A standalone copy of this script (curl ... | sudo bash) has no binaries next
+# to it. Download the latest release archive for this machine and continue
+# from there, so installing stays a single command.
+if [ ! -x "$SCRIPT_DIR/bin/x-node" ] && [ ! -f "$SCRIPT_DIR/uninstall.sh" ] \
+        && [ -z "${X_NODE_BOOTSTRAPPED:-}" ]; then
+    boot_arch="$(uname -m)"
+    case "$boot_arch" in
+        x86_64|amd64)  boot_arch=amd64 ;;
+        aarch64|arm64) boot_arch=arm64 ;;
+        armv7l|armv7)  boot_arch=arm ;;
+        *) echo "unsupported architecture: $boot_arch" >&2; exit 1 ;;
+    esac
+    boot_version="${X_NODE_VERSION:-}"
+    if [ -z "$boot_version" ]; then
+        if command -v curl >/dev/null 2>&1; then
+            boot_release="$(curl -fsSL https://api.github.com/repos/MrKsey/x-node/releases/latest)"
+        elif command -v wget >/dev/null 2>&1; then
+            boot_release="$(wget -qO- https://api.github.com/repos/MrKsey/x-node/releases/latest)"
+        else
+            echo "curl or wget is required to download X-Node" >&2
+            exit 1
+        fi
+        boot_version="$(printf '%s\n' "$boot_release" \
+            | sed -n 's/.*"tag_name": *"v\{0,1\}\([^"]*\)".*/\1/p' | head -n 1)"
+    fi
+    [ -n "$boot_version" ] || { echo "cannot determine the latest X-Node version" >&2; exit 1; }
+    boot_name="x-node-${boot_version}-linux-${boot_arch}"
+    boot_url="https://github.com/MrKsey/x-node/releases/download/v${boot_version}/${boot_name}.tar.gz"
+    boot_dir="$(mktemp -d)"
+    echo "Downloading X-Node ${boot_version} for linux/${boot_arch}..."
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL "$boot_url" | tar -xz -C "$boot_dir"
+    else
+        wget -qO- "$boot_url" | tar -xz -C "$boot_dir"
+    fi
+    export X_NODE_BOOTSTRAPPED=1
+    # With "curl ... | sudo bash" the standard input is the script itself, so
+    # the questions would read the download instead of the keyboard. The
+    # terminal is attached back when it exists; --yes does not need it.
+    if [ -r /dev/tty ]; then
+        exec bash "$boot_dir/$boot_name/install.sh" "$@" </dev/tty
+    fi
+    exec bash "$boot_dir/$boot_name/install.sh" "$@"
+fi
 
 # The node name is NODE_NAME and not NAME: /etc/os-release, which is sourced
 # below, defines NAME="Ubuntu" and would silently overwrite the flag.
@@ -79,15 +119,6 @@ CREDENTIALS_FILE="/root/x-node-credentials.txt"
 IPV6_MODE="auto"
 IPV6_MODE_SET=0
 UPGRADE=0
-# The old ygg-exit installation is migrated when it is found; --no-migrate
-# leaves it alone, --migrate forces the step even if nothing looks installed.
-MIGRATE=1
-OLD_SERVICE="ygg-exit"
-OLD_CONFIG="/etc/ygg-exit/config.json"
-OLD_STATE_DIR="/var/lib/ygg-exit"
-OLD_BIN="/usr/local/bin/ygg-exit"
-OLD_PROBE="/usr/local/bin/ygg-peerprobe"
-MIGRATED=0
 PUBLIC_HOST=""
 PUBLIC_HOST_SET=0
 ALLOW_ALL=0
@@ -169,8 +200,6 @@ Options:
                         written to /root/x-node-credentials.txt)
   --upgrade             replace the binaries and restart; keep the existing
                         configuration, clients and password
-  --no-migrate          do not migrate an existing ygg-exit installation
-  --migrate             migrate ygg-exit even if the detection is unsure
   --uninstall           remove the installation (runs uninstall.sh)
   --ygg-version VER     Yggdrasil version to install (default: 0.5.15)
   --ygg-deb PATH        install Yggdrasil from a local .deb instead of GitHub
@@ -221,15 +250,10 @@ PY
     fi
 }
 
-# The manifest of the previous installation may still live in the ygg-exit
-# state directory: the migration runs later in this script, so the peering port
-# and protocol must be read from there before the new state directory exists.
+# The manifest of the previous installation records the peering port and
+# protocol, so a repeated run keeps them instead of asking again.
 manifest_path() {
-    if [ -f "$STATE_DIR/install.json" ]; then
-        printf '%s\n' "$STATE_DIR/install.json"
-    else
-        printf '%s\n' "$OLD_STATE_DIR/install.json"
-    fi
+    printf '%s\n' "$STATE_DIR/install.json"
 }
 
 # Reads a field from an existing install manifest, so a repeated run keeps the
@@ -452,12 +476,8 @@ if [ -f "$(manifest_path)" ] && command -v python3 >/dev/null 2>&1; then
 fi
 
 # A repeated run keeps the web interface, its port, its bind address and its
-# path, and the IPv6 mode: only a flag changes them. The configuration may
-# still be the ygg-exit one, because the migration runs later.
+# path, and the IPv6 mode: only a flag changes them.
 PREVIOUS_CONFIG="$EXIT_CONFIG"
-if [ ! -f "$PREVIOUS_CONFIG" ] && [ -f "$OLD_CONFIG" ]; then
-    PREVIOUS_CONFIG="$OLD_CONFIG"
-fi
 if [ -f "$PREVIOUS_CONFIG" ] && command -v python3 >/dev/null 2>&1; then
     if [ "$WEB_ENABLED_SET" -eq 0 ]; then
         case "$(config_get "$PREVIOUS_CONFIG" web.enabled)" in
@@ -532,8 +552,7 @@ fi
 # configuration is left alone and the exit configuration is only topped up with
 # the keys a new version added.
 if [ "$UPGRADE" -eq 1 ]; then
-    [ -f "$EXIT_CONFIG" ] || [ -f "$OLD_CONFIG" ] \
-        || die "--upgrade needs an existing $EXIT_CONFIG (or a ygg-exit installation)"
+    [ -f "$EXIT_CONFIG" ] || die "--upgrade needs an existing $EXIT_CONFIG"
     ASSUME_YES=1
     SKIP_PEERS=1
     SKIP_PEERS_SET=1
@@ -1189,73 +1208,6 @@ install -d -m 0700 -o "$SERVICE_USER" -g "$SERVICE_USER" "$STATE_DIR"
 chown -R "$SERVICE_USER:$SERVICE_USER" "$STATE_DIR"
 install -d -m 0750 -o root -g "$SERVICE_USER" /etc/x-node
 
-# Migration from ygg-exit, the old name of the same daemon. The state files are
-# compatible, so the allowlist and the invites move over unchanged and the
-# registered phones keep working. The old service is stopped first: both
-# daemons bind the same SOCKS5 port.
-if [ "$MIGRATE" -eq 1 ] && { [ -d "$OLD_STATE_DIR" ] || [ -f "$OLD_CONFIG" ] \
-        || systemctl list-unit-files "$OLD_SERVICE.service" 2>/dev/null | grep -q "$OLD_SERVICE"; }; then
-    log "Migrating the ygg-exit installation"
-    MIGRATED=1
-    systemctl disable --now ygg-exit-firewall 2>/dev/null || true
-    systemctl disable --now "$OLD_SERVICE" 2>/dev/null || true
-    if [ -f "$OLD_CONFIG" ] && [ ! -f "$EXIT_CONFIG" ]; then
-        install -m 0640 -o root -g "$SERVICE_USER" "$OLD_CONFIG" "$EXIT_CONFIG"
-        echo "    configuration: $OLD_CONFIG -> $EXIT_CONFIG"
-    fi
-    # The old directory is kept next to the new one: a repeated run must not
-    # mistake it for an installation that still has to be migrated.
-    if [ -d /etc/ygg-exit ] && [ -f "$EXIT_CONFIG" ] && [ ! -d /etc/ygg-exit.migrated ]; then
-        mv /etc/ygg-exit /etc/ygg-exit.migrated
-        echo "    backup: /etc/ygg-exit.migrated"
-    fi
-    if [ -d "$OLD_STATE_DIR" ]; then
-        # Only the files the daemon owns; runtime.json is left behind because a
-        # stale copy would make the CLI believe a dead process is running.
-        for name in allowlist.json invites.json peers.json usage.json quotas.json \
-                    settings.json web.json install.json; do
-            source_file="$OLD_STATE_DIR/$name"
-            [ -f "$source_file" ] || continue
-            if [ -f "$STATE_DIR/$name" ]; then
-                echo "    state: $name kept (already present)"
-                continue
-            fi
-            cp -a "$source_file" "$STATE_DIR/$name"
-            echo "    state: $name copied"
-        done
-        if [ -d "$OLD_STATE_DIR/tls" ] && [ ! -d "$STATE_DIR/tls" ]; then
-            cp -a "$OLD_STATE_DIR/tls" "$STATE_DIR/tls"
-            echo "    state: tls/ copied"
-        fi
-        chown -R "$SERVICE_USER:$SERVICE_USER" "$STATE_DIR"
-        # The old directory is kept as a backup instead of being deleted: it is
-        # small, and a failed migration must not lose the allowlist.
-        if [ ! -d "$OLD_STATE_DIR.migrated" ]; then
-            mv "$OLD_STATE_DIR" "$OLD_STATE_DIR.migrated"
-            echo "    backup: $OLD_STATE_DIR.migrated"
-        fi
-    fi
-    rm -f /etc/systemd/system/ygg-exit.service \
-          /etc/systemd/system/ygg-exit-firewall.service
-    rm -f /etc/nginx/sites-enabled/ygg-exit.conf /etc/nginx/sites-available/ygg-exit.conf \
-          /etc/nginx/sites-enabled/ygg-exit-http.conf /etc/nginx/sites-available/ygg-exit-http.conf
-    rm -rf /var/www/ygg-exit
-    # Both sites existed for a moment, so nginx warned about conflicting server
-    # names and could have kept the old block. With the old files gone, reload
-    # so only the X-Node site is active.
-    systemctl reload nginx 2>/dev/null || true
-    systemctl daemon-reload 2>/dev/null || true
-    # Old scripts and habits keep working: the names point at the new binary,
-    # and the daemon still reads YGG_EXIT_CONFIG when X_NODE_CONFIG is unset.
-    if [ ! -e "$OLD_BIN" ]; then
-        ln -s /usr/local/bin/x-node "$OLD_BIN" 2>/dev/null || true
-    fi
-    if [ ! -e "$OLD_PROBE" ]; then
-        ln -s /usr/local/bin/x-node-peerprobe "$OLD_PROBE" 2>/dev/null || true
-    fi
-    echo "    ygg-exit is now a symlink to x-node"
-fi
-
 log "Writing the exit configuration"
 # The day and month of the traffic counters change at local midnight. A wrong
 # name here would stop the daemon, so the value is checked before it is used.
@@ -1614,12 +1566,6 @@ Useful commands:
   $SCRIPT_DIR/uninstall.sh --help
 
 EOF
-
-if [ "$MIGRATED" -eq 1 ]; then
-    echo "The old ygg-exit service was replaced. Its state directory is kept as"
-    echo "$OLD_STATE_DIR.migrated; delete it once the new service works."
-    echo
-fi
 
 if [ "$WEB_ENABLED" -eq 1 ] && [ "$WEB_TLS" != "off" ]; then
     echo "The web interface uses a self-signed certificate, so the browser warns"

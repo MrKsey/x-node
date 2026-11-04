@@ -180,14 +180,6 @@ rm -rf /etc/x-node
 rm -rf /usr/local/share/doc/x-node
 rm -f /etc/nftables.d/x-node.nft
 rm -f /usr/local/bin/x-node /usr/local/bin/x-node-peerprobe
-# The installer leaves ygg-exit as a symlink to x-node for old scripts. A real
-# ygg-exit binary is not ours and is left alone.
-if [ -L /usr/local/bin/ygg-exit ]; then
-    rm -f /usr/local/bin/ygg-exit
-fi
-if [ -L /usr/local/bin/ygg-peerprobe ]; then
-    rm -f /usr/local/bin/ygg-peerprobe
-fi
 # The password cannot be recovered from web.json, and a reinstall generates a
 # new one, so the plaintext copy is not kept around.
 rm -f /root/x-node-credentials.txt

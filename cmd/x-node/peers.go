@@ -39,10 +39,29 @@ const (
 
 // adminPeer is one entry of the Yggdrasil admin "getPeers" response.
 type adminPeer struct {
-	URI     string        `json:"remote"`
-	Up      bool          `json:"up"`
-	Inbound bool          `json:"inbound"`
-	Latency time.Duration `json:"latency"`
+	URI       string        `json:"remote"`
+	Up        bool          `json:"up"`
+	Inbound   bool          `json:"inbound"`
+	Address   string        `json:"address"`
+	Key       string        `json:"key"`
+	Port      int           `json:"port"`
+	Priority  int           `json:"priority"`
+	Cost      int           `json:"cost"`
+	BytesRecv uint64        `json:"bytes_recvd"`
+	BytesSent uint64        `json:"bytes_sent"`
+	Uptime    float64       `json:"uptime"`
+	Latency   time.Duration `json:"latency"`
+}
+
+// adminSelf is the Yggdrasil admin "getSelf" response: the node identity and
+// the size of its routing table.
+type adminSelf struct {
+	BuildName      string `json:"build_name"`
+	BuildVersion   string `json:"build_version"`
+	Key            string `json:"key"`
+	Address        string `json:"address"`
+	RoutingEntries int    `json:"routing_entries"`
+	Subnet         string `json:"subnet"`
 }
 
 // peerNode is the part of the Yggdrasil admin API the supervisor needs. The
@@ -156,6 +175,14 @@ func (a adminSocket) Peers() ([]adminPeer, error) {
 		return nil, err
 	}
 	return response.Peers, nil
+}
+
+func (a adminSocket) Self() (adminSelf, error) {
+	var self adminSelf
+	if err := a.call("getSelf", map[string]any{}, &self); err != nil {
+		return adminSelf{}, err
+	}
+	return self, nil
 }
 
 func (a adminSocket) AddPeer(uri string) error {
@@ -353,6 +380,16 @@ func (s *peerSupervisor) step(ctx context.Context) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Peers already configured in yggdrasil.conf are part of the node too. The
+	// installer writes the probed list to both files, and an operator may add a
+	// peer by hand; adopting them first keeps the total at peerCount instead of
+	// letting the configured and the managed lists stack up.
+	s.adoptLocked(outbound)
+	// A peer that is configured but absent from the admin response is missing
+	// from the running node (for example after a Yggdrasil restart, which drops
+	// runtime peers). Put it back instead of waiting for the dead-peer timer.
+	s.restoreMissingLocked(outbound, now)
+
 	for _, uri := range s.managed {
 		if state, ok := outbound[peerKeyOfURI(uri)]; ok && state.Up {
 			delete(s.deadSince, uri)
@@ -375,6 +412,51 @@ func (s *peerSupervisor) step(ctx context.Context) {
 		s.improveLocked(outbound, now, settings)
 	}
 	s.saveLocked()
+}
+
+// adoptLocked adds every outbound peer that is not in the managed list yet.
+// The URI from the seed list is preferred: it may carry a ?key= that the admin
+// response drops, and the supervisor must be able to re-add the peer later.
+func (s *peerSupervisor) adoptLocked(outbound map[string]adminPeer) {
+	known := make(map[string]bool, len(s.managed))
+	for _, uri := range s.managed {
+		known[peerKeyOfURI(uri)] = true
+	}
+	seeded := make(map[string]string, len(s.seed))
+	for _, uri := range s.seed {
+		seeded[peerKeyOfURI(uri)] = uri
+	}
+	for key, peer := range outbound {
+		if known[key] {
+			continue
+		}
+		uri := peer.URI
+		if fromSeed, ok := seeded[key]; ok {
+			uri = fromSeed
+		}
+		s.managed = append(s.managed, uri)
+		known[key] = true
+		s.changed = true
+		s.log.info("peer %s adopted from the Yggdrasil configuration", uri)
+	}
+}
+
+// restoreMissingLocked re-adds managed peers that are not configured in the
+// running Yggdrasil process. This is what brings the list back after a
+// Yggdrasil restart, because peers added through the admin socket live only in
+// memory.
+func (s *peerSupervisor) restoreMissingLocked(outbound map[string]adminPeer, now time.Time) {
+	for _, uri := range s.managed {
+		if _, ok := outbound[peerKeyOfURI(uri)]; ok {
+			continue
+		}
+		if err := s.node.AddPeer(uri); err != nil {
+			s.warn("could not restore %s: %v", uri, err)
+			continue
+		}
+		s.addedAt[uri] = now
+		s.log.info("peer %s restored in the running Yggdrasil node", uri)
+	}
 }
 
 // reloadConfig applies peer settings when the file changed. Only the peer
