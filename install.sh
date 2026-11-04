@@ -1216,24 +1216,17 @@ chown -R "$SERVICE_USER:$SERVICE_USER" "$STATE_DIR"
 install -d -m 0750 -o root -g "$SERVICE_USER" /etc/x-node
 
 # The dashboard can restart the two services and write the configuration files.
-# Both need root, so instead of running the daemon as root the installer grants
-# sudo for exactly one command: "x-node helper". The helper reads a JSON
-# request from stdin and accepts a fixed set of actions.
-if [ "$WEB_ENABLED" -eq 1 ]; then
-    log "Granting the web interface the root helper"
-    cat > /etc/sudoers.d/x-node-web <<EOF
-# X-Node web interface: restart the services and apply configuration files
-# through the helper, which validates every request. Arguments are matched
-# exactly, so no other x-node command can be run with this rule.
-$SERVICE_USER ALL=(root) NOPASSWD: /usr/local/bin/x-node helper
-EOF
-    chmod 0440 /etc/sudoers.d/x-node-web
-    if command -v visudo >/dev/null 2>&1 && ! visudo -cf /etc/sudoers.d/x-node-web >/dev/null; then
-        rm -f /etc/sudoers.d/x-node-web
-        warn "sudo rejected the web helper rule; restart and config buttons stay disabled"
-    fi
-else
-    rm -f /etc/sudoers.d/x-node-web
+# Both need root, so instead of running the daemon as root the installer starts
+# a separate root service, "x-node helper serve", which listens on a unix socket
+# the service user can open. A sudoers rule would be shorter, but the daemon
+# runs with NoNewPrivileges=yes and sudo refuses to escalate in that case.
+# The service itself is installed together with the other systemd units below.
+# Older releases granted the helper through sudo, which the hardened daemon
+# cannot use; the rule is removed on upgrade.
+rm -f /etc/sudoers.d/x-node-web
+if [ "$WEB_ENABLED" -ne 1 ]; then
+    systemctl disable --now x-node-helper >/dev/null 2>&1 || true
+    rm -f /run/x-node/helper.sock
 fi
 
 log "Writing the exit configuration"
@@ -1489,11 +1482,28 @@ fi
 
 log "Installing systemd units"
 install -m 0644 "$SCRIPT_DIR/deploy/systemd/x-node.service" /etc/systemd/system/x-node.service
+install -m 0644 "$SCRIPT_DIR/deploy/systemd/x-node-helper.service" \
+    /etc/systemd/system/x-node-helper.service
 if [ -f "$SCRIPT_DIR/README.md" ]; then
     install -d -m 0755 /usr/local/share/doc/x-node
     install -m 0644 "$SCRIPT_DIR/README.md" /usr/local/share/doc/x-node/README.md
 fi
 systemctl daemon-reload
+
+# The helper serves the restart and configuration buttons of the dashboard. It
+# is useless without the web interface, so it follows WEB_ENABLED.
+if [ "$WEB_ENABLED" -eq 1 ]; then
+    log "Starting the root helper"
+    if ! systemctl enable x-node-helper >/dev/null 2>&1; then
+        warn "could not enable x-node-helper; restart and config buttons stay disabled"
+    fi
+    if ! systemctl restart x-node-helper; then
+        journalctl -u x-node-helper -n 20 --no-pager 2>/dev/null || true
+        warn "x-node-helper did not start; restart and config buttons stay disabled"
+    fi
+else
+    systemctl disable --now x-node-helper >/dev/null 2>&1 || true
+fi
 
 log "Starting x-node"
 # enable --now starts a stopped service but leaves a running one alone, so an

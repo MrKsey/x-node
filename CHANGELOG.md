@@ -4,6 +4,17 @@ All notable changes to X-Node are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.6.1] — 2026-11-04
+
+### Fixed
+
+- The dashboard's restart and configuration buttons did not work: the daemon
+  runs with `NoNewPrivileges=yes`, so the `sudo` rule installed for
+  `x-node helper` was refused. The helper is now a separate root service,
+  `x-node-helper.service`, on a unix socket that only the `x-node` group can
+  open. The installer starts it when the web interface is enabled and the
+  uninstaller removes it.
+
 ## [1.6.0] — 2026-11-04
 
 ### Added
@@ -22,8 +33,8 @@ All notable changes to X-Node are documented here. The format is based on
 - The Settings page can change the node name, the admin password, the public web
   URL, the configuration files and the manual Yggdrasil peers.
 - The dashboard can restart `x-node` and `yggdrasil` and edit
-  `config.json`/`yggdrasil.conf`, through a narrow sudoers rule and the new
-  internal `x-node helper` command. Every write is validated and backed up.
+  `config.json`/`yggdrasil.conf`, through the new internal `x-node helper`
+  command. Every write is validated and backed up.
 - Manual peers (`manualPeers`) are pinned: the supervisor keeps them on top of
   the automatic count and never replaces or trims them.
 - The dashboard shows the node's own `wss://…/ygg?key=…` (or `tls://…`) peering
@@ -118,6 +129,7 @@ First public release: SOCKS5 over Yggdrasil with TCP and UDP, IPv6 modes and
 Happy Eyeballs, invites and the allowlist, traffic accounting and quotas, the
 web interface, peer supervision, `x-node doctor` and the installer.
 
+[1.6.1]: https://github.com/MrKsey/x-node/releases/tag/v1.6.1
 [1.6.0]: https://github.com/MrKsey/x-node/releases/tag/v1.6.0
 [1.5.2]: https://github.com/MrKsey/x-node/releases/tag/v1.5.2
 [1.5.1]: https://github.com/MrKsey/x-node/releases/tag/v1.5.1

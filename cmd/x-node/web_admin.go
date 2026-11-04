@@ -1,13 +1,13 @@
 package main
 
 import (
-	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 )
@@ -15,30 +15,47 @@ import (
 // web_admin.go contains the actions that need more than the service user can
 // do on its own: changing the password, writing a configuration file and
 // restarting a systemd unit. The first is a plain file write in the state
-// directory; the other two go through "x-node helper" and the single sudoers
-// rule the installer adds.
+// directory; the other two go through "x-node helper", which runs as a separate
+// root service.
 
-// runHelper sends one JSON request to the root helper and returns its output.
+// runHelper sends one JSON request to the root helper service and returns its
+// output. The helper listens on a unix socket that belongs to root:x-node, so
+// the daemon needs no root of its own.
 func runHelper(request helperRequest) (string, error) {
 	payload, err := json.Marshal(request)
 	if err != nil {
 		return "", err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "sudo", "-n", helperBinaryPath, "helper")
-	cmd.Stdin = bytes.NewReader(payload)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		message := strings.TrimSpace(stderr.String())
-		if message == "" {
-			message = err.Error()
-		}
-		return "", errors.New(message)
+	conn, err := net.DialTimeout("unix", helperSocketPath, 5*time.Second)
+	if err != nil {
+		return "", fmt.Errorf("the root helper is not running: %w", err)
 	}
-	return strings.TrimSpace(stdout.String()), nil
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(60 * time.Second))
+	if _, err := conn.Write(payload); err != nil {
+		return "", err
+	}
+	if unixConn, ok := conn.(*net.UnixConn); ok {
+		_ = unixConn.CloseWrite()
+	}
+	raw, err := io.ReadAll(io.LimitReader(conn, 1<<20))
+	if err != nil {
+		return "", err
+	}
+	var response struct {
+		OK    bool   `json:"ok"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(raw, &response); err != nil {
+		return "", fmt.Errorf("the root helper returned an unreadable answer: %w", err)
+	}
+	if !response.OK {
+		if response.Error == "" {
+			response.Error = "the root helper refused the request"
+		}
+		return "", errors.New(response.Error)
+	}
+	return strings.TrimSpace(string(raw)), nil
 }
 
 type passwordRequest struct {

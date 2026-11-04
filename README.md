@@ -61,9 +61,10 @@ details are stored in `/root/x-node-credentials.txt`.
 
 The installer detects the external address and writes it to `web.publicURL`, so
 `x-node web url` and the dashboard show a link that works from any browser. When
-the web interface is enabled it also installs a narrow sudoers rule for
-`x-node helper`: that is what lets the browser restart the services and apply
-edited configuration files without giving the web process full root access.
+the web interface is enabled it also installs and starts `x-node-helper.service`:
+a small root service on a unix socket that lets the browser restart the services
+and apply edited configuration files without giving the web process full root
+access. The daemon itself keeps `NoNewPrivileges=yes`.
 
 If you prefer the archive, download `x-node-<version>-linux-amd64.tar.gz` from
 the [releases](https://github.com/MrKsey/x-node/releases), unpack it and run
@@ -318,10 +319,11 @@ between quota and connection refusals, and `x-node quota show` shows the limits.
 **The browser complains about the certificate.** That is expected with a
 self-signed certificate; the section above explains how to install a real one.
 
-**Restart or save is disabled in the web interface.** The installer adds the
-sudoers rule for `x-node helper` only when the web interface is enabled. Rerun
-the installer with `--web` to add it; until then use `sudo systemctl restart
-x-node` and edit the files from the shell.
+**Restart or save is disabled in the web interface.** Those buttons need
+`x-node-helper.service`, which the installer starts only when the web interface
+is enabled. Rerun the installer with `--web`, or start it by hand:
+`sudo systemctl enable --now x-node-helper`. Until then use
+`sudo systemctl restart x-node` and edit the files from the shell.
 
 ## Development
 

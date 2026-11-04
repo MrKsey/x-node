@@ -153,7 +153,9 @@ fi
 
 log "Stopping x-node"
 systemctl disable --now x-node-firewall 2>/dev/null || true
+systemctl disable --now x-node-helper 2>/dev/null || true
 systemctl disable --now x-node 2>/dev/null || true
+rm -f /run/x-node/helper.sock
 
 if command -v nft >/dev/null 2>&1; then
     nft delete table inet x-node 2>/dev/null || true
@@ -161,6 +163,7 @@ fi
 
 log "Removing the systemd units"
 rm -f /etc/systemd/system/x-node.service \
+      /etc/systemd/system/x-node-helper.service \
       /etc/systemd/system/x-node-firewall.service
 systemctl daemon-reload 2>/dev/null || true
 
@@ -179,6 +182,8 @@ log "Removing the configuration and the binaries"
 rm -rf /etc/x-node
 rm -rf /usr/local/share/doc/x-node
 rm -f /etc/nftables.d/x-node.nft
+# Left behind by versions before 1.6.1, which used a sudoers rule for the
+# dashboard actions; the helper is a service now.
 rm -f /etc/sudoers.d/x-node-web
 rm -f /usr/local/bin/x-node /usr/local/bin/x-node-peerprobe
 # The password cannot be recovered from web.json, and a reinstall generates a

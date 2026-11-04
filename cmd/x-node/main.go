@@ -96,8 +96,9 @@ func run(command string, args []string) error {
 	case "version":
 		return cmdVersion(args)
 	case "helper":
-		// Internal entry point for the web interface, allowed through a
-		// single sudoers rule. It is not listed in the command overview.
+		// Internal entry point for the web interface. The installer runs
+		// "x-node helper serve" as a separate root service; it is not listed
+		// in the command overview.
 		return cmdHelper(args)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command %q\n\n", command)

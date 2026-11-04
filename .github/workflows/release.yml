@@ -101,6 +101,7 @@ jobs:
             printf '%s\n' "$listing" | grep -qx '.*/install.sh'
             printf '%s\n' "$listing" | grep -qx '.*/bin/x-node'
             printf '%s\n' "$listing" | grep -qx '.*/deploy/systemd/x-node.service'
+            echo "$listing" | grep -qx '.*/deploy/systemd/x-node-helper.service'
           done
 
       - name: publish
