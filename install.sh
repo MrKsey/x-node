@@ -400,8 +400,6 @@ while [ "$#" -gt 0 ]; do
         --web-user)       need_value "$@"; WEB_USER="$2"; shift 2 ;;
         --web-password)   need_value "$@"; WEB_PASSWORD="$2"; WEB_PASSWORD_SET=1; shift 2 ;;
         --upgrade)        UPGRADE=1; shift ;;
-        --no-migrate)     MIGRATE=0; shift ;;
-        --migrate)        MIGRATE=1; shift ;;
         --uninstall)      UNINSTALL=1; shift ;;
         --ygg-version)    need_value "$@"; YGG_VERSION="$2"; shift 2 ;;
         --ygg-deb)        need_value "$@"; YGG_DEB="$2"; shift 2 ;;
