@@ -8,6 +8,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -317,6 +318,16 @@ func (w *webServer) serveAPI(rw http.ResponseWriter, r *http.Request, route stri
 		w.handleSettingsGet(rw, r)
 	case route == "settings" && r.Method == http.MethodPut:
 		w.handleSettingsPut(rw, r)
+	case route == "password" && r.Method == http.MethodPost:
+		w.handlePassword(rw, r)
+	case route == "restart" && r.Method == http.MethodPost:
+		w.handleRestart(rw, r)
+	case route == "config" && r.Method == http.MethodGet:
+		w.handleConfigGet(rw, r)
+	case route == "config" && r.Method == http.MethodPut:
+		w.handleConfigPut(rw, r)
+	case route == "peers/manual" && r.Method == http.MethodPost:
+		w.handleManualPeers(rw, r)
 	case route == "peers" && r.Method == http.MethodGet:
 		w.handlePeers(rw, r)
 	case route == "traffic" && r.Method == http.MethodGet:
@@ -472,52 +483,83 @@ func (w *webServer) handleLogout(rw http.ResponseWriter, r *http.Request) {
 /* ---------- status ---------- */
 
 type webStatus struct {
-	Name              string   `json:"name"`
-	Version           string   `json:"version"`
-	Address           string   `json:"address"`
-	UptimeSeconds     int64    `json:"uptimeSeconds"`
-	SocksPort         int      `json:"socksPort"`
-	APIPort           int      `json:"apiPort"`
-	AllowAll          bool     `json:"allowAll"`
-	Registration      bool     `json:"registration"`
-	UDPEnabled        bool     `json:"udpEnabled"`
-	IPv6Mode          string   `json:"ipv6Mode"`
-	IPv6Available     bool     `json:"ipv6Available"`
-	IPv6Detail        string   `json:"ipv6Detail"`
-	WebPath           string   `json:"webPath"`
-	WebURLs           []string `json:"webURLs"`
-	PendingRestart    bool     `json:"pendingRestart"`
-	Clients           int      `json:"clients"`
-	ActiveConnections int      `json:"activeConnections"`
-	ActiveUDP         int      `json:"activeUdp"`
-	TodayRx           uint64   `json:"todayRx"`
-	TodayTx           uint64   `json:"todayTx"`
-	MonthRx           uint64   `json:"monthRx"`
-	MonthTx           uint64   `json:"monthTx"`
-	TotalRx           uint64   `json:"totalRx"`
-	TotalTx           uint64   `json:"totalTx"`
-	PeersUp           int      `json:"peersUp"`
-	PeersManaged      int      `json:"peersManaged"`
-	PeersInbound      int      `json:"peersInbound"`
+	Name              string        `json:"name"`
+	Version           string        `json:"version"`
+	Address           string        `json:"address"`
+	UptimeSeconds     int64         `json:"uptimeSeconds"`
+	SocksPort         int           `json:"socksPort"`
+	APIPort           int           `json:"apiPort"`
+	APIAuth           string        `json:"apiAuth"`
+	AllowAll          bool          `json:"allowAll"`
+	Registration      bool          `json:"registration"`
+	UDPEnabled        bool          `json:"udpEnabled"`
+	MaxUDPAssoc       int           `json:"maxUdpAssociations"`
+	IPv6Mode          string        `json:"ipv6Mode"`
+	IPv6Available     bool          `json:"ipv6Available"`
+	IPv6Detail        string        `json:"ipv6Detail"`
+	DomainResolution  bool          `json:"domainResolution"`
+	WebPath           string        `json:"webPath"`
+	WebURLs           []string      `json:"webURLs"`
+	WebLogin          string        `json:"webLogin"`
+	PendingRestart    bool          `json:"pendingRestart"`
+	RestartSupported  bool          `json:"restartSupported"`
+	Clients           int           `json:"clients"`
+	MaxClients        int           `json:"maxClients"`
+	MaxConnsPerClient int           `json:"maxConnsPerClient"`
+	MaxConnsTotal     int           `json:"maxConnsTotal"`
+	ActiveConnections int           `json:"activeConnections"`
+	ActiveUDP         int           `json:"activeUdp"`
+	TodayRx           uint64        `json:"todayRx"`
+	TodayTx           uint64        `json:"todayTx"`
+	MonthRx           uint64        `json:"monthRx"`
+	MonthTx           uint64        `json:"monthTx"`
+	TotalRx           uint64        `json:"totalRx"`
+	TotalTx           uint64        `json:"totalTx"`
+	PeersUp           int           `json:"peersUp"`
+	PeersManaged      int           `json:"peersManaged"`
+	PeersManual       int           `json:"peersManual"`
+	PeersInbound      int           `json:"peersInbound"`
+	PeerURI           string        `json:"peerURI"`
+	Quotas            QuotaDefaults `json:"quotas"`
+	UsageEnabled      bool          `json:"usageEnabled"`
+	UsageTimezone     string        `json:"usageTimezone"`
+	LogLevel          string        `json:"logLevel"`
+	StateDir          string        `json:"stateDir"`
+	ConfigPath        string        `json:"configPath"`
 }
 
 func (w *webServer) handleStatus(rw http.ResponseWriter, r *http.Request) {
 	cfg := w.live.get()
 	status := webStatus{
-		Name:           cfg.Name,
-		Version:        daemonVersion,
-		Address:        cfg.ListenAddress,
-		UptimeSeconds:  int64(time.Since(w.startedAt).Seconds()),
-		SocksPort:      cfg.SocksPort,
-		APIPort:        cfg.apiPort(),
-		AllowAll:       cfg.AllowAll,
-		Registration:   cfg.Registration,
-		UDPEnabled:     cfg.UDPEnabled,
-		IPv6Mode:       cfg.ipv6Mode(),
-		WebPath:        cfg.Web.Path,
-		WebURLs:        webURLs(cfg),
-		PendingRestart: pendingSettings(cfg, w.configPath),
-		Clients:        len(w.store.List()),
+		Name:              cfg.Name,
+		Version:           daemonVersion,
+		Address:           cfg.ListenAddress,
+		UptimeSeconds:     int64(time.Since(w.startedAt).Seconds()),
+		SocksPort:         cfg.SocksPort,
+		APIPort:           cfg.apiPort(),
+		APIAuth:           cfg.apiAuthMode(),
+		AllowAll:          cfg.AllowAll,
+		Registration:      cfg.Registration,
+		UDPEnabled:        cfg.UDPEnabled,
+		MaxUDPAssoc:       cfg.MaxUDPAssociations,
+		IPv6Mode:          cfg.ipv6Mode(),
+		DomainResolution:  cfg.DomainResolution,
+		WebPath:           cfg.Web.Path,
+		WebURLs:           webURLs(cfg),
+		WebLogin:          currentWebUser(w.credsPath),
+		PendingRestart:    pendingSettings(cfg, w.configPath),
+		RestartSupported:  requestHelperInstalled(),
+		Clients:           len(w.store.List()),
+		MaxClients:        cfg.MaxClients,
+		MaxConnsPerClient: cfg.MaxConnsPerClient,
+		MaxConnsTotal:     cfg.MaxConnsTotal,
+		PeerURI:           cfg.PeerURI,
+		Quotas:            cfg.Quotas,
+		UsageEnabled:      cfg.Usage.Enabled,
+		UsageTimezone:     cfg.Usage.Timezone,
+		LogLevel:          cfg.LogLevel,
+		StateDir:          cfg.StateDir,
+		ConfigPath:        w.configPath,
 	}
 	if w.family != nil {
 		status.IPv6Available, status.IPv6Detail = w.family.status()
@@ -534,8 +576,9 @@ func (w *webServer) handleStatus(rw http.ResponseWriter, r *http.Request) {
 		status.TotalRx += row.Rx
 		status.TotalTx += row.Tx
 	}
-	managed, up, inbound := peerSummary(cfg)
+	managed, manual, up, inbound := peerSummary(cfg)
 	status.PeersManaged = managed
+	status.PeersManual = manual
 	status.PeersUp = up
 	status.PeersInbound = inbound
 	writeJSON(rw, http.StatusOK, status)
@@ -544,20 +587,26 @@ func (w *webServer) handleStatus(rw http.ResponseWriter, r *http.Request) {
 // peerSummary reads the managed peer list and asks the admin socket which of
 // them are up. A failure to reach the socket is not an error for the dashboard.
 // Inbound links are clients of the exit node, not public peers, so they are
-// counted separately and never mixed into the managed total.
-func peerSummary(cfg Config) (managed int, up int, inbound int) {
+// counted separately and never mixed into the managed total. Manual peers are
+// counted on their own: they are extra links the supervisor never trims.
+func peerSummary(cfg Config) (managed int, manual int, up int, inbound int) {
 	list := cleanPeerList(cfg.Peers)
 	if state, err := readPeersState(cfg.statePath(peersStateFile)); err == nil && len(state.Managed) > 0 {
 		list = cleanPeerList(state.Managed)
 	}
 	managed = len(list)
-	wanted := make(map[string]bool, len(list))
+	manualList := cleanPeerList(cfg.ManualPeers)
+	manual = len(manualList)
+	wanted := make(map[string]bool, len(list)+len(manualList))
 	for _, uri := range list {
+		wanted[peerKeyOfURI(uri)] = true
+	}
+	for _, uri := range manualList {
 		wanted[peerKeyOfURI(uri)] = true
 	}
 	live, err := newAdminSocket(cfg.AdminSocket, 2*time.Second).Peers()
 	if err != nil {
-		return managed, 0, 0
+		return managed, manual, 0, 0
 	}
 	for _, peer := range live {
 		if peer.Inbound {
@@ -568,7 +617,7 @@ func peerSummary(cfg Config) (managed int, up int, inbound int) {
 			up++
 		}
 	}
-	return managed, up, inbound
+	return managed, manual, up, inbound
 }
 
 /* ---------- clients ---------- */
@@ -583,7 +632,15 @@ type webClient struct {
 	Connections     int        `json:"connections"`
 	UDPAssociations int        `json:"udpAssociations"`
 	Refused         int        `json:"refused"`
+	QuotaRefused    int        `json:"quotaRefused"`
 	HasToken        bool       `json:"hasToken"`
+	DeviceName      string     `json:"deviceName,omitempty"`
+	AppVersion      string     `json:"appVersion,omitempty"`
+	UDPDatagramsIn  uint64     `json:"udpDatagramsIn"`
+	UDPDatagramsOut uint64     `json:"udpDatagramsOut"`
+	UDPBytesIn      uint64     `json:"udpBytesIn"`
+	UDPBytesOut     uint64     `json:"udpBytesOut"`
+	Destinations    []string   `json:"destinations,omitempty"`
 	DayUsed         uint64     `json:"dayUsed"`
 	MonthUsed       uint64     `json:"monthUsed"`
 	Quota           quotaState `json:"quota"`
@@ -607,11 +664,19 @@ func (w *webServer) handleClients(rw http.ResponseWriter, r *http.Request) {
 			Connections:     row.Connections,
 			UDPAssociations: row.UDPAssociations,
 			Refused:         row.Refused,
+			QuotaRefused:    row.QuotaRefused,
+			UDPDatagramsIn:  row.UDPDatagramsIn,
+			UDPDatagramsOut: row.UDPDatagramsOut,
+			UDPBytesIn:      row.UDPBytesIn,
+			UDPBytesOut:     row.UDPBytesOut,
+			Destinations:    row.Destinations,
 			DayUsed:         day,
 			MonthUsed:       month,
 		}
 		if stored, ok := w.store.Get(ip); ok {
 			client.HasToken = stored.TokenHash != ""
+			client.DeviceName = stored.DeviceName
+			client.AppVersion = stored.AppVersion
 		}
 		if ip != nil {
 			client.Quota = buildQuotaState(w.quotas, w.usage, ip)
@@ -714,9 +779,44 @@ type inviteRequest struct {
 	TTL  string `json:"ttl"`
 }
 
+// webInvite is one invite as the dashboard shows it. The token is stored next
+// to its hash, so the link and the QR code can be shown again; the state
+// directory is readable only by the service user and root.
+type webInvite struct {
+	Hash      string    `json:"hash"`
+	Note      string    `json:"note"`
+	CreatedAt time.Time `json:"createdAt"`
+	ExpiresAt time.Time `json:"expiresAt"`
+	Uses      int       `json:"uses"`
+	Used      int       `json:"used"`
+	Token     string    `json:"token,omitempty"`
+	Link      string    `json:"link,omitempty"`
+	QR        string    `json:"qr,omitempty"`
+}
+
 func (w *webServer) handleInvites(rw http.ResponseWriter, r *http.Request) {
+	cfg := w.live.get()
 	invites := w.store.ListInvites()
-	writeJSON(rw, http.StatusOK, map[string]any{"ok": true, "invites": invites})
+	out := make([]webInvite, 0, len(invites))
+	for _, invite := range invites {
+		row := webInvite{
+			Hash:      invite.Hash,
+			Note:      invite.Note,
+			CreatedAt: invite.CreatedAt,
+			ExpiresAt: invite.ExpiresAt,
+			Uses:      invite.Uses,
+			Used:      invite.Used,
+			Token:     invite.Token,
+		}
+		if invite.Token != "" {
+			row.Link = exitLink(cfg, invite.Token)
+			if png, err := qrPNG(row.Link, 320); err == nil {
+				row.QR = "data:image/png;base64," + base64.StdEncoding.EncodeToString(png)
+			}
+		}
+		out = append(out, row)
+	}
+	writeJSON(rw, http.StatusOK, map[string]any{"ok": true, "invites": out})
 }
 
 func (w *webServer) handleInviteCreate(rw http.ResponseWriter, r *http.Request) {
@@ -752,10 +852,16 @@ func (w *webServer) handleInviteCreate(rw http.ResponseWriter, r *http.Request) 
 		return
 	}
 	w.log.info("web: invite created (%d use(s), expires %s)", invite.Uses, invite.ExpiresAt.Format(time.RFC3339))
+	link := exitLink(cfg, token)
+	qr := ""
+	if png, err := qrPNG(link, 320); err == nil {
+		qr = "data:image/png;base64," + base64.StdEncoding.EncodeToString(png)
+	}
 	writeJSON(rw, http.StatusOK, map[string]any{
 		"ok":        true,
 		"invite":    token,
-		"link":      exitLink(cfg, token),
+		"link":      link,
+		"qr":        qr,
 		"expiresAt": invite.ExpiresAt,
 		"uses":      invite.Uses,
 		"note":      invite.Note,
@@ -898,6 +1004,7 @@ func (w *webServer) handleSettingsGet(rw http.ResponseWriter, r *http.Request) {
 // settingsPatch uses pointers so a field that is absent from the request keeps
 // its current value. The web interface sends only the fields it shows.
 type settingsPatch struct {
+	Name               *string        `json:"name"`
 	AllowAll           *bool          `json:"allowAll"`
 	Registration       *bool          `json:"registration"`
 	InviteTTL          *string        `json:"inviteTTL"`
@@ -923,6 +1030,7 @@ type settingsPatch struct {
 
 type webPatch struct {
 	Path            *string `json:"path"`
+	PublicURL       *string `json:"publicURL"`
 	SessionTTL      *string `json:"sessionTTL"`
 	MaxFailedLogins *int    `json:"maxFailedLogins"`
 	Lockout         *string `json:"lockout"`
@@ -940,6 +1048,13 @@ func (w *webServer) handleSettingsPut(rw http.ResponseWriter, r *http.Request) {
 	}
 
 	next := before
+	if patch.Name != nil {
+		next.Name = strings.TrimSpace(*patch.Name)
+		if next.Name == "" {
+			writeJSON(rw, http.StatusBadRequest, errorResponse{Error: "bad_name", Message: "The node name must not be empty"})
+			return
+		}
+	}
 	if patch.AllowAll != nil {
 		next.AllowAll = *patch.AllowAll
 	}
@@ -1004,6 +1119,9 @@ func (w *webServer) handleSettingsPut(rw http.ResponseWriter, r *http.Request) {
 		if patch.Web.Path != nil {
 			next.Web.Path = normalizeWebPath(*patch.Web.Path)
 		}
+		if patch.Web.PublicURL != nil {
+			next.Web.PublicURL = strings.TrimSpace(*patch.Web.PublicURL)
+		}
 		if patch.Web.SessionTTL != nil {
 			next.Web.SessionTTL = strings.TrimSpace(*patch.Web.SessionTTL)
 		}
@@ -1052,6 +1170,7 @@ type webPeer struct {
 	Up            bool    `json:"up"`
 	Inbound       bool    `json:"inbound"`
 	Managed       bool    `json:"managed"`
+	Manual        bool    `json:"manual"`
 	Address       string  `json:"address"`
 	Key           string  `json:"key"`
 	Port          int     `json:"port"`
@@ -1073,6 +1192,8 @@ func (w *webServer) handlePeers(rw http.ResponseWriter, r *http.Request) {
 	for _, uri := range list {
 		wanted[peerKeyOfURI(uri)] = true
 	}
+	manualList := cleanPeerList(cfg.ManualPeers)
+	manualKeys := peerKeySet(manualList)
 	socket := newAdminSocket(cfg.AdminSocket, 3*time.Second)
 	live, err := socket.Peers()
 	self, selfErr := socket.Self()
@@ -1084,6 +1205,7 @@ func (w *webServer) handlePeers(rw http.ResponseWriter, r *http.Request) {
 			Up:            peer.Up,
 			Inbound:       peer.Inbound,
 			Managed:       wanted[peerKeyOfURI(peer.URI)],
+			Manual:        manualKeys[peerKeyOfURI(peer.URI)],
 			Address:       peer.Address,
 			Key:           peer.Key,
 			Port:          peer.Port,
@@ -1118,6 +1240,7 @@ func (w *webServer) handlePeers(rw http.ResponseWriter, r *http.Request) {
 		"peerCount":      cfg.PeerCount,
 		"autoReplace":    cfg.PeerAutoReplace,
 		"managed":        len(list),
+		"manualPeers":    manualList,
 		"up":             up,
 		"inbound":        inbound,
 		"peers":          rows,

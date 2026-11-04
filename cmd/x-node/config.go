@@ -66,6 +66,12 @@ type Config struct {
 	// Inbound peers (the clients of the exit node) are never part of it.
 	Peers []string `json:"peers,omitempty"`
 
+	// ManualPeers are links the operator added by hand. They are kept
+	// connected on top of [PeerCount], are never replaced or trimmed by the
+	// supervisor and are removed only from the web interface or by editing
+	// this list. Use it for a private peer that must stay pinned.
+	ManualPeers []string `json:"manualPeers,omitempty"`
+
 	// PeerCount is how many public peers the node keeps connected. The number
 	// counts outbound links only: clients that dial the exit node are extra and
 	// are never dropped or replaced by the supervisor.
@@ -144,6 +150,11 @@ type WebConfig struct {
 	// Path is the URL prefix, e.g. /a1b2c3d4e5f6g7h8/web. It is not a secret
 	// on its own: the login page protects the interface.
 	Path string `json:"path"`
+	// PublicURL is the address a browser should open, when the interface is
+	// reachable through a reverse proxy or a public name. webURLs prints it
+	// first, so "x-node web url" and the dashboard show the real address
+	// instead of 127.0.0.1:8443. Empty means "derive it from the listener".
+	PublicURL string `json:"publicURL,omitempty"`
 	// TLS selects the transport:
 	//   "auto" — HTTPS when a certificate is configured or can be created,
 	//            plain HTTP otherwise (the default, behind nginx)
@@ -283,6 +294,38 @@ func defaultConfig() Config {
 			Timezone: "UTC",
 		},
 	}
+}
+
+// loadEffectiveConfig reads the file configuration and applies the overlay
+// written by the web interface. The daemon and the peer supervisor use it, so a
+// setting changed in the dashboard applies without root and without a restart.
+func loadEffectiveConfig(path string) (Config, error) {
+	cfg, err := loadConfig(path)
+	if err != nil {
+		return cfg, err
+	}
+	return loadSettingsOverlay(cfg)
+}
+
+// configStamp identifies the base file and the overlay, so the supervisor
+// notices a change in either of them.
+func configStamp(path string) string {
+	overlay := ""
+	if cfg, err := loadConfig(path); err == nil {
+		overlay = cfg.statePath(settingsFileName)
+	}
+	return fileStampString(path) + "|" + fileStampString(overlay)
+}
+
+func fileStampString(path string) string {
+	if path == "" {
+		return ""
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return ""
+	}
+	return fmt.Sprintf("%d:%d", info.ModTime().UnixNano(), info.Size())
 }
 
 // configPath resolves the -config flag, the environment and the default path.
@@ -480,6 +523,11 @@ func (c *Config) validate() error {
 			return err
 		}
 	}
+	for _, raw := range c.ManualPeers {
+		if err := validatePeerURI(raw); err != nil {
+			return fmt.Errorf("manualPeers: %w", err)
+		}
+	}
 	switch strings.ToLower(strings.TrimSpace(c.IPv6)) {
 	case ipv6Auto, ipv6Prefer, ipv6Off:
 	default:
@@ -498,6 +546,12 @@ func (c *Config) validate() error {
 	}
 	if !validWebPath(c.Web.Path) {
 		return fmt.Errorf("web.path %q must be a URL path such as /<random>/web", c.Web.Path)
+	}
+	if raw := strings.TrimSpace(c.Web.PublicURL); raw != "" {
+		u, err := url.Parse(raw)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return fmt.Errorf("web.publicURL %q must be an http:// or https:// URL", c.Web.PublicURL)
+		}
 	}
 	switch strings.ToLower(strings.TrimSpace(c.Web.TLS)) {
 	case webTLSAuto, webTLSSelf, webTLSOff:

@@ -183,6 +183,7 @@ func (w *webServer) handleTraffic(rw http.ResponseWriter, r *http.Request) {
 		"range":        strconv.FormatInt(int64(window/time.Second), 10) + "s",
 		"interval":     strconv.FormatInt(int64(trafficBucket(window)/time.Second), 10) + "s",
 		"points":       points,
+		"generatedAt":  time.Now(),
 		"sampledEvery": strconv.FormatInt(int64(trafficSampleInterval/time.Second), 10) + "s",
 	})
 }

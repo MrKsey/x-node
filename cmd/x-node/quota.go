@@ -42,6 +42,17 @@ type quotaStore struct {
 	quotas   map[string]Quota
 	defaults QuotaDefaults
 	log      *logger
+	// limiters holds one shared token bucket pair per client. A speed limit is
+	// a property of the client, not of one TCP connection: with a per-connection
+	// shaper ten parallel downloads would each get the full rate.
+	limiters map[string]*clientLimiters
+}
+
+// clientLimiters is the upload and download bucket of one address. Both are
+// always non-nil so a quota change can update them in place.
+type clientLimiters struct {
+	up   *shaper
+	down *shaper
 }
 
 func openQuotas(cfg Config, log *logger) (*quotaStore, error) {
@@ -50,6 +61,7 @@ func openQuotas(cfg Config, log *logger) (*quotaStore, error) {
 		quotas:   make(map[string]Quota),
 		defaults: cfg.Quotas,
 		log:      log,
+		limiters: make(map[string]*clientLimiters),
 	}
 	raw, err := os.ReadFile(store.path)
 	if err != nil {
@@ -79,19 +91,9 @@ func (q *quotaStore) Get(ip net.IP) Quota {
 	if ip == nil {
 		return Quota{}
 	}
-	address := ip.String()
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	if quota, ok := q.quotas[address]; ok {
-		return quota
-	}
-	return Quota{
-		Address:      address,
-		MonthlyBytes: q.defaults.MonthlyBytes,
-		DailyBytes:   q.defaults.DailyBytes,
-		DownKbps:     q.defaults.DownKbps,
-		UpKbps:       q.defaults.UpKbps,
-	}
+	return q.effectiveQuotaLocked(ip.String())
 }
 
 // Set stores an explicit quota.
@@ -106,6 +108,7 @@ func (q *quotaStore) Set(quota Quota) error {
 	defer q.mu.Unlock()
 	quota.UpdatedAt = time.Now().UTC()
 	q.quotas[quota.Address] = quota
+	q.refreshLimiterLocked(quota.Address)
 	return q.saveLocked()
 }
 
@@ -117,9 +120,13 @@ func (q *quotaStore) Reset(address string, all bool) int {
 	if all {
 		removed = len(q.quotas)
 		q.quotas = make(map[string]Quota)
+		for key := range q.limiters {
+			q.refreshLimiterLocked(key)
+		}
 	} else if _, ok := q.quotas[address]; ok {
 		delete(q.quotas, address)
 		removed = 1
+		q.refreshLimiterLocked(address)
 	}
 	if removed > 0 {
 		if err := q.saveLocked(); err != nil {
@@ -152,7 +159,69 @@ func (q *quotaStore) Defaults() QuotaDefaults {
 func (q *quotaStore) UpdateDefaults(defaults QuotaDefaults) {
 	q.mu.Lock()
 	q.defaults = defaults
+	for key := range q.limiters {
+		q.refreshLimiterLocked(key)
+	}
 	q.mu.Unlock()
+}
+
+// refreshLimiterLocked updates the buckets of one client after a quota change.
+// The caller holds q.mu, and refreshLimiterLocked itself uses effectiveQuota.
+func (q *quotaStore) refreshLimiterLocked(address string) {
+	limiters, ok := q.limiters[address]
+	if !ok {
+		return
+	}
+	quota := q.effectiveQuotaLocked(address)
+	limiters.up.setRate(quota.UpKbps)
+	limiters.down.setRate(quota.DownKbps)
+}
+
+// effectiveQuotaLocked is Get without taking the lock again.
+func (q *quotaStore) effectiveQuotaLocked(address string) Quota {
+	if quota, ok := q.quotas[address]; ok {
+		return quota
+	}
+	return Quota{
+		Address:      address,
+		MonthlyBytes: q.defaults.MonthlyBytes,
+		DailyBytes:   q.defaults.DailyBytes,
+		DownKbps:     q.defaults.DownKbps,
+		UpKbps:       q.defaults.UpKbps,
+	}
+}
+
+// Limiters returns the shared buckets of one client. Every TCP connection and
+// every UDP association of the address waits on the same pair, so the rate is
+// the rate of the client, not of one socket. A nil store or address returns
+// unlimited buckets.
+func (q *quotaStore) Limiters(ip net.IP) (up, down *shaper) {
+	if q == nil || ip == nil {
+		return nil, nil
+	}
+	address := ip.String()
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	limiters, ok := q.limiters[address]
+	if !ok {
+		quota := q.effectiveQuotaLocked(address)
+		limiters = newClientLimiters(quota)
+		q.limiters[address] = limiters
+	}
+	return limiters.up, limiters.down
+}
+
+// newClientLimiters builds the buckets of one client. An unlimited direction
+// still gets a bucket, so a later quota change applies without new connections.
+func newClientLimiters(quota Quota) *clientLimiters {
+	up, down := newShaper(quota.UpKbps), newShaper(quota.DownKbps)
+	if up == nil {
+		up = &shaper{}
+	}
+	if down == nil {
+		down = &shaper{}
+	}
+	return &clientLimiters{up: up, down: down}
 }
 
 func (q *quotaStore) saveLocked() error {
@@ -193,6 +262,10 @@ type quotaState struct {
 	DayUsed      uint64 `json:"dayUsed"`
 	MonthUsed    uint64 `json:"monthUsed"`
 	Explicit     bool   `json:"explicit"`
+	// Exhausted tells the client why the exit refuses new connections. The app
+	// shows "traffic quota exhausted" instead of guessing a connection limit.
+	Exhausted bool   `json:"exhausted"`
+	Reason    string `json:"reason,omitempty"`
 }
 
 func quotaStates(quotas *quotaStore, usage *usageStore, clients []Client) []quotaState {
@@ -221,8 +294,7 @@ func quotaStates(quotas *quotaStore, usage *usageStore, clients []Client) []quot
 func buildQuotaState(quotas *quotaStore, usage *usageStore, ip net.IP) quotaState {
 	quota := quotas.Get(ip)
 	day, month := usage.used(ip)
-	_, explicit := quotas.quotas[ip.String()]
-	return quotaState{
+	state := quotaState{
 		Address:      ip.String(),
 		MonthlyBytes: quota.MonthlyBytes,
 		DailyBytes:   quota.DailyBytes,
@@ -230,11 +302,20 @@ func buildQuotaState(quotas *quotaStore, usage *usageStore, ip net.IP) quotaStat
 		UpKbps:       quota.UpKbps,
 		DayUsed:      day,
 		MonthUsed:    month,
-		Explicit:     explicit,
+		Explicit:     quotas.explicit(ip),
 	}
+	switch {
+	case quota.DailyBytes > 0 && int64(day) >= quota.DailyBytes:
+		state.Exhausted, state.Reason = true, "daily quota exhausted"
+	case quota.MonthlyBytes > 0 && int64(month) >= quota.MonthlyBytes:
+		state.Exhausted, state.Reason = true, "monthly quota exhausted"
+	}
+	return state
 }
 
-// parseByteSize reads "100GiB", "5G", "500M" or a plain number of bytes.
+// parseByteSize reads "100GB", "5G", "500M", "100GiB" or a plain number of
+// bytes. The bare suffixes are decimal, like the display: 1 MB = 1 000 000
+// bytes. The explicit MiB/GiB spellings keep the binary meaning.
 func parseByteSize(value string) (int64, error) {
 	raw := strings.TrimSpace(strings.ToUpper(value))
 	if raw == "" {
@@ -244,10 +325,10 @@ func parseByteSize(value string) (int64, error) {
 		suffix string
 		factor float64
 	}{
-		{"TIB", 1 << 40}, {"TB", 1e12}, {"TI", 1 << 40}, {"T", 1 << 40},
-		{"GIB", 1 << 30}, {"GB", 1e9}, {"GI", 1 << 30}, {"G", 1 << 30},
-		{"MIB", 1 << 20}, {"MB", 1e6}, {"MI", 1 << 20}, {"M", 1 << 20},
-		{"KIB", 1 << 10}, {"KB", 1e3}, {"KI", 1 << 10}, {"K", 1 << 10},
+		{"TIB", 1 << 40}, {"TB", 1e12}, {"TI", 1 << 40}, {"T", 1e12},
+		{"GIB", 1 << 30}, {"GB", 1e9}, {"GI", 1 << 30}, {"G", 1e9},
+		{"MIB", 1 << 20}, {"MB", 1e6}, {"MI", 1 << 20}, {"M", 1e6},
+		{"KIB", 1 << 10}, {"KB", 1e3}, {"KI", 1 << 10}, {"K", 1e3},
 		{"B", 1},
 	}
 	factor := float64(1)
@@ -304,22 +385,41 @@ func parseBitRate(value string) (int, error) {
 	return int(result), nil
 }
 
-// formatRate renders kilobits per second for the CLI.
+// explicit reports whether the address has its own quota entry.
+func (q *quotaStore) explicit(ip net.IP) bool {
+	if q == nil || ip == nil {
+		return false
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	_, ok := q.quotas[ip.String()]
+	return ok
+}
+
+// formatRate renders kilobits per second for the CLI. Speeds are shown in
+// megabits per second, because that is the unit an operator sets and compares
+// against a speed test.
 func formatRate(kbps int) string {
 	switch {
 	case kbps <= 0:
 		return "unlimited"
 	case kbps >= 1_000_000:
-		return fmt.Sprintf("%.1f Gbps", float64(kbps)/1e6)
-	case kbps >= 1_000:
-		return fmt.Sprintf("%.1f Mbps", float64(kbps)/1e3)
+		return trimRate(kbps, 1e6) + " Gbps"
 	default:
-		return fmt.Sprintf("%d Kbps", kbps)
+		return trimRate(kbps, 1e3) + " Mbps"
 	}
 }
 
-// shaper is a token bucket. It is created per connection and limits the speed
-// of one direction. A nil shaper means "no limit".
+// trimRate formats value/unit with at most two decimals and no trailing zeros.
+func trimRate(value int, unit float64) string {
+	text := strconv.FormatFloat(float64(value)/unit, 'f', 2, 64)
+	text = strings.TrimRight(text, "0")
+	return strings.TrimRight(text, ".")
+}
+
+// shaper is a token bucket. It limits one direction of one client; every
+// connection of that client waits on the same bucket. A nil shaper means "no
+// limit", and a bucket with rate 0 does the same without allocating a new one.
 type shaper struct {
 	rate  float64 // bytes per second
 	burst float64
@@ -333,37 +433,75 @@ func newShaper(kbps int) *shaper {
 	if kbps <= 0 {
 		return nil
 	}
-	rate := float64(kbps) * 1000 / 8 // kilobits to bytes
-	burst := rate / 4
-	if burst < 16*1024 {
-		burst = 16 * 1024
-	}
-	return &shaper{rate: rate, burst: burst, tokens: burst, last: time.Now()}
+	s := &shaper{last: time.Now()}
+	s.setRate(kbps)
+	// Start with a full bucket: the first burst must not wait.
+	s.mu.Lock()
+	s.tokens = s.burst
+	s.mu.Unlock()
+	return s
 }
 
-// wait blocks until n bytes may be sent at the configured rate.
+// setRate changes the speed of an existing bucket. A quota change applies to
+// the connections that are already open, not only to new ones.
+func (s *shaper) setRate(kbps int) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if kbps <= 0 {
+		s.rate, s.burst, s.tokens = 0, 0, 0
+		s.last = time.Now()
+		return
+	}
+	s.rate = float64(kbps) * 1000 / 8 // kilobits to bytes
+	s.burst = s.rate / 4
+	if s.burst < 16*1024 {
+		s.burst = 16 * 1024
+	}
+	if s.tokens > s.burst {
+		s.tokens = s.burst
+	}
+	if s.last.IsZero() {
+		s.last = time.Now()
+	}
+}
+
+// wait reserves n bytes and blocks until the bucket has paid for them. The
+// reservation may make the balance negative, so concurrent callers each sleep
+// their own share and the aggregate rate stays at the configured value.
 func (s *shaper) wait(n int) {
 	if s == nil || n <= 0 {
 		return
 	}
 	s.mu.Lock()
-	now := time.Now()
-	elapsed := now.Sub(s.last).Seconds()
-	if elapsed > 0 {
-		s.tokens += elapsed * s.rate
-		if s.tokens > s.burst {
-			s.tokens = s.burst
-		}
-		s.last = now
-	}
-	need := float64(n)
-	if s.tokens >= need {
-		s.tokens -= need
+	if s.rate <= 0 {
 		s.mu.Unlock()
 		return
 	}
-	deficit := need - s.tokens
-	s.tokens = 0
+	now := time.Now()
+	if !s.last.IsZero() {
+		if elapsed := now.Sub(s.last).Seconds(); elapsed > 0 {
+			s.tokens += elapsed * s.rate
+			if s.tokens > s.burst {
+				s.tokens = s.burst
+			}
+		}
+	}
+	s.last = now
+	s.tokens -= float64(n)
+	delay := time.Duration(0)
+	if s.tokens < 0 {
+		delay = time.Duration(-s.tokens / s.rate * float64(time.Second))
+		// A single huge write must not sleep for minutes with the lock held;
+		// the next call continues where this one stopped.
+		if delay > 5*time.Second {
+			delay = 5 * time.Second
+		}
+	}
 	s.mu.Unlock()
-	time.Sleep(time.Duration(deficit / s.rate * float64(time.Second)))
+	if delay > 0 {
+		time.Sleep(delay)
+	}
 }

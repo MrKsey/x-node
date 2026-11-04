@@ -58,12 +58,21 @@ bound to the Yggdrasil address of this node.`,
 	},
 	"invite": {
 		Name:    "invite",
-		Summary: "Create an invitation (QR code and link) for a client",
-		Usage:   []string{"x-node invite [-config PATH] [-uses N] [-ttl 24h] [-note TEXT] [-json]"},
+		Summary: "Create, list and remove invitations (QR code and link)",
+		Usage: []string{
+			"x-node invite [-config PATH] [-uses N] [-ttl 24h] [-note TEXT] [-json]",
+			"x-node invite list [-config PATH] [-json]",
+			"x-node invite remove <id> [-config PATH]",
+		},
 		Details: `An invite is a one-time secret that lets a Y-Node client add this exit.
-The command prints a QR code, a yggnode:// link and the token itself. Only the
-SHA-256 of the token is stored, so a leaked state file cannot be used to
-register.
+The command prints a QR code, a yggnode:// link and the token itself. The link
+can be shown again with "x-node invite list": the token is stored in the state
+directory, which only the service user and root can read. The hash is what the
+registration endpoint compares, so editing the file by hand cannot forge an
+invite without knowing the token.
+
+The -note is a free-form label ("family phone") that is shown in "invite list"
+and in the web interface, so several open invites can be told apart.
 
 The client must already be connected to Yggdrasil: registration goes over the
 tunnel, not over the clearnet.`,
@@ -71,12 +80,15 @@ tunnel, not over the clearnet.`,
 			{Flag: "-config PATH", Default: "/etc/x-node/config.json", Env: "X_NODE_CONFIG", Text: "configuration file to read"},
 			{Flag: "-uses N", Default: "inviteUses from the config (1)", Text: "how many clients may use this invite"},
 			{Flag: "-ttl 24h", Default: "inviteTTL from the config (24h)", Text: "how long the invite stays valid"},
-			{Flag: "-note TEXT", Default: "", Text: "free-form note shown in the client list"},
+			{Flag: "-note TEXT", Default: "", Text: "free-form note shown in the invite list and the client list"},
 			{Flag: "-json", Default: "off", Text: "print JSON instead of the QR code, for scripts"},
 		},
 		Examples: []string{
 			"x-node invite",
 			`x-node invite -uses 3 -ttl 48h -note "family phones"`,
+			"x-node invite list",
+			"x-node invite list -json",
+			"x-node invite remove a1b2c3d4",
 			"x-node invite -json | jq -r .link",
 		},
 		SeeAlso: []string{"allow", "clients"},
@@ -151,7 +163,7 @@ exit back to the client (download).`,
 		Summary: "Show, set and reset per-client traffic quotas",
 		Usage: []string{
 			"x-node quota show [address] [-config PATH] [-json]",
-			"x-node quota set <address> [-monthly 100GiB] [-daily 5GiB] [-down 10Mbps] [-up 5Mbps] [-config PATH]",
+			"x-node quota set <address> [-monthly 100GB] [-daily 5GB] [-down 10Mbps] [-up 5Mbps] [-config PATH]",
 			"x-node quota reset <address>|--all [-config PATH]",
 		},
 		Details: `A quota caps the traffic of one client and optionally throttles its speed.
@@ -159,24 +171,30 @@ Limits are enforced when a new connection or UDP association starts: once the
 cap is reached the exit refuses new requests with a SOCKS5 "not allowed" reply
 and writes a line to the log. Connections that are already open are left alone.
 
-Sizes accept B, KiB, MiB, GiB, TiB and the short forms K, M, G, T. Speeds accept
-Kbps, Mbps and Gbps. Zero means "no limit". A client without its own entry uses
-the defaults from the "quotas" section of the configuration.`,
+Traffic caps are stored as bytes and can be written in MB (10^6), MiB (2^20),
+GB, GiB and so on. The web interface uses megabytes, so a cap can be set with
+the precision of one megabyte. Speeds are kilobits per second internally and
+can be written as Kbps, Mbps or Gbps; they are shown in Mbit/s, the unit a
+speed test reports. Zero means "no limit". A client without its own entry uses
+the defaults from the "quotas" section of the configuration.
+
+The speed limit is shared by every TCP connection and every UDP association of
+the client, so ten parallel downloads cannot multiply it.`,
 		Args: []argHelp{
 			{Name: "address", Text: "Yggdrasil node address of an allowlisted client"},
 		},
 		Flags: []flagHelp{
 			{Flag: "-config PATH", Default: "/etc/x-node/config.json", Env: "X_NODE_CONFIG", Text: "configuration file to read"},
-			{Flag: "-monthly SIZE", Default: "unchanged", Text: "monthly traffic cap, 0 removes it"},
-			{Flag: "-daily SIZE", Default: "unchanged", Text: "daily traffic cap, 0 removes it"},
-			{Flag: "-down SPEED", Default: "unchanged", Text: "download throttle, 0 removes it"},
-			{Flag: "-up SPEED", Default: "unchanged", Text: "upload throttle, 0 removes it"},
+			{Flag: "-monthly SIZE", Default: "unchanged", Text: "monthly traffic cap (100GB, 500MB), 0 removes it"},
+			{Flag: "-daily SIZE", Default: "unchanged", Text: "daily traffic cap (5GB, 500MB), 0 removes it"},
+			{Flag: "-down SPEED", Default: "unchanged", Text: "download throttle in Mbit/s (20Mbps), 0 removes it"},
+			{Flag: "-up SPEED", Default: "unchanged", Text: "upload throttle in Mbit/s (5Mbps), 0 removes it"},
 			{Flag: "-json", Default: "off", Text: "machine-readable output (show)"},
 			{Flag: "--all", Default: "off", Text: "reset every client (reset)"},
 		},
 		Examples: []string{
 			"x-node quota show",
-			"x-node quota set 201:1ba8:15c:b1be:7555:b3d7:7651:8e2e -monthly 100GiB -down 20Mbps",
+			"x-node quota set 201:1ba8:15c:b1be:7555:b3d7:7651:8e2e -monthly 100GB -down 20Mbps",
 			"x-node quota reset 201:1ba8:15c:b1be:7555:b3d7:7651:8e2e",
 		},
 		SeeAlso: []string{"usage", "clients"},
@@ -196,7 +214,11 @@ from the public list. It talks to Yggdrasil over the admin socket, so the node
 never restarts.
 
 Inbound peers — the clients that connect to this exit — are never counted,
-replaced or dropped by the supervisor.`,
+replaced or dropped by the supervisor.
+
+Peers added by hand (the "manualPeers" list in the configuration, or the Manual
+peers editor in the web interface) are always kept and never replaced by the
+supervisor. The web interface shows them with a "manual" badge.`,
 		Flags: []flagHelp{
 			{Flag: "-config PATH", Default: "/etc/x-node/config.json", Env: "X_NODE_CONFIG", Text: "configuration file to read"},
 			{Flag: "-json", Default: "off", Text: "machine-readable output (status)"},
@@ -213,14 +235,19 @@ replaced or dropped by the supervisor.`,
 		Name:    "status",
 		Summary: "Print the effective configuration and live counters",
 		Usage:   []string{"x-node status [-config PATH]"},
-		Details: `Shows what the daemon would use right now: address, ports, peer settings,
-UDP relay, web interface, quotas and the counters from runtime.json. It reads
-the configuration file directly, so it also works while the service is stopped.`,
+		Details: `Shows what the daemon would use right now, grouped into Node, Yggdrasil,
+Access, Outbound, Web interface, Quotas, Live and Files. Every line has a
+human-readable label: "SOCKS5 port: 1080" instead of a bare number.
+
+The command reads the configuration and the state directory directly, so it
+also works while the service is stopped. Live counters (connections, UDP
+associations, refusals, traffic) come from runtime.json and usage.json and say
+"service is not running" when the daemon is down.`,
 		Flags: []flagHelp{
 			{Flag: "-config PATH", Default: "/etc/x-node/config.json", Env: "X_NODE_CONFIG", Text: "configuration file to read"},
 		},
 		Examples: []string{"x-node status"},
-		SeeAlso:  []string{"doctor", "clients"},
+		SeeAlso:  []string{"doctor", "clients", "usage"},
 	},
 	"doctor": {
 		Name:    "doctor",
@@ -248,7 +275,9 @@ fails, so the command is usable from monitoring.`,
 			"x-node web reset-path [-config PATH]",
 		},
 		Details: `"web url" prints the address to open in a browser, including the random
-path from the configuration.
+path from the configuration. When "web.publicURL" is set (the installer fills it
+in with the detected external address), that address is printed instead of the
+local listen address, so the output can be pasted into a browser from anywhere.
 
 "web password" without -password generates a new password (20 characters,
 letters, digits and punctuation) and prints it once. With -password it sets the
@@ -273,15 +302,30 @@ login attempt, so no restart is needed.
 		Name:    "keygen",
 		Summary: "Generate an Ed25519 key pair and its Yggdrasil address",
 		Usage:   []string{"x-node keygen [-json]"},
-		Details: `Prints a private key, the matching public key and the Yggdrasil address
-derived from it. The same derivation is used by the app and by the allowlist, so
-the address is a stable identity for a node.
+		Details: `Generates a new Ed25519 key pair and prints three values:
 
-The private key is a secret: anyone who has it can impersonate the node.`,
+  privateKey  the 64-byte secret key as hex. Put it in the "PrivateKey" field
+              of yggdrasil.conf (Yggdrasil also accepts the same hex value in
+              its own "yggdrasil -genconf" output) and never share it: anyone
+              who has it can impersonate the node and use its address.
+  publicKey   the 32-byte public key as hex, derived from the private key. It
+              is what other nodes see and what the address is derived from.
+  address     the Yggdrasil IPv6 address (200::/7) derived from the public key
+              with the same algorithm as Yggdrasil and Y-Node. This is the
+              identity the exit allowlist uses.
+
+The command does not touch any file and does not need the configuration: it is
+a pure key generator. With -json the three values are printed as one JSON
+object, which is convenient for scripts and for pasting into a vault.`,
 		Flags: []flagHelp{
 			{Flag: "-json", Default: "off", Text: "print a JSON object instead of three lines"},
 		},
-		Examples: []string{"x-node keygen", "x-node keygen -json"},
+		Examples: []string{
+			"x-node keygen",
+			"x-node keygen -json",
+			"x-node keygen -json | jq -r .address",
+		},
+		SeeAlso: []string{"allow", "invite"},
 	},
 	"version": {
 		Name:    "version",
@@ -332,8 +376,9 @@ Common flags:
 Run "x-node help <command>" for the flags and examples of one command.
 
 The daemon reads its configuration once at start; the CLI reads the same file,
-so every command accepts -config. Sizes in the quota commands accept KiB, MiB,
-GiB, TiB and K, M, G, T.`)
+so every command accepts -config. Sizes in the quota commands accept MB, MiB,
+GB, GiB and the short forms M and G; speeds accept Kbps, Mbps and Gbps.
+`)
 	_, _ = out.WriteString(b.String())
 }
 

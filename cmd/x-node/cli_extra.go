@@ -87,15 +87,11 @@ func cmdUsage(args []string) error {
 		fmt.Println("No traffic recorded yet.")
 		return nil
 	}
-	fmt.Printf("%-42s %-18s %11s %11s %11s %6s %6s\n",
-		"ADDRESS", "LABEL", "TODAY", "THIS MONTH", "TOTAL", "TCP", "UDP")
+	fmt.Printf("%-64s %11s %11s %11s %6s %6s\n",
+		"CLIENT (ADDRESS + LABEL)", "TODAY", "THIS MONTH", "TOTAL", "TCP", "UDP")
 	for _, row := range rows {
-		label := labels[row.Address]
-		if label == "" {
-			label = "-"
-		}
-		fmt.Printf("%-42s %-18s %11s %11s %11s %6d %6d\n",
-			row.Address, truncate(label, 18),
+		fmt.Printf("%-64s %11s %11s %11s %6d %6d\n",
+			clientName(row.Address, labels[row.Address]),
 			formatBytes(row.DayRx+row.DayTx),
 			formatBytes(row.MonthRx+row.MonthTx),
 			formatBytes(row.Rx+row.Tx),
@@ -147,6 +143,10 @@ func cmdQuota(args []string) error {
 	if err != nil {
 		return err
 	}
+	labels := make(map[string]string)
+	for _, client := range store.List() {
+		labels[client.Address] = client.Label
+	}
 
 	switch action {
 	case "show":
@@ -177,8 +177,8 @@ func cmdQuota(args []string) error {
 			fmt.Println("No clients.")
 			return nil
 		}
-		fmt.Printf("%-42s %11s %11s %11s %11s %-12s %-12s\n",
-			"ADDRESS", "TODAY", "MONTH", "DAILY CAP", "MONTHLY CAP", "DOWN", "UP")
+		fmt.Printf("%-64s %11s %11s %11s %11s %-10s %-10s\n",
+			"CLIENT (ADDRESS + LABEL)", "TODAY", "MONTH", "DAILY CAP", "MONTHLY CAP", "DOWN", "UP")
 		for _, state := range states {
 			daily := "unlimited"
 			if state.DailyBytes > 0 {
@@ -188,15 +188,16 @@ func cmdQuota(args []string) error {
 			if state.MonthlyBytes > 0 {
 				monthly = formatBytes(uint64(state.MonthlyBytes))
 			}
-			fmt.Printf("%-42s %11s %11s %11s %11s %-12s %-12s\n",
-				state.Address, formatBytes(state.DayUsed), formatBytes(state.MonthUsed),
+			fmt.Printf("%-64s %11s %11s %11s %11s %-10s %-10s\n",
+				clientName(state.Address, labels[state.Address]),
+				formatBytes(state.DayUsed), formatBytes(state.MonthUsed),
 				daily, monthly, formatRate(state.DownKbps), formatRate(state.UpKbps))
 		}
 		return nil
 
 	case "set":
 		if len(positional) != 1 {
-			return errors.New("usage: x-node quota set <address> [-monthly 100GiB] [-daily 5GiB] [-down 10Mbps] [-up 5Mbps]")
+			return errors.New("usage: x-node quota set <address> [-monthly 100GB] [-daily 5GB] [-down 10Mbps] [-up 5Mbps]")
 		}
 		ip := net.ParseIP(strings.TrimSpace(positional[0]))
 		if ip == nil || !isYggAddress(ip) {
@@ -272,6 +273,118 @@ func cmdQuota(args []string) error {
 	default:
 		return fmt.Errorf("unknown quota action %q", action)
 	}
+}
+
+// cmdInviteList shows the invites that are still usable. The token is stored
+// with the invite, so the link can be shown again: recreating an invite for a
+// client that lost the QR code is not necessary.
+func cmdInviteList(args []string) error {
+	fs := flag.NewFlagSet("invite list", flag.ContinueOnError)
+	configFlag := addConfigFlag(fs)
+	asJSON := fs.Bool("json", false, "print JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	cfg, err := loadConfig(configPath(*configFlag))
+	if err != nil {
+		return err
+	}
+	store, err := openStore(cfg, newLogger("warn"))
+	if err != nil {
+		return err
+	}
+	invites := store.ListInvites()
+	if *asJSON {
+		type row struct {
+			Hash      string    `json:"hash"`
+			Note      string    `json:"note"`
+			CreatedAt time.Time `json:"createdAt"`
+			ExpiresAt time.Time `json:"expiresAt"`
+			Uses      int       `json:"uses"`
+			Used      int       `json:"used"`
+			Token     string    `json:"token,omitempty"`
+			Link      string    `json:"link,omitempty"`
+		}
+		rows := make([]row, 0, len(invites))
+		for _, invite := range invites {
+			item := row{
+				Hash: invite.Hash, Note: invite.Note, CreatedAt: invite.CreatedAt,
+				ExpiresAt: invite.ExpiresAt, Uses: invite.Uses, Used: invite.Used,
+				Token: invite.Token,
+			}
+			if invite.Token != "" {
+				item.Link = exitLink(cfg, invite.Token)
+			}
+			rows = append(rows, item)
+		}
+		raw, _ := json.MarshalIndent(map[string]any{"ok": true, "invites": rows}, "", "  ")
+		fmt.Println(string(raw))
+		return nil
+	}
+	if len(invites) == 0 {
+		fmt.Println("No active invites. Create one: x-node invite")
+		return nil
+	}
+	fmt.Printf("%-14s %-24s %-8s %-20s %s\n", "ID", "NOTE", "USES", "EXPIRES", "LINK")
+	for _, invite := range invites {
+		link := "-"
+		if invite.Token != "" {
+			link = exitLink(cfg, invite.Token)
+		}
+		fmt.Printf("%-14s %-24s %-8s %-20s %s\n",
+			invite.Hash[:12]+"…", truncate(invite.Note, 24),
+			fmt.Sprintf("%d / %d", invite.Used, invite.Uses),
+			invite.ExpiresAt.Local().Format("2006-01-02 15:04"), link)
+	}
+	fmt.Println()
+	fmt.Println("Use the ID prefix with \"x-node invite remove <id>\".")
+	return nil
+}
+
+// cmdInviteRemove deletes an invite by the prefix shown by "invite list".
+func cmdInviteRemove(args []string) error {
+	fs := flag.NewFlagSet("invite remove", flag.ContinueOnError)
+	configFlag := addConfigFlag(fs)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return errors.New("usage: x-node invite remove <id>")
+	}
+	prefix := strings.TrimSpace(fs.Arg(0))
+	if len(prefix) < 4 {
+		return errors.New("the invite ID prefix must be at least 4 characters")
+	}
+	cfg, err := loadConfig(configPath(*configFlag))
+	if err != nil {
+		return err
+	}
+	store, err := openStore(cfg, newLogger("warn"))
+	if err != nil {
+		return err
+	}
+	var matches []Invite
+	for _, invite := range store.ListInvites() {
+		if strings.HasPrefix(invite.Hash, prefix) {
+			matches = append(matches, invite)
+		}
+	}
+	switch len(matches) {
+	case 0:
+		return fmt.Errorf("no active invite starts with %q", prefix)
+	case 1:
+	default:
+		return fmt.Errorf("%q matches %d invites; use a longer prefix", prefix, len(matches))
+	}
+	removed, err := store.DeleteInvite(matches[0].Hash)
+	if err != nil {
+		return err
+	}
+	if !removed {
+		return errors.New("the invite disappeared; run \"x-node invite list\" again")
+	}
+	fmt.Println("removed invite", matches[0].Hash[:12]+"…")
+	return nil
 }
 
 func formatLimit(bytes int64) string {

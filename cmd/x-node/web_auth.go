@@ -364,21 +364,15 @@ func webScheme(cfg Config) string {
 }
 
 // webURLs lists the addresses the interface is reachable on. It is used by the
-// installer, `x-node web url` and the console output of the service.
+// installer, `x-node web url` and the console output of the service. A
+// configured public URL comes first: behind nginx the listener is on
+// 127.0.0.1, which is not the address an operator can open.
 func webURLs(cfg Config) []string {
-	scheme := webScheme(cfg)
-	path := cfg.Web.Path
-	port := cfg.Web.Port
-	suffix := ""
-	if !(scheme == "https" && port == 443) && !(scheme == "http" && port == 80) {
-		suffix = fmt.Sprintf(":%d", port)
-	}
 	var out []string
-	add := func(host string) {
-		if host == "" {
+	add := func(url string) {
+		if url == "" {
 			return
 		}
-		url := fmt.Sprintf("%s://%s%s%s", scheme, host, suffix, path)
 		for _, existing := range out {
 			if existing == url {
 				return
@@ -386,15 +380,31 @@ func webURLs(cfg Config) []string {
 		}
 		out = append(out, url)
 	}
+	if public := strings.TrimSpace(cfg.Web.PublicURL); public != "" {
+		add(public)
+	}
+	scheme := webScheme(cfg)
+	path := cfg.Web.Path
+	port := cfg.Web.Port
+	suffix := ""
+	if !(scheme == "https" && port == 443) && !(scheme == "http" && port == 80) {
+		suffix = fmt.Sprintf(":%d", port)
+	}
+	addHost := func(host string) {
+		if host == "" {
+			return
+		}
+		add(fmt.Sprintf("%s://%s%s%s", scheme, host, suffix, path))
+	}
 	switch strings.ToLower(strings.TrimSpace(cfg.Web.Listen)) {
 	case webListenYggdrasil:
-		add("[" + cfg.ListenAddress + "]")
+		addHost("[" + cfg.ListenAddress + "]")
 	case webListenLoopback:
-		add("127.0.0.1")
+		addHost("127.0.0.1")
 	default:
-		add("[" + cfg.ListenAddress + "]")
+		addHost("[" + cfg.ListenAddress + "]")
 		if hostname, err := os.Hostname(); err == nil && hostname != "" {
-			add(hostname)
+			addHost(hostname)
 		}
 	}
 	return out

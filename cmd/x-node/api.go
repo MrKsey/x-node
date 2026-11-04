@@ -17,13 +17,15 @@ import (
 
 // daemonVersion is stamped by build.sh (-ldflags -X main.daemonVersion=...).
 // The default is what a plain "go build" reports.
-var daemonVersion = "1.5.2"
+var daemonVersion = "1.6.0"
 
 type apiServer struct {
 	cfg     Config
 	live    *settings
 	store   *Store
 	tracker *runtimeTracker
+	quotas  *quotaStore
+	usage   *usageStore
 	log     *logger
 
 	// registerLimit guards /v1/register: an invite is a secret, so one source
@@ -92,8 +94,27 @@ type statusResponse struct {
 	// through the exit.
 	Connections        int `json:"connections,omitempty"`
 	Refused            int `json:"refused,omitempty"`
+	LimitRefused       int `json:"limitRefused,omitempty"`
+	QuotaRefused       int `json:"quotaRefused,omitempty"`
 	UDPAssociations    int `json:"udpAssociations,omitempty"`
 	MaxUDPAssociations int `json:"maxUdpAssociations,omitempty"`
+
+	// Quota is the effective limit of this client and how much of it is used.
+	// The app shows it, so a client knows that a quota applies before it hits
+	// one, and why a new connection was refused after it did.
+	Quota *statusQuota `json:"quota,omitempty"`
+}
+
+// statusQuota is the quota state of the calling client.
+type statusQuota struct {
+	MonthlyBytes int64  `json:"monthlyBytes"`
+	DailyBytes   int64  `json:"dailyBytes"`
+	DownKbps     int    `json:"downKbps"`
+	UpKbps       int    `json:"upKbps"`
+	DayUsed      uint64 `json:"dayUsed"`
+	MonthUsed    uint64 `json:"monthUsed"`
+	Exhausted    bool   `json:"exhausted"`
+	Reason       string `json:"reason,omitempty"`
 }
 
 type tokenResponse struct {
@@ -243,8 +264,26 @@ func (a *apiServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 	response.MaxConns = a.config().MaxConnsPerClient
 	response.Connections = live.Connections
 	response.Refused = live.Refused
+	response.QuotaRefused = live.QuotaRefused
+	response.LimitRefused = live.Refused - live.QuotaRefused
+	if response.LimitRefused < 0 {
+		response.LimitRefused = 0
+	}
 	response.UDPAssociations = live.UDPAssociations
 	response.MaxUDPAssociations = a.config().MaxUDPAssociations
+	if a.quotas != nil && a.usage != nil {
+		state := buildQuotaState(a.quotas, a.usage, source)
+		response.Quota = &statusQuota{
+			MonthlyBytes: state.MonthlyBytes,
+			DailyBytes:   state.DailyBytes,
+			DownKbps:     state.DownKbps,
+			UpKbps:       state.UpKbps,
+			DayUsed:      state.DayUsed,
+			MonthUsed:    state.MonthUsed,
+			Exhausted:    state.Exhausted,
+			Reason:       state.Reason,
+		}
+	}
 	writeJSON(w, http.StatusOK, response)
 }
 

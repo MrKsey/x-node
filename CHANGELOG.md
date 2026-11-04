@@ -4,6 +4,59 @@ All notable changes to X-Node are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.6.0] — 2026-11-04
+
+### Added
+
+- Per-client speed limits are one shared token bucket: every TCP connection and
+  every UDP association of a client waits on the same pair, so ten parallel
+  downloads cannot multiply the rate, and QUIC is shaped too.
+- `/v1/status` reports the effective quota, the used volume and the split
+  between connection-limit and quota refusals. The Y-Node app shows the limits
+  and says "traffic quota exhausted" instead of blaming the connection limit.
+- `x-node invite list` and `x-node invite remove` show and revoke the invites
+  that are still usable. The token is stored next to its hash, so a lost QR code
+  can be shown again.
+- The web interface shows the QR code of every invite, copies the link or the
+  token, and creates invites with a note.
+- The Settings page can change the node name, the admin password, the public web
+  URL, the configuration files and the manual Yggdrasil peers.
+- The dashboard can restart `x-node` and `yggdrasil` and edit
+  `config.json`/`yggdrasil.conf`, through a narrow sudoers rule and the new
+  internal `x-node helper` command. Every write is validated and backed up.
+- Manual peers (`manualPeers`) are pinned: the supervisor keeps them on top of
+  the automatic count and never replaces or trims them.
+- The dashboard shows the node's own `wss://…/ygg?key=…` (or `tls://…`) peering
+  link with a copy button and a hint on how to add it to another node.
+- The dashboard reports everything `x-node clients` does: device name, app
+  version, UDP datagrams and bytes, destinations and refusals.
+
+### Changed
+
+- Traffic is measured and displayed in decimal units: 1 MB = 1 000 000 bytes,
+  1 GB = 1 000 000 000 bytes. The `MiB`/`GiB`/`TiB` spellings keep the binary
+  meaning for quotas written with them.
+- Speed limits are set and shown in Mbit/s, the unit a speed test reports.
+- The traffic chart is drawn in bit/s, is 25% taller and has a tooltip with the
+  exact time and both rates; it also shows how old the data is.
+- `x-node status` prints labelled blocks (Node, Yggdrasil, Access, Outbound, Web
+  interface, Quotas, Live, Files) instead of a flat list.
+- Every CLI table shows a client as `address (label)`.
+- `x-node keygen` explains the private key, the public key and the derived
+  address, and `-json` prints all three.
+- `x-node web url` and the dashboard use `web.publicURL`, which the installer
+  fills with the detected external address.
+- `x-node -h` ends without an extra blank line.
+- The web interface calls the service block "X-Node" instead of "Health" and
+  aligns switches with the fields next to them.
+
+### Fixed
+
+- A client over its traffic quota is reported as a quota refusal, not as a
+  connection-limit problem.
+- `yggdrasil.conf` can be read by the web editor: the file belongs to the
+  `yggdrasil` group, so the helper reads it instead of the service user.
+
 ## [1.5.2] — 2026-11-04
 
 ### Fixed
@@ -65,6 +118,7 @@ First public release: SOCKS5 over Yggdrasil with TCP and UDP, IPv6 modes and
 Happy Eyeballs, invites and the allowlist, traffic accounting and quotas, the
 web interface, peer supervision, `x-node doctor` and the installer.
 
+[1.6.0]: https://github.com/MrKsey/x-node/releases/tag/v1.6.0
 [1.5.2]: https://github.com/MrKsey/x-node/releases/tag/v1.5.2
 [1.5.1]: https://github.com/MrKsey/x-node/releases/tag/v1.5.1
 [1.5.0]: https://github.com/MrKsey/x-node/releases/tag/v1.5.0

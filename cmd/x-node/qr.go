@@ -67,6 +67,16 @@ func renderQR(payload string) (string, error) {
 	return out.String(), nil
 }
 
+// qrPNG renders the same payload as a PNG for the web interface. The image is
+// returned inline as a data: URI, which the CSP allows and which keeps the
+// dashboard working without an external QR service.
+func qrPNG(payload string, size int) ([]byte, error) {
+	if size <= 0 {
+		size = 320
+	}
+	return qrcode.Encode(payload, qrcode.Medium, size)
+}
+
 // printInvite prints the QR, the link and the metadata of a fresh invite.
 func printInvite(cfg Config, token string, invite Invite) {
 	link := exitLink(cfg, token)

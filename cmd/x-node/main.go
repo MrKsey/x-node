@@ -95,6 +95,10 @@ func run(command string, args []string) error {
 		return cmdWeb(args)
 	case "version":
 		return cmdVersion(args)
+	case "helper":
+		// Internal entry point for the web interface, allowed through a
+		// single sudoers rule. It is not listed in the command overview.
+		return cmdHelper(args)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command %q\n\n", command)
 		usage()
@@ -149,6 +153,8 @@ func cmdServe(args []string) error {
 	tracker := newRuntimeTracker(cfg, log)
 	api := newAPIServer(cfg, store, tracker, log)
 	api.live = live
+	api.quotas = quotas
+	api.usage = usage
 	socks := newSocksServer(cfg, store, tracker, log, api.handler())
 	socks.live = live
 	socks.usage = usage
@@ -272,6 +278,14 @@ func cmdKeygen(args []string) error {
 }
 
 func cmdInvite(args []string) error {
+	if len(args) > 0 {
+		switch args[0] {
+		case "list":
+			return cmdInviteList(args[1:])
+		case "remove":
+			return cmdInviteRemove(args[1:])
+		}
+	}
 	fs := flag.NewFlagSet("invite", flag.ContinueOnError)
 	configFlag := addConfigFlag(fs)
 	uses := fs.Int("uses", 0, "how many clients may use this invite (default from config)")
@@ -375,14 +389,14 @@ func cmdAllow(args []string) error {
 			fmt.Println("The allowlist is empty.")
 			return nil
 		}
-		fmt.Printf("%-42s %-24s %-19s %-9s %s\n", "ADDRESS", "LABEL", "REGISTERED", "SOURCE", "TOKEN")
+		fmt.Printf("%-64s %-19s %-9s %s\n", "CLIENT (ADDRESS + LABEL)", "REGISTERED", "SOURCE", "TOKEN")
 		for _, client := range clients {
 			token := "no"
 			if client.TokenHash != "" {
 				token = "yes"
 			}
-			fmt.Printf("%-42s %-24s %-19s %-9s %s\n",
-				client.Address, truncate(client.Label, 24),
+			fmt.Printf("%-64s %-19s %-9s %s\n",
+				clientName(client.Address, client.Label),
 				client.RegisteredAt.Format("2006-01-02 15:04"), client.Source, token)
 		}
 		return nil
@@ -488,15 +502,15 @@ func cmdClients(args []string) error {
 		fmt.Println("Create an invite: x-node invite")
 		return nil
 	}
-	fmt.Printf("%-42s %-20s %-11s %5s %4s %7s  %-19s %-19s %s\n",
-		"ADDRESS", "LABEL", "STATE", "CONNS", "UDP", "REFUSED", "LAST SEEN", "REGISTERED", "SOURCE")
+	fmt.Printf("%-64s %-11s %5s %4s %7s  %-19s %-19s %s\n",
+		"CLIENT (ADDRESS + LABEL)", "STATE", "CONNS", "UDP", "REFUSED", "LAST SEEN", "REGISTERED", "SOURCE")
 	connected := 0
 	for _, row := range rows {
 		if row.State == "connected" {
 			connected++
 		}
-		fmt.Printf("%-42s %-20s %-11s %5d %4d %7d  %-19s %-19s %s\n",
-			row.Address, truncate(row.Label, 20), row.State, row.Connections,
+		fmt.Printf("%-64s %-11s %5d %4d %7d  %-19s %-19s %s\n",
+			clientName(row.Address, row.Label), row.State, row.Connections,
 			row.UDPAssociations, row.Refused, formatWhen(row.LastSeenAt),
 			formatWhen(row.RegisteredAt), row.Source)
 	}
@@ -544,102 +558,155 @@ func cmdStatus(args []string) error {
 		return err
 	}
 	line := func(label string, values ...any) {
-		fmt.Printf("%-13s %s\n", label, fmt.Sprint(values...))
+		fmt.Printf("%-19s %s\n", label+":", fmt.Sprint(values...))
 	}
-	line("Name:", cfg.Name)
-	line("Address:", cfg.ListenAddress)
-	line("SOCKS5:", cfg.SocksPort)
+	section := func(title string) {
+		fmt.Println()
+		fmt.Println(title)
+	}
+
+	fmt.Printf("x-node %s\n", daemonVersion)
+
+	section("Node")
+	line("Name", cfg.Name)
+	line("Yggdrasil address", cfg.ListenAddress)
+	line("SOCKS5 port", cfg.SocksPort)
 	if cfg.apiShared() {
-		line("API:", "shared with SOCKS5 (same port, /v1/...)")
+		line("API port", "shared with SOCKS5 (HTTP /v1/... on the same port)")
 	} else {
-		line("API:", cfg.APIPort)
+		line("API port", cfg.APIPort)
 	}
 	if cfg.APIRateLimit > 0 {
-		line("API auth:", fmt.Sprintf("%s, %d request(s)/min per source", cfg.apiAuthMode(), cfg.APIRateLimit))
+		line("API auth", fmt.Sprintf("%s, %d request(s)/min per source", cfg.apiAuthMode(), cfg.APIRateLimit))
 	} else {
-		line("API auth:", cfg.apiAuthMode(), ", rate limit off")
+		line("API auth", cfg.apiAuthMode()+", rate limit off")
 	}
-	if strings.TrimSpace(cfg.PeerURI) != "" {
-		line("Peer:", cfg.PeerURI)
-	}
-	line("Peers:", fmt.Sprintf("%d public, auto replace %s", cfg.PeerCount, onOff(cfg.PeerAutoReplace)))
-	if cfg.UDPEnabled {
-		line("UDP relay:", fmt.Sprintf("enabled, %d association(s), idle %s",
-			cfg.MaxUDPAssociations, cfg.UDPIdleTimeout))
-	} else {
-		line("UDP relay:", "disabled")
-	}
-	line("Allow all:", cfg.AllowAll)
-	line("Registration:", cfg.Registration)
-	line("Allowlist:", len(store.List()), " client(s)")
-	line("Invites:", len(store.ListInvites()), " active")
 
-	// Outbound address selection.
+	section("Yggdrasil")
+	if strings.TrimSpace(cfg.PeerURI) != "" {
+		line("Peer link", cfg.PeerURI)
+	} else {
+		line("Peer link", "not configured (no incoming peering)")
+	}
+	managed, manual, up, inbound := peerSummary(cfg)
+	line("Public peers", fmt.Sprintf("%d wanted, %d up, auto replace %s", cfg.PeerCount, up, onOff(cfg.PeerAutoReplace)))
+	if managed > 0 && managed != cfg.PeerCount {
+		line("Managed peers", managed)
+	}
+	if manual > 0 {
+		line("Manual peers", fmt.Sprintf("%d pinned", manual))
+	}
+	if inbound > 0 {
+		line("Inbound peers", inbound)
+	}
+
+	section("Access")
+	if cfg.AllowAll {
+		line("Open mode", "on (allowAll: every Yggdrasil node may use the exit)")
+	} else {
+		line("Open mode", "off (only the allowlist)")
+	}
+	line("Registration", onOff(cfg.Registration))
+	line("Allowlist", fmt.Sprintf("%d client(s)", len(store.List())))
+	line("Invites", fmt.Sprintf("%d active (x-node invite list)", len(store.ListInvites())))
+
+	section("Outbound")
 	mode := cfg.ipv6Mode()
 	available, detail := detectIPv6()
 	switch mode {
 	case ipv6Off:
-		line("IPv6:", "off (IPv4 only)")
+		line("IPv6", "off (IPv4 only)")
 	case ipv6Prefer:
 		if available {
-			line("IPv6:", "prefer, available via "+detail)
+			line("IPv6", "prefer, available via "+detail)
 		} else {
-			line("IPv6:", "prefer, but no IPv6 route ("+detail+")")
+			line("IPv6", "prefer, but no IPv6 route ("+detail+")")
 		}
 	default:
 		if available {
-			line("IPv6:", "auto, available via "+detail)
+			line("IPv6", "auto, available via "+detail)
 		} else {
-			line("IPv6:", "auto, not available ("+detail+")")
+			line("IPv6", "auto, not available ("+detail+")")
 		}
 	}
-	if cfg.DomainResolution {
-		line("Domains:", "resolved on the exit (ATYP=domain)")
+	if cfg.UDPEnabled {
+		line("UDP relay", fmt.Sprintf("enabled, %d association(s), idle %s",
+			cfg.MaxUDPAssociations, cfg.UDPIdleTimeout))
 	} else {
-		line("Domains:", "ATYP=domain refused, the client resolves")
+		line("UDP relay", "disabled")
+	}
+	if cfg.DomainResolution {
+		line("Domain names", "resolved on the exit (ATYP=domain)")
+	} else {
+		line("Domain names", "ATYP=domain refused, the client resolves")
 	}
 
-	// Web interface.
+	section("Web interface")
 	if cfg.Web.Enabled {
+		for i, url := range webURLs(cfg) {
+			if i == 0 {
+				line("URL", url)
+			} else {
+				fmt.Printf("%-19s %s\n", "", url)
+			}
+		}
 		host := cfg.webBindHost()
 		if host == "" {
 			host = "every address"
 		}
-		line("Web:", webScheme(cfg), " on ", host, ":", cfg.Web.Port)
-		for _, url := range webURLs(cfg) {
-			fmt.Printf("%-13s %s\n", "", url)
-		}
-		line("Web login:", currentWebUser(cfg.statePath(webCredentialsFileName)))
+		line("Listener", fmt.Sprintf("%s on %s:%d", webScheme(cfg), host, cfg.Web.Port))
+		line("Login", currentWebUser(cfg.statePath(webCredentialsFileName)))
 	} else {
-		line("Web:", "disabled")
+		line("Web", "disabled")
 	}
 
-	// Quotas and accounting.
-	line("Usage:", onOff(cfg.Usage.Enabled), ", timezone ", cfg.Usage.Timezone)
-	line("Quotas:", "defaults: ", quotaDefaultsSummary(cfg.Quotas))
-	if quotas, err := openQuotas(cfg, newLogger("warn")); err == nil {
-		line("Overrides:", len(quotas.List()), " client(s)")
+	section("Quotas")
+	if cfg.Usage.Enabled {
+		line("Accounting", "on, timezone "+cfg.Usage.Timezone)
+	} else {
+		line("Accounting", "off (quotas are not enforced)")
+	}
+	line("Defaults", quotaDefaultsSummary(cfg.Quotas))
+	quotas, quotaErr := openQuotas(cfg, newLogger("warn"))
+	if quotaErr == nil {
+		line("Overrides", fmt.Sprintf("%d client(s) with their own limits", len(quotas.List())))
 	}
 
+	section("Live")
 	if doc, err := readRuntime(cfg.statePath(runtimeFileName)); err == nil && runtimeFresh(doc, time.Now()) {
-		line("Connected:", len(doc.Clients), " client(s), ", doc.TotalConnections, " connection(s)")
-		if doc.TotalRefused > 0 {
-			line("Refused:", doc.TotalRefused, " connection(s) hit the limits (maxConnsPerClient ", cfg.MaxConnsPerClient, ")")
-		}
+		line("Clients", fmt.Sprintf("%d connected, %d open connection(s)",
+			len(doc.Clients), doc.TotalConnections))
 		if cfg.UDPEnabled {
-			line("UDP active:", fmt.Sprintf("%d association(s), %d datagram(s) in, %d out, %s in, %s out",
-				doc.TotalUDPAssociations, doc.TotalUDPDatagramsIn, doc.TotalUDPDatagramsOut,
+			line("UDP active", fmt.Sprintf("%d association(s), %d datagram(s) in, %d out",
+				doc.TotalUDPAssociations, doc.TotalUDPDatagramsIn, doc.TotalUDPDatagramsOut))
+			line("UDP traffic", fmt.Sprintf("%s in, %s out",
 				formatBytes(doc.TotalUDPBytesIn), formatBytes(doc.TotalUDPBytesOut)))
 		}
+		if doc.TotalRefused > 0 {
+			line("Refused", fmt.Sprintf("%d connection(s), max %d per client",
+				doc.TotalRefused, cfg.MaxConnsPerClient))
+		}
 	} else {
-		line("Connected:", "service not running")
+		line("Clients", "service is not running")
 	}
-	line("State dir:", cfg.StateDir)
-	line("On interface:", interfaceHasAddress(cfg.ListenAddress))
+	if usage, err := openUsage(cfg, newLogger("warn")); err == nil {
+		var today, month, total uint64
+		for _, row := range usage.rows() {
+			today += row.DayRx + row.DayTx
+			month += row.MonthRx + row.MonthTx
+			total += row.Rx + row.Tx
+		}
+		line("Traffic today", formatBytes(today))
+		line("Traffic month", formatBytes(month))
+		line("Traffic total", formatBytes(total))
+	}
+
+	section("Files")
+	line("State directory", cfg.StateDir)
 	if pendingSettings(cfg, path) {
-		line("Config:", path, " changed since the service started; restart it to apply")
+		line("Config", path+" (changed since the service started; restart it to apply)")
 	} else {
-		line("Config:", path)
+		line("Config", path)
 	}
 	return nil
 }
@@ -995,16 +1062,17 @@ func interfaceHasAddress(address string) bool {
 	return false
 }
 
-// formatBytes renders a counter for the CLI. The exit only reports totals, so
-// one decimal place is enough. The units are binary, like the quota parser:
-// 1 KiB is 1024 bytes.
+// formatBytes renders a counter for the CLI in decimal units: 1 MB is
+// 1 000 000 bytes, which is what a provider and a speed test show. The quota
+// parser accepts the binary MiB/GiB spellings explicitly when a file was
+// written with them.
 func formatBytes(bytes uint64) string {
-	const unit = 1024
+	const unit = 1000
 	if bytes < unit {
 		return fmt.Sprintf("%d B", bytes)
 	}
 	value := float64(bytes)
-	units := []string{"KiB", "MiB", "GiB", "TiB"}
+	units := []string{"KB", "MB", "GB", "TB", "PB"}
 	index := -1
 	for value >= unit && index < len(units)-1 {
 		value /= unit
@@ -1021,4 +1089,15 @@ func truncate(value string, limit int) string {
 		return value[:limit]
 	}
 	return value[:limit-1] + "…"
+}
+
+// clientName renders a client the way every CLI table shows it: the address
+// first, then the label in parentheses. The label is what an operator
+// recognises; the address is what the exit actually enforces.
+func clientName(address, label string) string {
+	label = strings.TrimSpace(label)
+	if label == "" {
+		return address
+	}
+	return address + " (" + truncate(label, 24) + ")"
 }

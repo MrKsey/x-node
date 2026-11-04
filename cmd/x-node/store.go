@@ -46,8 +46,11 @@ type Client struct {
 	TokenIssuedAt time.Time `json:"tokenIssuedAt,omitempty"`
 }
 
-// Invite is a one-time (or N-time) registration secret. Only its SHA-256 is
-// stored, so a leaked state file does not hand out working invites.
+// Invite is a one-time (or N-time) registration secret. The hash is what the
+// registration path compares; the token is kept as well, so the web interface
+// and "x-node invite list" can show the link again instead of forcing the
+// operator to create a new invite for a client that lost the QR code. The file
+// lives in the state directory, which only the service user and root can read.
 type Invite struct {
 	Hash      string    `json:"hash"`
 	Note      string    `json:"note"`
@@ -55,6 +58,7 @@ type Invite struct {
 	ExpiresAt time.Time `json:"expiresAt"`
 	Uses      int       `json:"uses"`
 	Used      int       `json:"used"`
+	Token     string    `json:"token,omitempty"`
 }
 
 type allowlistFile struct {
@@ -419,7 +423,8 @@ func (s *Store) Touch(ip net.IP) {
 }
 
 // NewInvite creates a registration secret and returns the token and its stored
-// form. The token is shown once; only the hash remains on disk.
+// form. The token is kept next to its hash so the operator can show the link
+// again; the state directory is readable only by the service user and root.
 func (s *Store) NewInvite(note string, ttl time.Duration, uses int) (string, Invite, error) {
 	if uses <= 0 {
 		uses = 1
@@ -437,6 +442,7 @@ func (s *Store) NewInvite(note string, ttl time.Duration, uses int) (string, Inv
 		CreatedAt: now,
 		ExpiresAt: now.Add(ttl),
 		Uses:      uses,
+		Token:     token,
 	}
 	release, err := s.beginWrite()
 	if err != nil {

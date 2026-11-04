@@ -73,6 +73,7 @@ func loadSettingsOverlay(cfg Config) (Config, error) {
 // configuration key is not frozen by an old overlay.
 func saveSettingsOverlay(cfg Config) error {
 	document := map[string]any{
+		"name":                   cfg.Name,
 		"allowAll":               cfg.AllowAll,
 		"registration":           cfg.Registration,
 		"inviteTTL":              cfg.InviteTTL,
@@ -91,6 +92,7 @@ func saveSettingsOverlay(cfg Config) error {
 		"domainResolution":       cfg.DomainResolution,
 		"peerCount":              cfg.PeerCount,
 		"peerAutoReplace":        cfg.PeerAutoReplace,
+		"manualPeers":            cfg.ManualPeers,
 		"peerDeadTimeout":        cfg.PeerDeadTimeout,
 		"peerCheckInterval":      cfg.PeerCheckInterval,
 		"peerRefreshInterval":    cfg.PeerRefreshInterval,

@@ -179,6 +179,7 @@ log "Removing the configuration and the binaries"
 rm -rf /etc/x-node
 rm -rf /usr/local/share/doc/x-node
 rm -f /etc/nftables.d/x-node.nft
+rm -f /etc/sudoers.d/x-node-web
 rm -f /usr/local/bin/x-node /usr/local/bin/x-node-peerprobe
 # The password cannot be recovered from web.json, and a reinstall generates a
 # new one, so the plaintext copy is not kept around.

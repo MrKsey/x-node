@@ -135,6 +135,12 @@ type udpAssociation struct {
 	flows  map[string]*udpFlow
 	client *net.UDPAddr
 
+	// up and down are the shared buckets of the client. Without them a UDP
+	// speed quota would only limit TCP, and QUIC or a UDP speed test would run
+	// at full speed.
+	up   *shaper
+	down *shaper
+
 	datagramsIn  atomic.Uint64
 	datagramsOut atomic.Uint64
 	bytesIn      atomic.Uint64
@@ -287,6 +293,7 @@ func (a *udpAssociation) handle(packet []byte) {
 	if flow == nil {
 		return
 	}
+	a.up.wait(len(payload))
 	if _, err := flow.conn.Write(payload); err != nil {
 		a.log.debug("client %s: UDP send to %s: %v", a.source, flow.key, err)
 		a.dropFlow(flow)
@@ -345,6 +352,7 @@ func (a *udpAssociation) pumpFlow(flow *udpFlow) {
 			continue
 		}
 		packet := buildSocksUDPDatagram(flow.ip, flow.port, buf[:n])
+		a.down.wait(len(packet))
 		if _, err := a.relay.WriteToUDP(packet, client); err != nil {
 			return
 		}

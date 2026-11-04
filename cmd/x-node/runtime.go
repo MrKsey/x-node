@@ -28,9 +28,10 @@ type runtimeClient struct {
 	Destinations []string  `json:"destinations,omitempty"`
 
 	// Refused counts the connections the limits turned away since the service
-	// started. The client reads it from the status API: it is the only way to
-	// tell "the exit is down" from "this client hit maxConnsPerClient".
-	Refused int `json:"refused,omitempty"`
+	// started. QuotaRefused is the part caused by a traffic quota, so a client
+	// can tell "maxConnsPerClient" from "you are out of traffic".
+	Refused      int `json:"refused,omitempty"`
+	QuotaRefused int `json:"quotaRefused,omitempty"`
 
 	UDPAssociations int    `json:"udpAssociations,omitempty"`
 	UDPDatagramsIn  uint64 `json:"udpDatagramsIn,omitempty"`
@@ -189,6 +190,17 @@ func (t *runtimeTracker) touch(ip net.IP) {
 // refused records one connection the limits turned away. The counter is what
 // the client's status call reads to tell a limit problem from a dead exit.
 func (t *runtimeTracker) refused(ip net.IP) {
+	t.countRefused(ip, false)
+}
+
+// quotaRefused records a refusal caused by a traffic quota. The total grows as
+// well, so an old client still sees that something was refused; the new field
+// lets a current client name the actual reason.
+func (t *runtimeTracker) quotaRefused(ip net.IP) {
+	t.countRefused(ip, true)
+}
+
+func (t *runtimeTracker) countRefused(ip net.IP, quota bool) {
 	if ip == nil {
 		return
 	}
@@ -201,6 +213,9 @@ func (t *runtimeTracker) refused(ip net.IP) {
 		t.clients[key] = client
 	}
 	client.Refused++
+	if quota {
+		client.QuotaRefused++
+	}
 	client.LastSeenAt = now
 	t.totalRefused++
 	t.dirty = true
@@ -372,6 +387,7 @@ type clientRow struct {
 	UDPBytesIn      uint64    `json:"udpBytesIn"`
 	UDPBytesOut     uint64    `json:"udpBytesOut"`
 	Refused         int       `json:"refused,omitempty"`
+	QuotaRefused    int       `json:"quotaRefused,omitempty"`
 	Destinations    []string  `json:"destinations,omitempty"`
 	RegisteredAt    time.Time `json:"registeredAt"`
 	LastSeenAt      time.Time `json:"lastSeenAt"`
@@ -406,6 +422,7 @@ func mergeClients(clients []Client, doc *runtimeFile, now time.Time) []clientRow
 			row.UDPBytesIn = item.UDPBytesIn
 			row.UDPBytesOut = item.UDPBytesOut
 			row.Refused = item.Refused
+			row.QuotaRefused = item.QuotaRefused
 			row.Destinations = item.Destinations
 			if item.LastSeenAt.After(row.LastSeenAt) {
 				row.LastSeenAt = item.LastSeenAt
@@ -433,6 +450,7 @@ func mergeClients(clients []Client, doc *runtimeFile, now time.Time) []clientRow
 			UDPBytesIn:      item.UDPBytesIn,
 			UDPBytesOut:     item.UDPBytesOut,
 			Refused:         item.Refused,
+			QuotaRefused:    item.QuotaRefused,
 			Destinations:    item.Destinations,
 			LastSeenAt:      item.LastSeenAt,
 		}

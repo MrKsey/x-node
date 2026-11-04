@@ -1215,6 +1215,27 @@ install -d -m 0700 -o "$SERVICE_USER" -g "$SERVICE_USER" "$STATE_DIR"
 chown -R "$SERVICE_USER:$SERVICE_USER" "$STATE_DIR"
 install -d -m 0750 -o root -g "$SERVICE_USER" /etc/x-node
 
+# The dashboard can restart the two services and write the configuration files.
+# Both need root, so instead of running the daemon as root the installer grants
+# sudo for exactly one command: "x-node helper". The helper reads a JSON
+# request from stdin and accepts a fixed set of actions.
+if [ "$WEB_ENABLED" -eq 1 ]; then
+    log "Granting the web interface the root helper"
+    cat > /etc/sudoers.d/x-node-web <<EOF
+# X-Node web interface: restart the services and apply configuration files
+# through the helper, which validates every request. Arguments are matched
+# exactly, so no other x-node command can be run with this rule.
+$SERVICE_USER ALL=(root) NOPASSWD: /usr/local/bin/x-node helper
+EOF
+    chmod 0440 /etc/sudoers.d/x-node-web
+    if command -v visudo >/dev/null 2>&1 && ! visudo -cf /etc/sudoers.d/x-node-web >/dev/null; then
+        rm -f /etc/sudoers.d/x-node-web
+        warn "sudo rejected the web helper rule; restart and config buttons stay disabled"
+    fi
+else
+    rm -f /etc/sudoers.d/x-node-web
+fi
+
 log "Writing the exit configuration"
 # The day and month of the traffic counters change at local midnight. A wrong
 # name here would stop the daemon, so the value is checked before it is used.
@@ -1230,6 +1251,12 @@ if ! python3 -c 'import sys, zoneinfo; zoneinfo.ZoneInfo(sys.argv[1])' "$SYSTEM_
 fi
 exit_tmp="$(mktemp)"
 trap 'rm -f "$exit_tmp"' EXIT
+# The address a browser should open. Behind nginx the listener is on loopback,
+# so without this the dashboard and "x-node web url" would print 127.0.0.1.
+WEB_PUBLIC_URL=""
+if [ "$WEB_ENABLED" -eq 1 ]; then
+    WEB_PUBLIC_URL="$(web_public_url)"
+fi
 allow_arg="keep"; [ "$ALLOW_ALL_SET" -eq 0 ] || allow_arg="$ALLOW_ALL"
 registration_arg="keep"; [ "$REGISTRATION_SET" -eq 0 ] || registration_arg="$REGISTRATION"
 # An empty value keeps the peer settings already present in the file; a
@@ -1239,14 +1266,15 @@ peer_replace_arg=""; [ "$PEER_AUTO_REPLACE_SET" -eq 0 ] || peer_replace_arg="$PE
 python3 - "$EXIT_CONFIG" "$exit_tmp" "$NODE_NAME" "$ADDRESS" "$SOCKS_PORT" "$API_PORT" \
     "$allow_arg" "$registration_arg" "$PEER_URI" "$peer_count_arg" \
     "$peer_replace_arg" "$SEED_PEERS" "$UPGRADE" "$WEB_ENABLED" "$WEB_PORT" \
-    "$WEB_BIND" "$WEB_TLS" "$WEB_PATH" "$IPV6_MODE" "$SYSTEM_TIMEZONE" <<'PY'
+    "$WEB_BIND" "$WEB_TLS" "$WEB_PATH" "$IPV6_MODE" "$SYSTEM_TIMEZONE" \
+    "$WEB_PUBLIC_URL" <<'PY'
 import json
 import os
 import sys
 
 (source, target, name, address, socks, api, allow_all, registration, peer_uri,
  peer_count, peer_replace, seed_peers, upgrade, web_enabled, web_port, web_bind,
- web_tls, web_path, ipv6_mode, timezone) = sys.argv[1:21]
+ web_tls, web_path, ipv6_mode, timezone, public_url) = sys.argv[1:22]
 defaults = {
     "inviteTTL": "24h",
     "inviteUses": 1,
@@ -1323,6 +1351,8 @@ web.setdefault("sessionTTL", "12h")
 web.setdefault("maxFailedLogins", 5)
 web.setdefault("lockout", "15m")
 web.setdefault("trustedProxies", ["127.0.0.1", "::1"])
+if public_url:
+    web.setdefault("publicURL", public_url)
 if web_enabled == "1" and upgrade != "1":
     # A fresh install always takes the values from the answers above; on a
     # repeated run they are already in the file and must not drift.
@@ -1330,6 +1360,8 @@ if web_enabled == "1" and upgrade != "1":
     web["port"] = int(web_port)
     web["path"] = web_path
     web["tls"] = web_tls
+    if public_url:
+        web["publicURL"] = public_url
 config["web"] = web
 
 # Traffic accounting feeds the quotas and the web dashboard. The quotas start

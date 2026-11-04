@@ -32,14 +32,15 @@ invites, quotas, peers, the web interface — serves those three jobs.
   node.
 - **IPv6 and domain names** — the node resolves names itself and can reach
   destinations over IPv4 and IPv6, picking whichever works.
-- **Access by invite** — a one-time link with a QR code; registration goes over
-  Yggdrasil, so there is nothing to type by hand.
+- **Access by invite** — a one-time link with a QR code, a note for each invite,
+  and a list of the invites that are still usable.
 - **Traffic accounting and quotas** — day, month and total per client, with
-  volume and speed limits.
-- **Web interface** — node health, clients, invites, settings and logs in a
-  browser, phones included.
+  volume limits in decimal megabytes and speed limits in megabits per second.
+- **Web interface** — a dashboard with live traffic and peers, clients, QR
+  invites, settings, config editing and logs in a browser, phones included.
 - **Peer supervision** — the node keeps several public peers alive and replaces
-  a dead or too slow one without touching connected clients.
+  a dead or too slow one without touching connected clients. Peers added by hand
+  are pinned and never replaced.
 - **One-command install** — the installer asks the rest and sets everything up.
 
 ## Installation
@@ -57,6 +58,12 @@ invite with a QR code.
 
 At the end it prints the web address, the login and the password. The same
 details are stored in `/root/x-node-credentials.txt`.
+
+The installer detects the external address and writes it to `web.publicURL`, so
+`x-node web url` and the dashboard show a link that works from any browser. When
+the web interface is enabled it also installs a narrow sudoers rule for
+`x-node helper`: that is what lets the browser restart the services and apply
+edited configuration files without giving the web process full root access.
 
 If you prefer the archive, download `x-node-<version>-linux-amd64.tar.gz` from
 the [releases](https://github.com/MrKsey/x-node/releases), unpack it and run
@@ -120,13 +127,26 @@ from the regular internet. The web interface is reachable from outside:
 - with `wss` — at `https://<server>/<path>/` on the same 443;
 - with `tls` — on its own port (usually 8080), because Yggdrasil holds 443.
 
-`sudo x-node web url` always prints the exact address.
+`sudo x-node web url` always prints the exact address. When `web.publicURL` is
+set — the installer fills it with the detected external address — the command
+prints that URL instead of the local listen address.
 
 ## Web interface
 
-It shows node health and live connections, clients with quotas, invites,
-settings and the latest log lines. Clients can be added, renamed and limited
-right in the browser.
+The interface has five pages:
+
+- **Dashboard** — X-Node health, a traffic chart in bit/s, the Yggdrasil peers
+  with a ready-to-copy `Peer: wss://…/ygg?key=…` link, quotas and the service
+  restart buttons.
+- **Clients** — everyone in the allowlist with the device name, app version,
+  live TCP and UDP counters, refusals, traffic and the quota editor. A client
+  can be added by address, renamed, limited, reset or removed here.
+- **Invites** — create an invite with a note, show its QR code again, copy the
+  `yggnode://` link or the token, and remove an invite that is no longer needed.
+- **Settings** — node name, log level and time zone; access, limits, UDP and
+  IPv6; public peers and manual Yggdrasil peers; the public web URL; the admin
+  password; the configuration editor for `config.json` and `yggdrasil.conf`.
+- **Logs** — the latest log lines, with a refresh button.
 
 ```bash
 sudo x-node web url          # address to sign in
@@ -134,7 +154,32 @@ sudo x-node web password     # new password
 ```
 
 The login and password from the installation are in
-`/root/x-node-credentials.txt`.
+`/root/x-node-credentials.txt`; the password can also be changed on the
+**Settings** page. Restarting a service and saving a configuration file need the
+helper from the installer. Without it the page says so and the rest of the
+interface keeps working.
+
+## Command line
+
+The CLI reads the same configuration and state as the service, so most commands
+work while the daemon is stopped.
+
+```bash
+sudo x-node status               # configuration and live counters, grouped
+sudo x-node clients              # allowlist, connections, traffic, refusals
+sudo x-node invite               # new QR code and link
+sudo x-node invite list          # active invites with notes and links
+sudo x-node invite remove <id>   # revoke an invite by the ID prefix
+sudo x-node keygen               # Ed25519 key pair and Yggdrasil address
+sudo x-node doctor               # installation check with hints
+```
+
+`status` prints labelled blocks — Node, Yggdrasil, Access, Outbound, Web
+interface, Quotas, Live and Files — instead of a bare list of numbers. Wherever
+a client is shown, its Yggdrasil address is printed together with the label, so
+the same person is recognisable in `clients`, `usage`, `quota` and the web
+interface. `keygen` explains what the private key, the public key and the
+derived address are for, and `keygen -json` is convenient for scripts.
 
 ## Clients
 
@@ -147,7 +192,8 @@ The login and password from the installation are in
 3. Enable the exit. Traffic now goes through X-Node.
 
 The invite is one-time. If a phone is lost, remove its address:
-`sudo x-node allow remove <address>`.
+`sudo x-node allow remove <address>`. If the QR code is lost before it is used,
+`sudo x-node invite list` shows the link and the note again.
 
 ### Linux
 
@@ -179,15 +225,27 @@ total. Counters survive a restart; the day and month change in the
 
 ```bash
 sudo x-node usage                                    # usage per client
-sudo x-node quota set <address> -monthly 100GiB -down 20Mbps
-sudo x-node quota set <address> -daily 5GiB
+sudo x-node quota set <address> -monthly 100GB -down 20Mbps
+sudo x-node quota set <address> -daily 5GB -up 5Mbps
 sudo x-node quota reset <address>                    # drop the limits
 sudo x-node quota show                               # limits and usage
 ```
 
-Zero means "no limit". A quota is checked on a new connection: a client over
-the limit is refused, while already open connections keep working. The same
-settings live in the web interface on the **Clients** tab.
+Sizes use decimal units: `MB` is 10^6 bytes and `GB` is 10^9 bytes, the same
+units the web interface shows. The explicit `MiB`, `GiB` and `TiB` spellings keep
+their binary meaning for compatibility. Speeds are written in `Kbps`, `Mbps` or
+`Gbps` and shown in Mbit/s, the unit a speed test reports.
+
+Zero means "no limit". A traffic cap is checked when a new TCP connection or UDP
+association starts: a client over the limit is refused, while already open
+connections keep working. A speed limit is a single shared bucket per client, so
+ten parallel downloads cannot multiply it; both TCP and UDP go through the same
+limiter. The same settings live in the web interface on the **Clients** page.
+
+The exit reports the effective quota and the number of quota refusals in
+`/v1/status`. The Y-Node app shows the remaining volume and speed limits and
+says "traffic quota exhausted" instead of blaming the connection limit. In the
+CLI, `x-node clients` and `x-node quota show` show the same split.
 
 ## Peers
 
@@ -199,6 +257,15 @@ sudo x-node peers refresh         # refresh the public list
 ```
 
 Clients of the exit node are not counted here and are never replaced.
+
+Peers added by hand go into `manualPeers` in the configuration or through
+**Settings → Manual Yggdrasil peers** in the web interface. They are pinned: the
+supervisor always keeps them and never swaps them for a public candidate. The
+dashboard marks them with a `manual` badge.
+
+The same page shows the node's own peering link, `wss://…/ygg?key=…` (or
+`tls://…?key=…`). Copy it into the peers of another Yggdrasil node to connect
+the two directly.
 
 ## Certificate
 
@@ -237,16 +304,24 @@ sudo journalctl -u x-node -f    # the log
 ```
 
 **The app cannot see the exit.** Check that Yggdrasil runs on both sides, the
-phone's address is in `x-node allow list` and the SOCKS5 port matches.
+phone's address is in `x-node allow list` and the SOCKS5 port matches. If the QR
+code is lost, `x-node invite list` prints the link again; the dashboard shows the
+node's own `Peer:` link for a direct connection.
 
 **No IPv6.** The node keeps working over IPv4 — that is not an error.
 `x-node doctor` prints the reason.
 
-**A client gets "not allowed".** It is not in the allowlist or its quota is
-exhausted: `x-node quota show` shows both.
+**A client gets "not allowed".** It is not in the allowlist, its traffic quota
+is exhausted, or it hit the connection limit: `x-node clients` shows the split
+between quota and connection refusals, and `x-node quota show` shows the limits.
 
 **The browser complains about the certificate.** That is expected with a
 self-signed certificate; the section above explains how to install a real one.
+
+**Restart or save is disabled in the web interface.** The installer adds the
+sudoers rule for `x-node helper` only when the web interface is enabled. Rerun
+the installer with `--web` to add it; until then use `sudo systemctl restart
+x-node` and edit the files from the shell.
 
 ## Development
 

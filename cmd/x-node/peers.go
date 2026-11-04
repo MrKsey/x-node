@@ -226,6 +226,9 @@ type peerSettings struct {
 	RefreshInterval    time.Duration
 	ImprovementPercent int
 	Seed               []string
+	// Manual is the operator's own list. It is kept connected on top of
+	// Count and is never trimmed or replaced by the supervisor.
+	Manual []string
 }
 
 type peersState struct {
@@ -299,6 +302,7 @@ func peerSettingsFrom(cfg Config) peerSettings {
 		RefreshInterval:    refresh,
 		ImprovementPercent: cfg.PeerImprovementPercent,
 		Seed:               cleanPeerList(cfg.Peers),
+		Manual:             cleanPeerList(cfg.ManualPeers),
 	}
 }
 
@@ -384,7 +388,10 @@ func (s *peerSupervisor) step(ctx context.Context) {
 	// installer writes the probed list to both files, and an operator may add a
 	// peer by hand; adopting them first keeps the total at peerCount instead of
 	// letting the configured and the managed lists stack up.
-	s.adoptLocked(outbound)
+	s.adoptLocked(outbound, settings.Manual)
+	// Manual links belong to the operator: put a missing one back, but never
+	// count it against peerCount and never replace it.
+	s.restoreManualLocked(settings.Manual, outbound, now)
 	// A peer that is configured but absent from the admin response is missing
 	// from the running node (for example after a Yggdrasil restart, which drops
 	// runtime peers). Put it back instead of waiting for the dead-peer timer.
@@ -417,9 +424,14 @@ func (s *peerSupervisor) step(ctx context.Context) {
 // adoptLocked adds every outbound peer that is not in the managed list yet.
 // The URI from the seed list is preferred: it may carry a ?key= that the admin
 // response drops, and the supervisor must be able to re-add the peer later.
-func (s *peerSupervisor) adoptLocked(outbound map[string]adminPeer) {
+// Manual peers are skipped: they are kept by restoreManualLocked and must not
+// be trimmed when the automatic list is longer than peerCount.
+func (s *peerSupervisor) adoptLocked(outbound map[string]adminPeer, manual []string) {
 	known := make(map[string]bool, len(s.managed))
 	for _, uri := range s.managed {
+		known[peerKeyOfURI(uri)] = true
+	}
+	for _, uri := range manual {
 		known[peerKeyOfURI(uri)] = true
 	}
 	seeded := make(map[string]string, len(s.seed))
@@ -459,19 +471,34 @@ func (s *peerSupervisor) restoreMissingLocked(outbound map[string]adminPeer, now
 	}
 }
 
-// reloadConfig applies peer settings when the file changed. Only the peer
-// part is hot-reloaded; ports and addresses still need a restart.
-func (s *peerSupervisor) reloadConfig() {
-	info, err := os.Stat(s.cfgPath)
-	if err != nil {
-		return
+// restoreManualLocked re-adds the operator's peers. Unlike the managed list
+// they are not capped, replaced or removed; a dead manual link is simply dialled
+// again on the next check.
+func (s *peerSupervisor) restoreManualLocked(manual []string, outbound map[string]adminPeer, now time.Time) {
+	for _, uri := range manual {
+		if _, ok := outbound[peerKeyOfURI(uri)]; ok {
+			continue
+		}
+		if err := s.node.AddPeer(uri); err != nil {
+			s.warn("could not add manual peer %s: %v", uri, err)
+			continue
+		}
+		s.addedAt[uri] = now
+		s.log.info("manual peer %s added to the running Yggdrasil node", uri)
 	}
-	stamp := fmt.Sprintf("%d:%d", info.ModTime().UnixNano(), info.Size())
+}
+
+// reloadConfig applies peer settings when the file changed. Only the peer
+// part is hot-reloaded; ports and addresses still need a restart. The overlay
+// written by the web interface is read as well, so a manual peer or a new
+// peerCount from the dashboard applies without root.
+func (s *peerSupervisor) reloadConfig() {
+	stamp := configStamp(s.cfgPath)
 	if stamp == s.stamp {
 		return
 	}
 	s.stamp = stamp
-	cfg, err := loadConfig(s.cfgPath)
+	cfg, err := loadEffectiveConfig(s.cfgPath)
 	if err != nil {
 		s.warn("cannot reload %s: %v", s.cfgPath, err)
 		return
@@ -533,7 +560,11 @@ func (s *peerSupervisor) reseedLocked(seed []string) {
 }
 
 func (s *peerSupervisor) firstDeadLocked(outbound map[string]adminPeer, now time.Time, settings peerSettings) string {
+	manual := peerKeySet(settings.Manual)
 	for _, uri := range s.managed {
+		if manual[peerKeyOfURI(uri)] {
+			continue
+		}
 		if state, ok := outbound[peerKeyOfURI(uri)]; ok && state.Up {
 			continue
 		}
@@ -556,7 +587,7 @@ func (s *peerSupervisor) replaceLocked(
 	now time.Time,
 	settings peerSettings,
 ) {
-	candidate, ok := s.takeCandidateLocked(outbound, now)
+	candidate, ok := s.takeCandidateLocked(outbound, now, settings.Manual)
 	if !ok {
 		s.startProbeLocked(ctx, settings)
 		return
@@ -584,7 +615,7 @@ func (s *peerSupervisor) topUpLocked(
 	settings peerSettings,
 ) {
 	for len(s.managed) < settings.Count {
-		candidate, ok := s.takeCandidateLocked(outbound, now)
+		candidate, ok := s.takeCandidateLocked(outbound, now, settings.Manual)
 		if !ok {
 			s.startProbeLocked(ctx, settings)
 			return
@@ -607,7 +638,7 @@ func (s *peerSupervisor) trimLocked(
 	settings peerSettings,
 ) {
 	for len(s.managed) > settings.Count {
-		worst := s.worstLocked(outbound, now, false)
+		worst := s.worstLocked(outbound, now, false, settings.Manual)
 		if worst == "" {
 			return
 		}
@@ -632,7 +663,7 @@ func (s *peerSupervisor) improveLocked(
 	if len(s.pool) == 0 {
 		return
 	}
-	worst, worstLatency := s.worstUpLocked(outbound, now)
+	worst, worstLatency := s.worstUpLocked(outbound, now, settings.Manual)
 	if worst == "" || worstLatency <= 0 {
 		return
 	}
@@ -644,7 +675,7 @@ func (s *peerSupervisor) improveLocked(
 		if candidate.LatencyMs*100 >= worstLatency*(100-margin) {
 			continue
 		}
-		if s.hostInUseLocked(candidate.URI, outbound) {
+		if s.hostInUseLocked(candidate.URI, outbound, settings.Manual) {
 			continue
 		}
 		if err := s.node.RemovePeer(worst); err != nil {
@@ -669,10 +700,14 @@ func (s *peerSupervisor) improveLocked(
 
 // worstUpLocked returns the slowest live managed peer. A link added recently
 // is skipped: its first latency sample is not trustworthy yet.
-func (s *peerSupervisor) worstUpLocked(outbound map[string]adminPeer, now time.Time) (string, float64) {
+func (s *peerSupervisor) worstUpLocked(outbound map[string]adminPeer, now time.Time, manual []string) (string, float64) {
+	manualKeys := peerKeySet(manual)
 	worst := ""
 	worstLatency := 0.0
 	for _, uri := range s.managed {
+		if manualKeys[peerKeyOfURI(uri)] {
+			continue
+		}
 		state, ok := outbound[peerKeyOfURI(uri)]
 		if !ok || !state.Up || state.Latency <= 0 {
 			continue
@@ -691,11 +726,15 @@ func (s *peerSupervisor) worstUpLocked(outbound map[string]adminPeer, now time.T
 
 // worstLocked picks the link to drop when the list is longer than peerCount:
 // a dead peer first, then the slowest one.
-func (s *peerSupervisor) worstLocked(outbound map[string]adminPeer, now time.Time, onlyFresh bool) string {
+func (s *peerSupervisor) worstLocked(outbound map[string]adminPeer, now time.Time, onlyFresh bool, manual []string) string {
+	manualKeys := peerKeySet(manual)
 	worst := ""
 	worstLatency := 0.0
 	worstDown := false
 	for _, uri := range s.managed {
+		if manualKeys[peerKeyOfURI(uri)] {
+			continue
+		}
 		state, ok := outbound[peerKeyOfURI(uri)]
 		up := ok && state.Up
 		if onlyFresh {
@@ -733,9 +772,12 @@ func (s *peerSupervisor) worstLocked(outbound map[string]adminPeer, now time.Tim
 
 // takeCandidateLocked removes and returns the best pool entry that is not in
 // use, shares no host with a live link and is not penalised.
-func (s *peerSupervisor) takeCandidateLocked(outbound map[string]adminPeer, now time.Time) (probeResult, bool) {
-	used := make(map[string]bool, len(s.managed)+len(outbound))
+func (s *peerSupervisor) takeCandidateLocked(outbound map[string]adminPeer, now time.Time, manual []string) (probeResult, bool) {
+	used := make(map[string]bool, len(s.managed)+len(outbound)+len(manual))
 	for _, uri := range s.managed {
+		used[peerHost(uri)] = true
+	}
+	for _, uri := range manual {
 		used[peerHost(uri)] = true
 	}
 	for uri := range outbound {
@@ -769,10 +811,15 @@ func (s *peerSupervisor) takeCandidateLocked(outbound map[string]adminPeer, now 
 	return picked, found
 }
 
-func (s *peerSupervisor) hostInUseLocked(uri string, outbound map[string]adminPeer) bool {
+func (s *peerSupervisor) hostInUseLocked(uri string, outbound map[string]adminPeer, manual []string) bool {
 	host := peerHost(uri)
 	for _, managed := range s.managed {
 		if peerHost(managed) == host {
+			return true
+		}
+	}
+	for _, item := range manual {
+		if peerHost(item) == host {
 			return true
 		}
 	}
@@ -828,6 +875,9 @@ func (s *peerSupervisor) startProbeLocked(ctx context.Context, settings peerSett
 func (s *peerSupervisor) filterPoolLocked(results []probeResult) []probeResult {
 	usedHosts := make(map[string]bool, len(s.managed))
 	for _, uri := range s.managed {
+		usedHosts[peerHost(uri)] = true
+	}
+	for _, uri := range s.settings.Manual {
 		usedHosts[peerHost(uri)] = true
 	}
 	now := time.Now()
@@ -989,6 +1039,16 @@ func peerKeyOfURI(uri string) string {
 		port = ":" + parsed.Port()
 	}
 	return parsed.Scheme + "://" + host + port + parsed.Path
+}
+
+// peerKeySet maps peer keys without their query strings, for lookups that must
+// treat tls://host:port?key=... and tls://host:port as one link.
+func peerKeySet(list []string) map[string]bool {
+	out := make(map[string]bool, len(list))
+	for _, uri := range list {
+		out[peerKeyOfURI(uri)] = true
+	}
+	return out
 }
 
 func cleanPeerList(list []string) []string {

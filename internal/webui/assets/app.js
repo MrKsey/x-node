@@ -55,27 +55,42 @@ function api(method, path, body) {
 }
 
 function bytes(value) {
-  const units = ["B", "KiB", "MiB", "GiB", "TiB", "PiB"];
+  const units = ["B", "KB", "MB", "GB", "TB", "PB"];
   let number = Number(value) || 0;
   let index = 0;
-  while (number >= 1024 && index < units.length - 1) {
-    number /= 1024;
+  while (number >= 1000 && index < units.length - 1) {
+    number /= 1000;
     index += 1;
   }
-  const digits = number >= 100 || index === 0 ? 0 : 1;
+  const digits = index === 0 || number >= 100 ? 0 : 1;
   return number.toFixed(digits) + " " + units[index];
 }
 
-function speed(bytesPerSecond) {
-  return bytes(bytesPerSecond) + "/s";
+// bitrate renders bits per second. The dashboard shows throughput in bit/s,
+// because that is the unit of a provider tariff and of the quota form.
+function bitrate(bitsPerSecond) {
+  const units = ["bps", "Kbps", "Mbps", "Gbps", "Tbps"];
+  let number = Number(bitsPerSecond) || 0;
+  let index = 0;
+  while (number >= 1000 && index < units.length - 1) {
+    number /= 1000;
+    index += 1;
+  }
+  const digits = index === 0 || number >= 100 ? 0 : 1;
+  return number.toFixed(digits) + " " + units[index];
 }
 
 function rate(kbps) {
   const value = Number(kbps) || 0;
   if (value <= 0) return "unlimited";
-  if (value >= 1000000) return (value / 1000000).toFixed(1) + " Gbps";
-  if (value >= 1000) return (value / 1000).toFixed(1) + " Mbps";
-  return value + " Kbps";
+  if (value >= 1000000) return trimNumber(value / 1000000) + " Gbps";
+  if (value >= 1000) return trimNumber(value / 1000) + " Mbps";
+  return trimNumber(value) + " Kbps";
+}
+
+function trimNumber(value) {
+  const text = Number(value).toFixed(2);
+  return text.replace(/\.?0+$/, "");
 }
 
 function duration(seconds) {
@@ -135,8 +150,8 @@ async function copy(text) {
   }
 }
 
-function gb(value) {
-  return (Number(value) || 0) / 1073741824;
+function mb(value) {
+  return (Number(value) || 0) / 1000000;
 }
 
 /* ---------- theme ---------- */
@@ -326,7 +341,7 @@ async function render() {
       view.innerHTML = invitesHtml();
       wireInvites();
     } else if (state.view === "settings") {
-      await loadSettings();
+      await Promise.all([loadSettings(), loadPeers()]);
       view.innerHTML = settingsHtml();
       wireSettings();
     } else if (state.view === "logs") {
@@ -345,6 +360,8 @@ function dashboardHtml() {
   const status = state.status || {};
   const peers = state.peers || {};
   const self = peers.self || {};
+  const quotas = status.quotas || {};
+  const apiShared = status.apiPort && status.apiPort === status.socksPort;
   return `
     <div class="grid kpi">
       <div class="card kpi-card">
@@ -379,22 +396,31 @@ function dashboardHtml() {
         </div>
         <span class="muted small" id="chart-legend"></span>
       </header>
-      <canvas class="chart" id="chart"></canvas>
-      <p class="hint" id="chart-hint">Download and upload through the exit node. Updated every 5 seconds.</p>
+      <div class="chart-wrap">
+        <canvas class="chart" id="chart"></canvas>
+        <div class="chart-tip hidden" id="chart-tip"></div>
+      </div>
+      <p class="hint" id="chart-hint">Download and upload through the exit node, in bit/s. Updated every 5 seconds.</p>
     </div>
 
     <div class="grid two">
       <div class="card section">
-        <header><h3>Health</h3></header>
+        <header><h3>X-Node</h3><span class="muted small">${escapeHtml(status.version || "")}</span></header>
         <table class="facts">
-          <tr><th>Service</th><td class="right"><span class="pill ok">running</span></td></tr>
-          <tr><th>Version</th><td class="right">${escapeHtml(status.version || "")}</td></tr>
+          <tr><th>Service</th><td class="right"><span class="pill ok">running</span> · ${duration(status.uptimeSeconds || 0)}</td></tr>
           <tr><th>SOCKS5</th><td class="right mono">[${escapeHtml(status.address || "")}]:${status.socksPort || ""}</td></tr>
-          <tr><th>UDP relay</th><td class="right">${status.udpEnabled ? "enabled" : "disabled"}</td></tr>
+          <tr><th>API</th><td class="right mono">${apiShared ? "shared with SOCKS5" : "port " + (status.apiPort || "")} · auth ${escapeHtml(status.apiAuth || "")}</td></tr>
+          <tr><th>Registration</th><td class="right">${status.registration ? "enabled" : "disabled"}</td></tr>
           <tr><th>Open mode</th><td class="right">${status.allowAll ? '<span class="pill warn">allowAll</span>' : "allowlist"}</td></tr>
+          <tr><th>Limits</th><td class="right">${status.maxClients || 0} clients · ${status.maxConnsPerClient || 0}/client · ${status.maxConnsTotal || 0} total</td></tr>
+          <tr><th>UDP relay</th><td class="right">${status.udpEnabled ? "enabled · " + (status.maxUdpAssociations || 0) + " association(s)" : "disabled"}</td></tr>
           <tr><th>IPv6 outbound</th><td class="right">${status.ipv6Available ? '<span class="pill ok">' + escapeHtml(status.ipv6Mode) + "</span>" : '<span class="pill warn">IPv4 only</span>'}</td></tr>
-          <tr><th>Public peers</th><td class="right">${peers.up || 0} up · ${peers.managed || 0} managed · ${peers.inbound || 0} inbound</td></tr>
+          <tr><th>Domain names</th><td class="right">${status.domainResolution ? "resolved on the exit" : "client resolves"}</td></tr>
+          <tr><th>Log level</th><td class="right">${escapeHtml(status.logLevel || "")}</td></tr>
+          <tr><th>Config</th><td class="right mono ellipsis" title="${escapeHtml(status.configPath || "")}">${escapeHtml(status.configPath || "—")}</td></tr>
+          <tr><th>State</th><td class="right mono ellipsis" title="${escapeHtml(status.stateDir || "")}">${escapeHtml(status.stateDir || "—")}</td></tr>
         </table>
+        <p class="hint">${escapeHtml(status.ipv6Detail || "")}</p>
       </div>
 
       <div class="card section">
@@ -405,9 +431,34 @@ function dashboardHtml() {
           <tr><th>Public key</th><td class="right mono ellipsis" title="${escapeHtml(self.key || "")}">${escapeHtml(self.key || "—")}</td></tr>
           <tr><th>Routing entries</th><td class="right">${self.routing_entries == null ? "—" : self.routing_entries}</td></tr>
           <tr><th>Subnet</th><td class="right mono">${escapeHtml(self.subnet || "—")}</td></tr>
-          <tr><th>Public peers</th><td class="right">${peers.peerCount || 0} wanted, ${peers.autoReplace ? "auto replace on" : "auto replace off"}</td></tr>
+          <tr><th>Peers</th><td class="right">${peers.up || 0} up · ${peers.managed || 0} automatic · ${peers.manualPeers ? peers.manualPeers.length : 0} manual · ${peers.inbound || 0} inbound</td></tr>
+          <tr><th>Auto replace</th><td class="right">${peers.autoReplace ? "on" : "off"} · ${peers.peerCount || 0} wanted</td></tr>
         </table>
+        <div class="peer-box">
+          <div class="label">Peer link</div>
+          ${status.peerURI
+            ? `<div class="mono break">${escapeHtml(status.peerURI)}</div>
+               <div class="actions">
+                 <button class="btn small" data-copy="${escapeHtml(status.peerURI)}">Copy peer link</button>
+               </div>
+               <p class="hint">Add it in Y-Node → Exit node → Add → Peers, or append it to the <span class="mono">Peers</span> list in yggdrasil.conf.</p>`
+            : '<p class="hint">Incoming peering is disabled. Start the installer with a public host and a peering port to get a wss:// or tls:// link.</p>'}
+        </div>
       </div>
+    </div>
+
+    <div class="card section">
+      <header>
+        <h3>Quotas</h3>
+        <span class="muted small">${status.usageEnabled ? "accounting on · " + escapeHtml(status.usageTimezone || "") : "accounting off"}</span>
+      </header>
+      <table class="facts">
+        <tr><th>Default monthly cap</th><td class="right">${quotas.monthlyBytes > 0 ? bytes(quotas.monthlyBytes) : "unlimited"}</td></tr>
+        <tr><th>Default daily cap</th><td class="right">${quotas.dailyBytes > 0 ? bytes(quotas.dailyBytes) : "unlimited"}</td></tr>
+        <tr><th>Default download</th><td class="right">${rate(quotas.downKbps)}</td></tr>
+        <tr><th>Default upload</th><td class="right">${rate(quotas.upKbps)}</td></tr>
+      </table>
+      <p class="hint">Per-client limits are on the Clients page. Traffic is measured in decimal MB, speed in Mbit/s.</p>
     </div>
 
     <div class="card section">
@@ -419,11 +470,18 @@ function dashboardHtml() {
     </div>
 
     <div class="card section">
-      <header><h3>Web interface</h3><span class="muted small">${escapeHtml(status.webPath || "")}</span></header>
+      <header><h3>Web interface</h3><span class="muted small">${escapeHtml(status.webPath || "")} · login ${escapeHtml(status.webLogin || "")}</span></header>
       <div class="actions">
         ${(status.webURLs || []).map((url) => `<button class="btn small" data-copy="${escapeHtml(url)}">${escapeHtml(url)}</button>`).join("")}
       </div>
-      ${status.pendingRestart ? '<p class="error">Some settings need a restart: sudo systemctl restart x-node</p>' : ""}
+      ${status.pendingRestart ? '<p class="error">The configuration file changed and the running service has not read it yet.</p>' : ""}
+      ${status.restartSupported
+        ? `<div class="actions">
+             <button class="btn small" data-restart="x-node">Restart x-node</button>
+             <button class="btn small" data-restart="yggdrasil">Restart yggdrasil</button>
+           </div>
+           <p class="hint">Restarting x-node drops the open tunnels for a moment. Restarting yggdrasil rebuilds every peering link.</p>`
+        : '<p class="hint">Restarts are disabled: the root helper is not installed. Run install.sh again to enable them.</p>'}
     </div>
   `;
 }
@@ -435,7 +493,8 @@ function peerTableHtml(peers) {
   const rows = peers.map((peer) => {
     const statePill = peer.up ? '<span class="pill ok">up</span>' : '<span class="pill bad">down</span>';
     const direction = peer.inbound ? '<span class="pill warn">in</span>' : '<span class="pill">out</span>';
-    const managed = peer.managed ? '<span class="pill ok">managed</span>' : "";
+    const managed = peer.managed ? '<span class="pill ok">auto</span>' : "";
+    const manual = peer.manual ? '<span class="pill">manual</span>' : "";
     return `
       <tr>
         <td data-label="Link"><div class="mono break">${escapeHtml(peer.uri)}</div></td>
@@ -445,7 +504,7 @@ function peerTableHtml(peers) {
         <td class="right" data-label="RTT">${peer.latencyMs > 0 ? peer.latencyMs.toFixed(1) + " ms" : "—"}</td>
         <td class="right hide-sm" data-label="Uptime">${peer.uptimeSeconds > 0 ? duration(peer.uptimeSeconds) : "—"}</td>
         <td class="right hide-sm" data-label="Traffic">↑ ${bytes(peer.bytesRecv)} · ↓ ${bytes(peer.bytesSent)}</td>
-        <td class="right" data-label="Managed">${managed}</td>
+        <td class="right" data-label="Managed">${managed}${manual}</td>
       </tr>`;
   }).join("");
   return `<div class="table-wrap"><table class="cards">
@@ -470,6 +529,20 @@ function wireDashboard() {
       } catch (err) { toast(err.message, true); }
     });
   });
+  $$("[data-restart]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const service = button.dataset.restart;
+      if (!confirm("Restart " + service + "? Open tunnels will reconnect.")) return;
+      button.disabled = true;
+      try {
+        await api("POST", "api/restart", { service });
+        toast("Restart requested: " + service);
+      } catch (err) {
+        toast(err.message, true);
+        button.disabled = false;
+      }
+    });
+  });
 }
 
 function renderDashboard() {
@@ -481,6 +554,8 @@ function renderDashboard() {
   drawChart();
 }
 
+let chartGeometry = null;
+
 function drawChart() {
   const canvas = $("#chart");
   const data = state.traffic;
@@ -491,17 +566,23 @@ function drawChart() {
   const hint = $("#chart-hint");
   const last = points.length ? points[points.length - 1] : null;
   if (legend && last) {
-    legend.textContent = "↓ " + speed(last.tx / interval) + "  ↑ " + speed(last.rx / interval);
+    legend.textContent = "↓ " + bitrate((last.tx / interval) * 8) + "  ↑ " + bitrate((last.rx / interval) * 8);
   }
   if (hint) {
-    hint.textContent = points.length < 3
+    let freshness = "";
+    const generated = data.generatedAt ? new Date(data.generatedAt) : null;
+    if (generated && !Number.isNaN(generated.getTime())) {
+      const age = Math.max(0, Math.round((Date.now() - generated.getTime()) / 1000));
+      freshness = " · data " + (age < 2 ? "just now" : age + " s old");
+    }
+    hint.textContent = (points.length < 3
       ? "Collecting samples: the chart fills up within a few minutes."
-      : "Download and upload through the exit node. Updated every 5 seconds.";
+      : "Download and upload through the exit node, in bit/s.") + freshness;
   }
 
   const ratio = window.devicePixelRatio || 1;
   const width = canvas.clientWidth || 600;
-  const height = canvas.clientHeight || 180;
+  const height = canvas.clientHeight || 200;
   canvas.width = width * ratio;
   canvas.height = height * ratio;
   const ctx = canvas.getContext("2d");
@@ -514,7 +595,7 @@ function drawChart() {
   const ok = style.getPropertyValue("--ok").trim() || "#12805c";
   const muted = style.getPropertyValue("--muted").trim() || "#888";
 
-  const padLeft = 46;
+  const padLeft = 58;
   const padBottom = 20;
   const padTop = 8;
   const plotW = width - padLeft;
@@ -531,15 +612,18 @@ function drawChart() {
   }
 
   if (points.length < 2) {
+    chartGeometry = null;
     ctx.fillStyle = muted;
     ctx.font = "13px sans-serif";
     ctx.fillText("Collecting samples…", padLeft + 8, padTop + 24);
     return;
   }
 
+  // Everything on the chart is in bits per second: a point stores bytes in its
+  // bucket, so dividing by the bucket length and multiplying by 8 converts it.
   let max = 1;
   points.forEach((point) => {
-    max = Math.max(max, point.rx / interval, point.tx / interval);
+    max = Math.max(max, (point.rx / interval) * 8, (point.tx / interval) * 8);
   });
   max *= 1.15;
 
@@ -554,7 +638,7 @@ function drawChart() {
     ctx.beginPath();
     points.forEach((point, index) => {
       const x = xAt(index);
-      const y = yAt((point[line.key] || 0) / interval);
+      const y = yAt(((point[line.key] || 0) / interval) * 8);
       if (index === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
     });
     if (line.fill) {
@@ -571,7 +655,7 @@ function drawChart() {
 
   ctx.fillStyle = muted;
   ctx.font = "11px sans-serif";
-  ctx.fillText(speed(max), 4, padTop + 10);
+  ctx.fillText(bitrate(max), 4, padTop + 10);
   ctx.fillText("0", 4, padTop + plotH);
 
   const labels = 5;
@@ -583,6 +667,49 @@ function drawChart() {
     const left = i === 0 ? x : i === labels - 1 ? x - textWidth : x - textWidth / 2;
     ctx.fillText(text, left, height - 4);
   }
+
+  chartGeometry = { points, interval, xAt, yAt, padLeft, padTop, plotW, plotH, width, height };
+  wireChartTooltip(canvas);
+}
+
+// wireChartTooltip shows the exact time and both rates under the pointer. The
+// listener is assigned, not added, so a redraw does not stack handlers.
+function wireChartTooltip(canvas) {
+  const tip = $("#chart-tip");
+  if (!tip) return;
+  const show = (clientX, clientY) => {
+    const geometry = chartGeometry;
+    if (!geometry) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = clientX - rect.left;
+    if (x < geometry.padLeft || x > geometry.width) {
+      tip.classList.add("hidden");
+      return;
+    }
+    const relative = (x - geometry.padLeft) / geometry.plotW;
+    const index = Math.max(0, Math.min(geometry.points.length - 1,
+      Math.round(relative * (geometry.points.length - 1))));
+    const point = geometry.points[index];
+    const down = ((point.tx || 0) / geometry.interval) * 8;
+    const up = ((point.rx || 0) / geometry.interval) * 8;
+    tip.innerHTML = `<b>${clockTime(point.at)}</b><br>↓ ${bitrate(down)}<br>↑ ${bitrate(up)}`;
+    const wrapRect = tip.parentElement.getBoundingClientRect();
+    tip.style.left = Math.min(Math.max(8, clientX - wrapRect.left + 12), wrapRect.width - 150) + "px";
+    tip.style.top = Math.max(8, clientY - wrapRect.top - 54) + "px";
+    tip.classList.remove("hidden");
+  };
+  canvas.onmousemove = (event) => show(event.clientX, event.clientY);
+  canvas.onmouseleave = () => tip.classList.add("hidden");
+  canvas.ontouchstart = (event) => {
+    if (event.touches.length) show(event.touches[0].clientX, event.touches[0].clientY);
+  };
+  canvas.ontouchmove = (event) => {
+    if (event.touches.length) {
+      event.preventDefault();
+      show(event.touches[0].clientX, event.touches[0].clientY);
+    }
+  };
+  canvas.ontouchend = () => tip.classList.add("hidden");
 }
 
 window.addEventListener("resize", () => {
@@ -625,8 +752,8 @@ function clientsHtml() {
       <header><h3>Default quota</h3></header>
       <p class="hint">Used for every client without its own limits. Zero means no limit.</p>
       <form id="quota-defaults" class="form-grid">
-        <label class="field"><span>Monthly cap (GiB)</span><input id="def-monthly" type="number" min="0" step="1" value="${gb(defaults.monthlyBytes)}"></label>
-        <label class="field"><span>Daily cap (GiB)</span><input id="def-daily" type="number" min="0" step="1" value="${gb(defaults.dailyBytes)}"></label>
+        <label class="field"><span>Monthly cap (MB)</span><input id="def-monthly" type="number" min="0" step="1" value="${Math.round(mb(defaults.monthlyBytes))}"></label>
+        <label class="field"><span>Daily cap (MB)</span><input id="def-daily" type="number" min="0" step="1" value="${Math.round(mb(defaults.dailyBytes))}"></label>
         <label class="field"><span>Download (Mbps)</span><input id="def-down" type="number" min="0" step="1" value="${(defaults.downKbps || 0) / 1000}"></label>
         <label class="field"><span>Upload (Mbps)</span><input id="def-up" type="number" min="0" step="1" value="${(defaults.upKbps || 0) / 1000}"></label>
         <div class="full"><button class="btn primary" type="submit">Save defaults</button></div>
@@ -639,11 +766,24 @@ function clientRowHtml(client) {
   const quota = client.quota || {};
   const used = quota.monthlyBytes > 0 ? Math.min(100, (quota.monthUsed / quota.monthlyBytes) * 100) : 0;
   const barClass = used >= 95 ? "bar bad" : used >= 75 ? "bar warn" : "bar";
+  const details = [
+    client.deviceName ? "device " + client.deviceName : "",
+    client.appVersion ? "app " + client.appVersion : "",
+    client.registeredAt ? "registered " + when(client.registeredAt) : "",
+    (client.udpDatagramsIn || client.udpDatagramsOut)
+      ? "UDP " + (client.udpDatagramsIn || 0) + " in / " + (client.udpDatagramsOut || 0) + " out · "
+        + bytes((client.udpBytesIn || 0) + (client.udpBytesOut || 0))
+      : "",
+    (client.destinations || []).length ? "destinations: " + client.destinations.join(", ") : "",
+    client.refused ? client.refused + " refused (" + (client.quotaRefused || 0) + " by quota)" : "",
+  ].filter(Boolean).join(" · ");
+  const quotaPill = quota.exhausted ? '<span class="pill bad">quota exhausted</span>' : "";
   return `
     <tr>
       <td data-label="Client">
         <div class="mono break">${escapeHtml(client.address)}</div>
         <div class="muted small">${escapeHtml(client.label || "no label")}${client.source ? " · " + escapeHtml(client.source) : ""}</div>
+        ${details ? `<div class="muted small">${escapeHtml(details)}</div>` : ""}
       </td>
       <td data-label="State"><span class="pill ${client.state === "connected" ? "ok" : ""}">${escapeHtml(client.state)}</span></td>
       <td class="right" data-label="TCP">${client.connections || 0}</td>
@@ -653,6 +793,10 @@ function clientRowHtml(client) {
       <td data-label="Quota">
         <div class="${barClass}"><i style="width:${used}%"></i></div>
         <div class="muted small">${quota.monthlyBytes > 0 ? bytes(quota.monthUsed) + " of " + bytes(quota.monthlyBytes) : "no cap"}</div>
+        <div class="muted small">${quota.dailyBytes > 0 ? "today " + bytes(quota.dayUsed) + " of " + bytes(quota.dailyBytes) : ""}</div>
+        <div class="muted small">${rate(quota.downKbps)} down · ${rate(quota.upKbps)} up</div>
+        ${quotaPill}
+        ${quota.reason ? `<div class="muted small">${escapeHtml(quota.reason)}</div>` : ""}
       </td>
       <td class="right hide-sm" data-label="Last seen">${when(client.lastSeenAt)}</td>
       <td class="right nowrap" data-label="Actions">
@@ -706,8 +850,8 @@ function wireClients() {
     try {
       await api("PUT", "api/settings", {
         quotas: {
-          monthlyBytes: Math.round(Number($("#def-monthly").value) * 1073741824),
-          dailyBytes: Math.round(Number($("#def-daily").value) * 1073741824),
+          monthlyBytes: Math.round(Number($("#def-monthly").value) * 1000000),
+          dailyBytes: Math.round(Number($("#def-daily").value) * 1000000),
           downKbps: Math.round(Number($("#def-down").value) * 1000),
           upKbps: Math.round(Number($("#def-up").value) * 1000),
         },
@@ -730,8 +874,8 @@ function openClientEditor(address) {
       <header><h3>${escapeHtml(client.address)}</h3></header>
       <div class="form-grid">
         <label class="field"><span>Label</span><input id="e-label" value="${escapeHtml(client.label || "")}" placeholder="family phone"></label>
-        <label class="field"><span>Monthly cap (GiB, 0 = none)</span><input id="e-monthly" type="number" min="0" step="1" value="${gb(quota.monthlyBytes)}"></label>
-        <label class="field"><span>Daily cap (GiB, 0 = none)</span><input id="e-daily" type="number" min="0" step="1" value="${gb(quota.dailyBytes)}"></label>
+        <label class="field"><span>Monthly cap (MB, 0 = none)</span><input id="e-monthly" type="number" min="0" step="1" value="${Math.round(mb(quota.monthlyBytes))}"></label>
+        <label class="field"><span>Daily cap (MB, 0 = none)</span><input id="e-daily" type="number" min="0" step="1" value="${Math.round(mb(quota.dailyBytes))}"></label>
         <label class="field"><span>Download (Mbps, 0 = none)</span><input id="e-down" type="number" min="0" step="1" value="${(quota.downKbps || 0) / 1000}"></label>
         <label class="field"><span>Upload (Mbps, 0 = none)</span><input id="e-up" type="number" min="0" step="1" value="${(quota.upKbps || 0) / 1000}"></label>
         <div class="field"><span>Traffic</span><div class="muted">Today ${bytes(client.dayUsed || 0)} · month ${bytes(client.monthUsed || 0)}</div></div>
@@ -763,8 +907,8 @@ function openClientEditor(address) {
         label: $("#e-label").value.trim(),
       });
       await api("PUT", "api/quotas/" + encodeURIComponent(client.address), {
-        monthlyBytes: Math.round(Number($("#e-monthly").value) * 1073741824),
-        dailyBytes: Math.round(Number($("#e-daily").value) * 1073741824),
+        monthlyBytes: Math.round(Number($("#e-monthly").value) * 1000000),
+        dailyBytes: Math.round(Number($("#e-daily").value) * 1000000),
         downKbps: Math.round(Number($("#e-down").value) * 1000),
         upKbps: Math.round(Number($("#e-up").value) * 1000),
       });
@@ -784,13 +928,17 @@ function invitesHtml() {
       <td data-label="Note">${escapeHtml(invite.note || "—")}</td>
       <td class="right" data-label="Used">${invite.used} / ${invite.uses}</td>
       <td class="right" data-label="Expires">${new Date(invite.expiresAt).toLocaleString()}</td>
-      <td class="right" data-label=""><button class="btn small danger" data-invite="${escapeHtml(invite.hash)}">Delete</button></td>
+      <td class="right nowrap" data-label="">
+        ${invite.link ? `<button class="btn small" data-qr="${escapeHtml(invite.hash)}">QR</button>
+        <button class="btn small" data-invite-copy="${escapeHtml(invite.link)}">Copy link</button>` : ""}
+        <button class="btn small danger" data-invite="${escapeHtml(invite.hash)}">Delete</button>
+      </td>
     </tr>`).join("");
 
   return `
     <div class="card section">
       <header><h3>New invite</h3></header>
-      <p class="hint">The link is shown once. Open it on the phone with Y-Node, or paste it into Exit node → Add → Import from link.</p>
+      <p class="hint">The invite is stored with its token, so the QR code and the link can be shown again at any time. Open the link on the phone with Y-Node, or paste it into Exit node → Add → Import from link.</p>
       <form id="new-invite" class="form-grid">
         <label class="field"><span>Note</span><input id="invite-note" placeholder="family phone"></label>
         <label class="field"><span>Uses</span><input id="invite-uses" type="number" min="1" max="100" value="1"></label>
@@ -812,8 +960,30 @@ function invitesHtml() {
         <thead><tr><th>ID</th><th>Note</th><th class="right">Used</th><th class="right">Expires</th><th></th></tr></thead>
         <tbody>${rows}</tbody>
       </table></div>` : '<div class="empty">No active invites.</div>'}
+      <div id="invite-view"></div>
     </div>
   `;
+}
+
+function invitePanel(invite) {
+  return `
+    <div class="card section editor">
+      <header>
+        <h3>${escapeHtml(invite.note || "Invite")}</h3>
+        <span class="muted small">expires ${new Date(invite.expiresAt).toLocaleString()} · ${invite.used || 0} / ${invite.uses || 1} used</span>
+      </header>
+      <div class="invite-flex">
+        ${invite.qr ? `<div class="qr"><img src="${escapeHtml(invite.qr)}" alt="Invite QR code"></div>` : ""}
+        <div class="invite-text">
+          <div class="mono break">${escapeHtml(invite.link || invite.token || "")}</div>
+          <div class="actions">
+            <button class="btn primary small" data-invite-copy="${escapeHtml(invite.link || "")}">Copy link</button>
+            ${invite.token ? `<button class="btn small" data-invite-token="${escapeHtml(invite.token)}">Copy token</button>` : ""}
+          </div>
+          <p class="hint">Scan the QR in Y-Node → Exit node → Add, or open the link on the phone. Registration goes over Yggdrasil, so the tunnel must be up first.</p>
+        </div>
+      </div>
+    </div>`;
 }
 
 function wireInvites() {
@@ -825,16 +995,16 @@ function wireInvites() {
         uses: Number($("#invite-uses").value) || 1,
         ttl: $("#invite-ttl").value,
       });
-      $("#invite-result").innerHTML = `
-        <div class="card section" style="margin-top:14px">
-          <header><h3>Invite created</h3></header>
-          <p class="hint">Expires ${new Date(data.expiresAt).toLocaleString()} · ${data.uses} use(s)</p>
-          <div class="mono break">${escapeHtml(data.link)}</div>
-          <div class="actions">
-            <button class="btn primary small" id="copy-invite">Copy link</button>
-          </div>
-        </div>`;
-      $("#copy-invite").addEventListener("click", () => copy(data.link));
+      $("#invite-result").innerHTML = invitePanel({
+        note: data.note,
+        expiresAt: data.expiresAt,
+        uses: data.uses,
+        used: 0,
+        link: data.link,
+        token: data.invite,
+        qr: data.qr,
+      });
+      wireInviteActions($("#invite-result"));
       await loadInvites();
     } catch (err) { toast(err.message, true); }
   });
@@ -848,6 +1018,26 @@ function wireInvites() {
       } catch (err) { toast(err.message, true); }
     });
   });
+  $$("[data-qr]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const invite = state.invites.find((item) => item.hash === button.dataset.qr);
+      const view = $("#invite-view");
+      if (!invite || !view) return;
+      view.innerHTML = invitePanel(invite);
+      wireInviteActions(view);
+      view.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    });
+  });
+  wireInviteActions(document);
+}
+
+function wireInviteActions(root) {
+  $$("[data-invite-copy]", root).forEach((button) => {
+    button.addEventListener("click", () => copy(button.dataset.inviteCopy));
+  });
+  $$("[data-invite-token]", root).forEach((button) => {
+    button.addEventListener("click", () => copy(button.dataset.inviteToken));
+  });
 }
 
 /* settings */
@@ -855,8 +1045,35 @@ function wireInvites() {
 function settingsHtml() {
   const settings = state.settings || {};
   const web = settings.web || {};
+  const usage = settings.usage || {};
+  const manualPeers = (state.peers && state.peers.manualPeers) || [];
+  const manualRows = manualPeers.length
+    ? manualPeers.map((uri) => `
+        <div class="manual-peer">
+          <span class="mono break">${escapeHtml(uri)}</span>
+          <div class="actions">
+            <button class="btn small" data-manual-replace="${escapeHtml(uri)}">Replace</button>
+            <button class="btn small danger" data-manual-remove="${escapeHtml(uri)}">Remove</button>
+          </div>
+        </div>`).join("")
+    : '<div class="empty">No manual peers. Automatic peers are managed by the supervisor.</div>';
   return `
     <form id="settings-form" class="grid">
+      <div class="card section">
+        <header><h3>Node</h3></header>
+        <div class="form-grid">
+          <label class="field"><span>Node name</span><input id="s-name" value="${escapeHtml(settings.name || "")}" required></label>
+          <label class="field"><span>Log level</span>
+            <select id="s-loglevel">
+              ${["debug", "info", "warn", "error"].map((level) => `<option value="${level}" ${settings.logLevel === level ? "selected" : ""}>${level}</option>`).join("")}
+            </select>
+          </label>
+          <label class="switch"><input type="checkbox" id="s-usage" ${usage.enabled ? "checked" : ""}><span>Traffic accounting (needed for quotas)</span></label>
+          <label class="field"><span>Usage timezone</span><input id="s-timezone" value="${escapeHtml(usage.timezone || "UTC")}"></label>
+        </div>
+        <p class="hint">The name is shown in the app, in the invite QR code and in the dashboard.</p>
+      </div>
+
       <div class="card section">
         <header><h3>Access</h3></header>
         <div class="form-grid">
@@ -897,23 +1114,17 @@ function settingsHtml() {
       </div>
 
       <div class="card section">
-        <header><h3>Peers and logging</h3></header>
+        <header><h3>Public peers</h3></header>
         <div class="form-grid">
-          <label class="field"><span>Public peers</span><input id="s-peercount" type="number" min="1" max="50" value="${settings.peerCount || 3}"></label>
+          <label class="field"><span>Automatic peers to keep</span><input id="s-peercount" type="number" min="1" max="50" value="${settings.peerCount || 3}"></label>
           <label class="switch"><input type="checkbox" id="s-peerauto" ${settings.peerAutoReplace ? "checked" : ""}><span>Replace dead or slow peers</span></label>
-          <label class="field"><span>Log level</span>
-            <select id="s-loglevel">
-              ${["debug", "info", "warn", "error"].map((level) => `<option value="${level}" ${settings.logLevel === level ? "selected" : ""}>${level}</option>`).join("")}
-            </select>
-          </label>
-          <label class="field"><span>Usage timezone</span><input id="s-timezone" value="${escapeHtml((settings.usage && settings.usage.timezone) || "UTC")}"></label>
         </div>
       </div>
 
       <div class="card section">
         <header><h3>Web interface</h3></header>
-        <p class="hint">Network settings are read at start. Change them in /etc/x-node/config.json and restart the service.</p>
         <div class="form-grid">
+          <label class="field full"><span>Public URL (shown on the dashboard and by "x-node web url")</span><input id="s-publicurl" value="${escapeHtml(web.publicURL || "")}" placeholder="https://example.com/abc123/web/"></label>
           <label class="field"><span>URL path</span><input id="s-webpath" value="${escapeHtml(web.path || "")}"></label>
           <label class="field"><span>Session lifetime</span><input id="s-sessionttl" value="${escapeHtml(web.sessionTTL || "12h")}"></label>
           <label class="field"><span>Failed logins before a block</span><input id="s-maxfail" type="number" min="0" value="${web.maxFailedLogins || 5}"></label>
@@ -921,6 +1132,7 @@ function settingsHtml() {
           <label class="field"><span>Listen</span><input value="${escapeHtml(web.listen || "all")}" disabled></label>
           <label class="field"><span>Port</span><input value="${web.port || 443}" disabled></label>
         </div>
+        <p class="hint">Listen address, port and TLS are read at start: change them in the configuration editor below and restart x-node.</p>
       </div>
 
       <div class="actions">
@@ -928,6 +1140,44 @@ function settingsHtml() {
         <span class="muted small">Changes apply to new connections immediately. Network listeners need a restart.</span>
       </div>
     </form>
+
+    <div class="card section">
+      <header><h3>Admin password</h3><span class="muted small">login ${escapeHtml((state.status && state.status.webLogin) || "")}</span></header>
+      <form id="password-form" class="form-grid">
+        <label class="field"><span>Current password</span><input id="p-current" type="password" autocomplete="current-password" required></label>
+        <label class="field"><span>New password (12+ characters)</span><input id="p-new" type="password" autocomplete="new-password" minlength="12" required></label>
+        <label class="field"><span>Repeat the new password</span><input id="p-repeat" type="password" autocomplete="new-password" minlength="12" required></label>
+        <div class="full"><button class="btn primary" type="submit">Change password</button></div>
+      </form>
+      <p class="hint">Other signed-in browsers stay signed in until their session expires.</p>
+    </div>
+
+    <div class="card section">
+      <header><h3>Manual Yggdrasil peers</h3><span class="muted small">${manualPeers.length} pinned</span></header>
+      <p class="hint">A pinned peer is kept connected on top of the automatic count. It is never replaced or trimmed, so it is the right place for a private peer.</p>
+      <div id="manual-peers">${manualRows}</div>
+      <form id="manual-peer-add" class="row">
+        <input class="grow" id="manual-uri" placeholder="tls://peer.example:13338?key=…" required>
+        <button class="btn primary" type="submit">Add peer</button>
+      </form>
+    </div>
+
+    <div class="card section">
+      <header><h3>Configuration files</h3><span class="muted small" id="config-status"></span></header>
+      <p class="hint">The file is validated before it replaces the current one; a backup is written to /var/backups. Applying the main configuration removes the dashboard overlay, so the file becomes the only source of truth.</p>
+      <div class="row">
+        <select id="config-file" style="max-width:280px">
+          <option value="main">/etc/x-node/config.json</option>
+          <option value="yggdrasil">yggdrasil.conf</option>
+        </select>
+        <button class="btn small" id="config-load" type="button">Load</button>
+        <button class="btn primary small" id="config-save" type="button">Validate and save</button>
+        <button class="btn small" data-restart="x-node" type="button">Restart x-node</button>
+        <button class="btn small" data-restart="yggdrasil" type="button">Restart yggdrasil</button>
+      </div>
+      <div class="muted small mono" id="config-path"></div>
+      <textarea id="config-content" class="config-editor" spellcheck="false" placeholder="Load a file to edit it"></textarea>
+    </div>
   `;
 }
 
@@ -936,6 +1186,7 @@ function wireSettings() {
     event.preventDefault();
     const blocked = $("#s-blocked").value.split(",").map((item) => Number(item.trim())).filter((item) => item > 0);
     const payload = {
+      name: $("#s-name").value.trim(),
       allowAll: $("#s-allowall").checked,
       registration: $("#s-registration").checked,
       maxClients: Number($("#s-maxclients").value),
@@ -954,9 +1205,10 @@ function wireSettings() {
       peerCount: Number($("#s-peercount").value),
       peerAutoReplace: $("#s-peerauto").checked,
       logLevel: $("#s-loglevel").value,
-      usage: { enabled: true, timezone: $("#s-timezone").value.trim() },
+      usage: { enabled: $("#s-usage").checked, timezone: $("#s-timezone").value.trim() },
       web: {
         path: $("#s-webpath").value.trim(),
+        publicURL: $("#s-publicurl").value.trim(),
         sessionTTL: $("#s-sessionttl").value.trim(),
         maxFailedLogins: Number($("#s-maxfail").value),
         lockout: $("#s-lockout").value.trim(),
@@ -966,9 +1218,103 @@ function wireSettings() {
       await api("PUT", "api/settings", payload);
       toast("Settings saved");
       await loadSettings();
+      await refreshStatus();
       render();
     } catch (err) { toast(err.message, true); }
   });
+
+  $("#password-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if ($("#p-new").value !== $("#p-repeat").value) {
+      toast("The new passwords do not match", true);
+      return;
+    }
+    try {
+      await api("POST", "api/password", {
+        currentPassword: $("#p-current").value,
+        newPassword: $("#p-new").value,
+      });
+      $("#password-form").reset();
+      toast("Password changed");
+    } catch (err) { toast(err.message, true); }
+  });
+
+  $("#manual-peer-add").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try {
+      await api("POST", "api/peers/manual", { action: "add", uri: $("#manual-uri").value.trim() });
+      toast("Manual peer added");
+      await loadPeers();
+      render();
+    } catch (err) { toast(err.message, true); }
+  });
+  $$("[data-manual-remove]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      if (!confirm("Remove this manual peer?")) return;
+      try {
+        await api("POST", "api/peers/manual", { action: "remove", uri: button.dataset.manualRemove });
+        toast("Manual peer removed");
+        await loadPeers();
+        render();
+      } catch (err) { toast(err.message, true); }
+    });
+  });
+  $$("[data-manual-replace]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const next = prompt("New peer URI:", button.dataset.manualReplace);
+      if (!next || next === button.dataset.manualReplace) return;
+      try {
+        await api("POST", "api/peers/manual", {
+          action: "replace", from: button.dataset.manualReplace, to: next.trim(),
+        });
+        toast("Manual peer replaced");
+        await loadPeers();
+        render();
+      } catch (err) { toast(err.message, true); }
+    });
+  });
+
+  const loadConfig = async () => {
+    const file = $("#config-file").value;
+    const status = $("#config-status");
+    status.textContent = "loading…";
+    try {
+      const data = await api("GET", "api/config?file=" + encodeURIComponent(file));
+      $("#config-content").value = data.content || "";
+      $("#config-path").textContent = data.path + " · " + bytes(data.size) + " · modified " + when(data.modified);
+      status.textContent = data.helper ? "" : "root helper missing";
+    } catch (err) {
+      status.textContent = err.message;
+      toast(err.message, true);
+    }
+  };
+  $("#config-file").addEventListener("change", loadConfig);
+  $("#config-load").addEventListener("click", loadConfig);
+  $("#config-save").addEventListener("click", async () => {
+    const file = $("#config-file").value;
+    if (!confirm("Validate and save this file? A backup is kept in /var/backups.")) return;
+    try {
+      const data = await api("PUT", "api/config", { file, content: $("#config-content").value });
+      toast("Saved " + data.path);
+      $("#config-status").textContent = "saved";
+      await refreshStatus();
+    } catch (err) { toast(err.message, true); }
+  });
+  $$("[data-restart]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const service = button.dataset.restart;
+      if (!confirm("Restart " + service + "? Open tunnels will reconnect.")) return;
+      button.disabled = true;
+      try {
+        await api("POST", "api/restart", { service });
+        toast("Restart requested: " + service);
+      } catch (err) {
+        toast(err.message, true);
+        button.disabled = false;
+      }
+    });
+  });
+  loadConfig();
 }
 
 /* logs */

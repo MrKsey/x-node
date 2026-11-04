@@ -192,7 +192,7 @@ func (s *socksServer) serveConn(conn net.Conn) {
 			s.usage.addRefused(source)
 		}
 		if s.tracker != nil {
-			s.tracker.refused(source)
+			s.tracker.quotaRefused(source)
 		}
 		_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
 		_ = readGreeting(reader)
@@ -319,12 +319,9 @@ func (s *socksServer) serveConnect(conn net.Conn, source net.IP, request socksRe
 		s.usage.addConnection(source)
 	}
 
-	var up, down *shaper
-	if s.quotas != nil {
-		quota := s.quotas.Get(source)
-		up = newShaper(quota.UpKbps)
-		down = newShaper(quota.DownKbps)
-	}
+	// One bucket pair per client, shared by all of its connections: a speed
+	// limit is the rate of the client, not of a single TCP stream.
+	up, down := s.quotas.Limiters(source)
 	relayMetered(conn, upstream, idle, up, down, func(rx, tx uint64) {
 		if s.usage != nil {
 			s.usage.addTraffic(source, rx, tx)
@@ -382,6 +379,7 @@ func (s *socksServer) serveUDPAssociate(conn net.Conn, reader *bufio.Reader, sou
 	association := newUDPAssociation(cfg, relay, source, request, idle, s.udp, s.tracker, s.log)
 	association.usage = s.usage
 	association.dialer = s.dialer
+	association.up, association.down = s.quotas.Limiters(source)
 	s.log.info("client %s: UDP association on %s", source, local)
 	if s.tracker != nil {
 		s.tracker.udpOpen(source)
