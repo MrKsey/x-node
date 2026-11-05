@@ -4,6 +4,13 @@ All notable changes to X-Node are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.6.5] — 2026-11-05
+
+### Changed
+
+- The peering link on the dashboard is shown as `wss://host:443/ygg?key=…`, so
+  it fits one line; the full URI stays in the copy button and the tooltip.
+
 ## [1.6.4] — 2026-11-05
 
 ### Changed

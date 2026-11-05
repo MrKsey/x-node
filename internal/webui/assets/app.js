@@ -365,14 +365,13 @@ async function render() {
 
 /* dashboard */
 
-// shortPeerURI keeps the peering link on one line. The key is 64 hex digits,
-// so the full link wraps into a second, almost empty line; the copy button and
-// the tooltip still carry the whole value.
+// shortPeerURI keeps the peering link on one line. The key is 64 hex digits and
+// makes the link wider than the card, so only its presence is shown; the copy
+// button and the tooltip still carry the whole value.
 function shortPeerURI(uri) {
-  const match = /^(.*[?&]key=)([0-9a-fA-F]{16,})(.*)$/.exec(uri || "");
+  const match = /^(.*[?&])key=[0-9a-fA-F]{16,}(.*)$/.exec(uri || "");
   if (!match) return uri || "";
-  const key = match[2];
-  return match[1] + key.slice(0, 8) + "…" + key.slice(-4) + match[3];
+  return match[1] + "key=…" + match[2];
 }
 
 function dashboardHtml() {
