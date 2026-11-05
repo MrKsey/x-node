@@ -365,6 +365,16 @@ async function render() {
 
 /* dashboard */
 
+// shortPeerURI keeps the peering link on one line. The key is 64 hex digits,
+// so the full link wraps into a second, almost empty line; the copy button and
+// the tooltip still carry the whole value.
+function shortPeerURI(uri) {
+  const match = /^(.*[?&]key=)([0-9a-fA-F]{16,})(.*)$/.exec(uri || "");
+  if (!match) return uri || "";
+  const key = match[2];
+  return match[1] + key.slice(0, 8) + "…" + key.slice(-4) + match[3];
+}
+
 function dashboardHtml() {
   const status = state.status || {};
   const peers = state.peers || {};
@@ -448,7 +458,7 @@ function dashboardHtml() {
         <div class="peer-box">
           <div class="label">Peer link</div>
           ${status.peerURI
-            ? `<div class="mono break">${escapeHtml(status.peerURI)}</div>
+            ? `<div class="peer-link mono" title="${escapeHtml(status.peerURI)}">${escapeHtml(shortPeerURI(status.peerURI))}</div>
                <div class="actions">
                  <button class="btn small" data-copy="${escapeHtml(status.peerURI)}">Copy peer link</button>
                </div>

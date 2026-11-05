@@ -4,6 +4,14 @@ All notable changes to X-Node are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.6.4] — 2026-11-05
+
+### Changed
+
+- The dashboard shows the peering link on one line: the 64-digit key is
+  shortened in the middle, while the copy button and the tooltip keep the full
+  URI.
+
 ## [1.6.3] — 2026-11-05
 
 ### Fixed
