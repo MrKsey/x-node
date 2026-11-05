@@ -272,6 +272,10 @@ type peerSupervisor struct {
 	// next tick. A refresh request from the web interface must not sit for the
 	// whole check interval.
 	wake chan struct{}
+
+	// runCtx is the context of the run loop, so a probe started from the web
+	// interface is cancelled with the daemon and not with the HTTP request.
+	runCtx context.Context
 }
 
 func newPeerSupervisor(cfg Config, cfgPath string, log *logger) *peerSupervisor {
@@ -333,6 +337,9 @@ func (s *peerSupervisor) loadState(seed []string) {
 // from the settings again after every tick, so a new value applies at once.
 func (s *peerSupervisor) run(ctx context.Context) {
 	defer s.saveState()
+	s.mu.Lock()
+	s.runCtx = ctx
+	s.mu.Unlock()
 	s.reloadConfig()
 	// Write the starting list once, so peers.json exists even before the first
 	// replacement and "peers status" always reads the live list.
@@ -945,6 +952,19 @@ func (s *peerSupervisor) Probing() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.probing
+}
+
+// ProbeIfEmpty fills the candidate pool when nothing has been probed yet. The
+// supervisor skips the catalogue download while the managed list is complete,
+// so without this the manual peer picker stays empty until the first refresh
+// interval or a dead peer.
+func (s *peerSupervisor) ProbeIfEmpty() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.probing || len(s.pool) > 0 || s.runCtx == nil {
+		return
+	}
+	s.startProbeLocked(s.runCtx, s.settings)
 }
 
 // takeRefreshRequest consumes the marker written by "x-node peers refresh".

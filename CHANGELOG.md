@@ -4,6 +4,14 @@ All notable changes to X-Node are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.6.6] — 2026-11-05
+
+### Added
+
+- The manual peer picker fills itself: opening the dashboard or Settings asks
+  the supervisor for a catalogue probe when nothing has been probed yet, so the
+  list is no longer empty until **Find peers** is pressed.
+
 ## [1.6.5] — 2026-11-05
 
 ### Changed

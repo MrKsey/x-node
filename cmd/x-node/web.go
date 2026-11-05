@@ -1186,6 +1186,11 @@ type webPeer struct {
 }
 
 func (w *webServer) handlePeers(rw http.ResponseWriter, r *http.Request) {
+	if w.supervisor != nil {
+		// The picker needs candidates; the supervisor does not download the
+		// catalogue while the managed list is full, so ask once here.
+		w.supervisor.ProbeIfEmpty()
+	}
 	cfg := w.live.get()
 	list := cleanPeerList(cfg.Peers)
 	if state, err := readPeersState(cfg.statePath(peersStateFile)); err == nil && len(state.Managed) > 0 {
