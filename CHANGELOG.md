@@ -4,6 +4,16 @@ All notable changes to X-Node are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.6.8] — 2026-11-05
+
+### Fixed
+
+- `install.sh --upgrade` generated a new web interface password on every run and
+  rewrote `/root/x-node-credentials.txt`, although the README promises that an
+  upgrade keeps the password. The password is now kept when `web.json` already
+  exists; the credentials file is only rewritten when a new password was set,
+  either by the first installation or by `--web-password`.
+
 ## [1.6.7] — 2026-11-05
 
 ### Changed

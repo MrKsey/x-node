@@ -1481,6 +1481,11 @@ if [ "$WEB_ENABLED" -eq 1 ]; then
             -config "$EXIT_CONFIG" -user "$WEB_USER" -password "$WEB_PASSWORD" >/dev/null \
             || die "could not store the web password"
         WEB_LOGIN="$WEB_USER"
+    elif [ "$UPGRADE" -eq 1 ] && [ -f "$STATE_DIR/web.json" ]; then
+        # An upgrade keeps the password: web.json already holds its hash, and a
+        # silent change would lock the operator out of the interface.
+        log "Keeping the existing web interface password"
+        WEB_LOGIN="$WEB_USER"
     else
         password_output="$(run_as_service /usr/local/bin/x-node web password \
             -config "$EXIT_CONFIG" -user "$WEB_USER" 2>&1)" \
@@ -1579,9 +1584,11 @@ WEB_URL=""
 if [ "$WEB_ENABLED" -eq 1 ]; then
     WEB_URL="$(web_public_url)"
     # The password is written once, next to the URL, because it cannot be read
-    # back from web.json (only the PBKDF2 hash is stored).
-    umask 077
-    cat > "$CREDENTIALS_FILE" <<EOF
+    # back from web.json (only the PBKDF2 hash is stored). An upgrade that kept
+    # the password leaves the file alone: it still holds the only copy.
+    if [ -n "$WEB_PASSWORD" ]; then
+        umask 077
+        cat > "$CREDENTIALS_FILE" <<EOF
 X-Node web interface
 ====================
 
@@ -1597,9 +1604,14 @@ recovered. Replace it at any time with:
 The URL path is random but is not a secret: the login page protects the
 interface. "x-node web reset-path" generates a new one.
 EOF
-    chmod 0600 "$CREDENTIALS_FILE"
-    umask 022
-    echo "    credentials: $CREDENTIALS_FILE (0600)"
+        chmod 0600 "$CREDENTIALS_FILE"
+        umask 022
+        echo "    credentials: $CREDENTIALS_FILE (0600)"
+    elif [ -f "$CREDENTIALS_FILE" ]; then
+        echo "    credentials: $CREDENTIALS_FILE (kept)"
+    else
+        warn "the web password is set but $CREDENTIALS_FILE is missing; run: sudo x-node web password"
+    fi
 fi
 
 echo

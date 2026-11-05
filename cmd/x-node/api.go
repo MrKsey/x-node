@@ -17,7 +17,7 @@ import (
 
 // daemonVersion is stamped by build.sh (-ldflags -X main.daemonVersion=...).
 // The default is what a plain "go build" reports.
-var daemonVersion = "1.6.7"
+var daemonVersion = "1.6.8"
 
 type apiServer struct {
 	cfg     Config
