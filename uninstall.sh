@@ -186,6 +186,9 @@ rm -f /etc/nftables.d/x-node.nft
 # dashboard actions; the helper is a service now.
 rm -f /etc/sudoers.d/x-node-web
 rm -f /usr/local/bin/x-node /usr/local/bin/x-node-peerprobe
+# The probe was called ygg-peerprobe before the rename; an upgrade removes it,
+# an installation that skipped one may still have it.
+rm -f /usr/local/bin/ygg-peerprobe
 # The password cannot be recovered from web.json, and a reinstall generates a
 # new one, so the plaintext copy is not kept around.
 rm -f /root/x-node-credentials.txt

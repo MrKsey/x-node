@@ -1027,7 +1027,11 @@ func writePeersState(path string, state peersState) error {
 func newPeerProbe(path string) func(context.Context, int) ([]probeResult, error) {
 	return func(ctx context.Context, count int) ([]probeResult, error) {
 		binary := strings.TrimSpace(path)
+		// A configuration written by an older version may point at a binary the
+		// installer no longer places there; the default is always present.
 		if binary == "" {
+			binary = defaultPeerProbePath
+		} else if _, err := os.Stat(binary); err != nil {
 			binary = defaultPeerProbePath
 		}
 		runCtx, cancel := context.WithTimeout(ctx, peerProbeTimeout)

@@ -4,6 +4,17 @@ All notable changes to X-Node are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.6.3] — 2026-11-05
+
+### Fixed
+
+- An installation made before the binary was renamed kept `peerProbePath`
+  pointing at `ygg-peerprobe`. The installer removed that file, the daemon fell
+  back to it, and the probed peers arrived without their country and city, so
+  the manual peer picker showed bare URIs. The installer now rewrites the path,
+  removes the old binary, and the daemon falls back to
+  `/usr/local/bin/x-node-peerprobe` when the configured file is missing.
+
 ## [1.6.2] — 2026-11-05
 
 ### Added

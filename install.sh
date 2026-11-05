@@ -927,6 +927,13 @@ if ! "$BIN_DIR/x-node-peerprobe" -source file:///nonexistent -count 1 -pool 1 \
 fi
 install -m 0755 -o root -g root "$BIN_DIR/x-node" /usr/local/bin/x-node
 install -m 0755 -o root -g root "$BIN_DIR/x-node-peerprobe" /usr/local/bin/x-node-peerprobe
+# An installation from before the rename keeps pointing at ygg-peerprobe, which
+# the installer no longer updates. The old binary would be used for every probe
+# and would report peers without the catalogue data.
+LEGACY_PROBE=/usr/local/bin/ygg-peerprobe
+if [ -f "$LEGACY_PROBE" ] && [ "$LEGACY_PROBE" != "/usr/local/bin/x-node-peerprobe" ]; then
+    rm -f "$LEGACY_PROBE"
+fi
 
 PEERS_MODE="set"
 SELECTED_PEERS=""
@@ -1297,6 +1304,12 @@ if os.path.exists(source):
 for key, value in defaults.items():
     config.setdefault(key, value)
 config["stateDir"] = "/var/lib/x-node"
+# A configuration written before the binary was renamed still points at the old
+# probe. That file no longer exists after the upgrade, and a stale copy would
+# keep producing candidates without their country and city.
+probe_path = str(config.get("peerProbePath") or "")
+if not probe_path or os.path.basename(probe_path) != "x-node-peerprobe":
+    config["peerProbePath"] = "/usr/local/bin/x-node-peerprobe"
 # An upgrade only tops the file up with the keys a new version added: the
 # operator's addresses, ports and peers must survive a binary replacement.
 if upgrade != "1":
