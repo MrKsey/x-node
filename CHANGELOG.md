@@ -4,6 +4,25 @@ All notable changes to X-Node are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.6.7] — 2026-11-05
+
+### Changed
+
+- The client details open in a floating card next to the icon instead of
+  expanding the table row. The card closes with its ×, with Escape or with a
+  click anywhere outside it, and the icon is a drawn SVG instead of the ⓘ text
+  glyph, which rendered without smoothing.
+- Settings shows two cards per row on a wide screen and one per row on a phone.
+- The peer probe asks for a dozen spare candidates (at least fifteen), so the
+  manual peer picker offers about ten peers instead of four or five.
+
+### Fixed
+
+- The Yggdrasil card drew two separator lines above **Peer link**: the last
+  table row and the block below it both had a border.
+- The **Peer link** value is shown in full again; it wraps inside the card
+  instead of being shortened to `key=…`.
+
 ## [1.6.6] — 2026-11-05
 
 ### Added

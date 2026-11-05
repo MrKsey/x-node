@@ -879,9 +879,15 @@ func (s *peerSupervisor) startProbeLocked(ctx context.Context, settings peerSett
 		return
 	}
 	s.probing = true
-	count := settings.Count * 3
-	if count < 8 {
-		count = 8
+	// The probe result also feeds the manual peer picker, and the peers that are
+	// already connected are filtered out of it. Ask for the automatic count plus
+	// a dozen spare candidates, so the picker always has something to show.
+	count := settings.Count + 12
+	if count < 15 {
+		count = 15
+	}
+	if count > 40 {
+		count = 40
 	}
 	go func() {
 		results, err := s.probe(ctx, count)

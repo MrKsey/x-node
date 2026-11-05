@@ -181,6 +181,10 @@ input[type="checkbox"] { width: auto; accent-color: var(--accent); }
 .break { word-break: break-all; }
 .ellipsis { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .facts th { width: 46%; font-weight: 500; text-transform: none; letter-spacing: 0; font-size: 13.5px; }
+/* The last row of a facts table has no line of its own: a block that follows
+   it draws one separator, otherwise the card shows two lines close together. */
+.facts tr:last-child th,
+.facts tr:last-child td { border-bottom: 0; }
 .editor { margin-top: 14px; border-color: var(--accent); }
 
 /* cards and grids */
@@ -251,9 +255,12 @@ canvas.chart { width: 100%; height: 250px; display: block; }
 }
 .peer-box { display: grid; gap: 6px; padding-top: 10px; border-top: 1px solid var(--border); }
 .peer-box .label { font-size: 12.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
-/* One line: the key is shortened for display and the full URI stays in the
-   copy button and in the title. */
-.peer-link { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The whole link stays readable: it wraps at any character instead of being
+   cut off, because the key is part of the address a person has to compare. */
+.peer-link {
+  font-size: 12px; line-height: 1.5;
+  white-space: normal; overflow-wrap: anywhere; word-break: break-all;
+}
 
 .toast {
   position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
@@ -278,27 +285,59 @@ canvas.chart { width: 100%; height: 250px; display: block; }
 }
 .manual-peer:last-child { border-bottom: 0; }
 
-/* The client row keeps the address and the label on one line. The popover with
-   the live counters sits under it and is opened by the icon button. */
+/* The client row keeps the address and the label on one line. The details open
+   in a floating card next to the icon, so the table does not move. */
 .client-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
 .client-line .mono { max-width: 100%; }
-.stats-btn { padding: 2px 7px; font-size: 13px; line-height: 1.2; }
-.client-stats {
-  margin-top: 6px; padding: 8px 10px; border: 1px solid var(--border);
-  border-radius: 10px; background: var(--bg-soft);
-  font-size: 12.5px; line-height: 1.5; word-break: break-word;
+.icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; padding: 0; flex: 0 0 auto;
+  border-radius: 50%; border: 1px solid var(--border);
+  background: var(--bg-elev); color: var(--muted); cursor: pointer;
+  transition: color .15s, border-color .15s, background .15s;
 }
+.icon-btn:hover { color: var(--accent); border-color: var(--accent); background: var(--bg-soft); }
+.icon-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.icon-btn svg { display: block; }
+
+.client-popover {
+  position: fixed; z-index: 60; width: min(360px, calc(100vw - 16px));
+  padding: 14px 16px; border-radius: 14px;
+  background: var(--bg-elev); border: 1px solid var(--border);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, .28);
+  display: grid; gap: 10px;
+}
+.client-popover > header {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding-bottom: 10px; border-bottom: 1px solid var(--border);
+}
+.client-popover > header > div { flex: 1; min-width: 0; }
+.client-popover > header h3 { margin: 0 0 2px; font-size: 14.5px; }
+.client-popover .popover-facts th { width: 42%; font-size: 12.5px; }
+.client-popover .popover-facts td { font-size: 12.5px; }
+.client-popover .popover-dest { display: grid; gap: 4px; }
 
 /* A settings card owns its Save button: the button appears only after the
    card is edited, so there is no page-wide save that hides which form it
    applies to. */
 .settings-card > header .save-btn { flex: 0 0 auto; }
 
+/* Two cards per row on a desktop: the forms are short, and one card per row
+   left most of the screen empty. */
+.settings-grid {
+  display: grid; gap: 16px; align-items: start;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+@media (max-width: 1024px) {
+  .settings-grid { grid-template-columns: 1fr; }
+}
+
 .empty { padding: 28px; text-align: center; color: var(--muted); }
 
 /* mobile */
 @media (max-width: 900px) {
   .app { grid-template-columns: 1fr; }
+  .settings-grid { grid-template-columns: 1fr; }
   .sidebar {
     position: fixed; inset: 0 auto 0 0; width: min(300px, 86vw); z-index: 40;
     transform: translateX(-102%); transition: transform .2s ease;

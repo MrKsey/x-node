@@ -249,11 +249,18 @@ function navigate(view) {
 
 window.addEventListener("hashchange", () => navigate(location.hash.replace("#", "")));
 $("#menu").addEventListener("click", () => $("#app").classList.toggle("menu-open"));
-// A tap anywhere outside an open client popover closes it.
+// A tap anywhere outside the client card closes it; a tap on another icon opens
+// that client instead, because its own handler runs first.
 document.addEventListener("click", (event) => {
-  if (event.target.closest("[data-client-stats]") || event.target.closest(".client-stats")) return;
-  $$(".client-stats").forEach((item) => item.classList.add("hidden"));
+  const popover = $("#client-popover");
+  if (!popover || popover.classList.contains("hidden")) return;
+  if (event.target.closest("#client-popover") || event.target.closest("[data-client-stats]")) return;
+  hideClientPopover();
 });
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") hideClientPopover();
+});
+window.addEventListener("resize", hideClientPopover);
 $("#app").addEventListener("click", (event) => {
   // A tap on the dimmed area closes the mobile menu.
   if (!$("#app").classList.contains("menu-open")) return;
@@ -365,15 +372,6 @@ async function render() {
 
 /* dashboard */
 
-// shortPeerURI keeps the peering link on one line. The key is 64 hex digits and
-// makes the link wider than the card, so only its presence is shown; the copy
-// button and the tooltip still carry the whole value.
-function shortPeerURI(uri) {
-  const match = /^(.*[?&])key=[0-9a-fA-F]{16,}(.*)$/.exec(uri || "");
-  if (!match) return uri || "";
-  return match[1] + "key=…" + match[2];
-}
-
 function dashboardHtml() {
   const status = state.status || {};
   const peers = state.peers || {};
@@ -457,7 +455,7 @@ function dashboardHtml() {
         <div class="peer-box">
           <div class="label">Peer link</div>
           ${status.peerURI
-            ? `<div class="peer-link mono" title="${escapeHtml(status.peerURI)}">${escapeHtml(shortPeerURI(status.peerURI))}</div>
+            ? `<div class="peer-link mono">${escapeHtml(status.peerURI)}</div>
                <div class="actions">
                  <button class="btn small" data-copy="${escapeHtml(status.peerURI)}">Copy peer link</button>
                </div>
@@ -788,6 +786,15 @@ function clientsHtml() {
   `;
 }
 
+// An info icon drawn as SVG: the text glyph ⓘ has no hinting in most fonts and
+// looks blurry next to the monospace address.
+const INFO_ICON =
+  '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false">' +
+  '<circle cx="8" cy="8" r="6.6" fill="none" stroke="currentColor" stroke-width="1.4"/>' +
+  '<circle cx="8" cy="4.9" r="1" fill="currentColor"/>' +
+  '<path d="M8 7.3v4.1" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>' +
+  "</svg>";
+
 function clientRowHtml(client) {
   const quota = client.quota || {};
   const used = quota.monthlyBytes > 0 ? Math.min(100, (quota.monthUsed / quota.monthlyBytes) * 100) : 0;
@@ -800,15 +807,6 @@ function clientRowHtml(client) {
     client.appVersion ? "app " + client.appVersion : "",
     client.registeredAt ? "registered " + when(client.registeredAt) : "",
   ].filter(Boolean).join(" · ");
-  const stats = [
-    client.source ? "added via " + client.source : "",
-    (client.udpDatagramsIn || client.udpDatagramsOut)
-      ? "UDP " + (client.udpDatagramsIn || 0) + " in / " + (client.udpDatagramsOut || 0) + " out · "
-        + bytes((client.udpBytesIn || 0) + (client.udpBytesOut || 0))
-      : "",
-    (client.destinations || []).length ? "destinations: " + client.destinations.join(", ") : "",
-    client.refused ? client.refused + " refused (" + (client.quotaRefused || 0) + " by quota)" : "",
-  ].filter(Boolean).join(" · ");
   const quotaPill = quota.exhausted ? '<span class="pill bad">quota exhausted</span>' : "";
   return `
     <tr>
@@ -816,10 +814,9 @@ function clientRowHtml(client) {
         <div class="client-line">
           <span class="mono break">${escapeHtml(client.address)}</span>
           ${client.label ? `<span class="pill">${escapeHtml(client.label)}</span>` : ""}
-          <button class="btn small icon-only stats-btn" data-client-stats title="Traffic details" aria-label="Traffic details">ⓘ</button>
+          <button class="icon-btn stats-btn" type="button" data-client-stats="${escapeHtml(client.address)}" title="Traffic details" aria-label="Traffic details">${INFO_ICON}</button>
         </div>
         ${meta ? `<div class="muted small">${escapeHtml(meta)}</div>` : ""}
-        <div class="client-stats hidden">${stats ? escapeHtml(stats) : "No traffic recorded yet"}</div>
       </td>
       <td data-label="State"><span class="pill ${client.state === "connected" ? "ok" : ""}">${escapeHtml(client.state)}</span></td>
       <td class="right" data-label="TCP">${client.connections || 0}</td>
@@ -843,18 +840,81 @@ function clientRowHtml(client) {
     </tr>`;
 }
 
+// clientDetailsHtml is the content of the floating client card: the values that
+// change all the time and would make the table unreadable.
+function clientDetailsHtml(client) {
+  const rows = [
+    ["Device", client.deviceName || "—"],
+    ["App version", client.appVersion || "—"],
+    ["Registered", client.registeredAt ? when(client.registeredAt) : "—"],
+    ["Last seen", client.lastSeenAt ? when(client.lastSeenAt) : "—"],
+    ["Added via", client.source || "—"],
+    ["TCP now", String(client.connections || 0)],
+    ["UDP now", String(client.udpAssociations || 0)],
+    [
+      "UDP total",
+      (client.udpDatagramsIn || client.udpDatagramsOut)
+        ? (client.udpDatagramsIn || 0) + " in / " + (client.udpDatagramsOut || 0) + " out · "
+          + bytes((client.udpBytesIn || 0) + (client.udpBytesOut || 0))
+        : "—",
+    ],
+    ["Refusals", client.refused
+      ? client.refused + " (" + (client.quotaRefused || 0) + " by quota)"
+      : "none"],
+  ];
+  const destinations = (client.destinations || []).length
+    ? `<div class="popover-dest"><span class="muted">Destinations</span><div class="mono small">${client.destinations.map(escapeHtml).join("<br>")}</div></div>`
+    : "";
+  return `
+    <header>
+      <div>
+        <h3>${escapeHtml(client.label || client.deviceName || "Client")}</h3>
+        <div class="muted small mono break">${escapeHtml(client.address)}</div>
+      </div>
+      <button class="icon-btn" type="button" data-popover-close aria-label="Close">×</button>
+    </header>
+    <table class="facts popover-facts">
+      ${rows.map(([name, value]) => `<tr><th>${escapeHtml(name)}</th><td class="right">${escapeHtml(value)}</td></tr>`).join("")}
+    </table>
+    ${destinations}`;
+}
+
+// showClientPopover opens one floating card next to the icon. It is a separate
+// element instead of a row that grows, so opening it does not move the table.
+function showClientPopover(button, client) {
+  const popover = $("#client-popover");
+  if (!popover) return;
+  popover.innerHTML = clientDetailsHtml(client);
+  popover.classList.remove("hidden");
+  popover.style.visibility = "hidden";
+  const rect = button.getBoundingClientRect();
+  const width = popover.offsetWidth;
+  const height = popover.offsetHeight;
+  const margin = 8;
+  let left = rect.right - width;
+  left = Math.min(Math.max(margin, left), window.innerWidth - width - margin);
+  let top = rect.bottom + margin;
+  if (top + height > window.innerHeight - margin) {
+    top = Math.max(margin, rect.top - height - margin);
+  }
+  popover.style.left = Math.round(left) + "px";
+  popover.style.top = Math.round(top) + "px";
+  popover.style.visibility = "";
+  popover.querySelector("[data-popover-close]").addEventListener("click", hideClientPopover);
+  popover.querySelector("[data-popover-close]").focus({ preventScroll: true });
+}
+
+function hideClientPopover() {
+  const popover = $("#client-popover");
+  if (popover) popover.classList.add("hidden");
+}
+
 function wireClients() {
   $$("[data-client-stats]").forEach((button) => {
     button.addEventListener("click", (event) => {
       event.stopPropagation();
-      const cell = button.closest("td");
-      const popover = cell && cell.querySelector(".client-stats");
-      if (!popover) return;
-      const open = !popover.classList.contains("hidden");
-      // Only one popover at a time: two open balloons on a phone cover the
-      // whole table.
-      $$(".client-stats").forEach((item) => item.classList.add("hidden"));
-      popover.classList.toggle("hidden", open);
+      const client = state.clients.find((item) => item.address === button.dataset.clientStats);
+      if (client) showClientPopover(button, client);
     });
   });
 
@@ -1145,6 +1205,7 @@ function settingsHtml() {
   const timezone = usage.timezone || "UTC";
   if (!zones.includes(timezone)) zones.unshift(timezone);
   return `
+    <div class="settings-grid">
     <form class="card section settings-card" data-settings="node">
       <header>
         <h3>Node</h3>
@@ -1284,6 +1345,7 @@ function settingsHtml() {
         <div class="full"><button class="btn primary" type="submit">Change password</button></div>
       </form>
       <p class="hint">Other signed-in browsers stay signed in until their session expires.</p>
+    </div>
     </div>
   `;
 }
