@@ -67,6 +67,14 @@ type webServer struct {
 	// configPath is the file the service was started with. It is compared with
 	// the start time to report a configuration change that needs a restart.
 	configPath string
+	// The update endpoint caches the GitHub answer so a dashboard reload does
+	// not spend the anonymous rate limit. updateRunning covers the helper call,
+	// which outlives the HTTP request that started it.
+	updateMu        sync.Mutex
+	updateCache     *updateInfo
+	updateCheckedAt time.Time
+	updateRunning   bool
+	updateError     string
 }
 
 func newWebServer(cfg Config, configPath string, live *settings, store *Store, tracker *runtimeTracker,
@@ -332,6 +340,10 @@ func (w *webServer) serveAPI(rw http.ResponseWriter, r *http.Request, route stri
 		w.handlePassword(rw, r)
 	case route == "restart" && r.Method == http.MethodPost:
 		w.handleRestart(rw, r)
+	case route == "update" && r.Method == http.MethodGet:
+		w.handleUpdateGet(rw, r)
+	case route == "update" && r.Method == http.MethodPost:
+		w.handleUpdatePost(rw, r)
 	case route == "config" && r.Method == http.MethodGet:
 		w.handleConfigGet(rw, r)
 	case route == "config" && r.Method == http.MethodPut:

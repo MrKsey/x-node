@@ -13,6 +13,8 @@ const state = {
   invites: [],
   settings: null,
   peers: null,
+  update: null,
+  updatePolling: false,
   traffic: null,
   trafficRange: "1h",
   logs: [],
@@ -21,6 +23,7 @@ const state = {
   logTimer: null,
   clientTimer: null,
   clientRefreshing: false,
+  peerPolling: false,
   editing: "",
   popover: null,
 };
@@ -373,6 +376,12 @@ async function loadLogs() {
   return state.logs;
 }
 
+async function loadUpdate(refresh) {
+  const data = await api("GET", "api/update" + (refresh ? "?refresh=1" : ""));
+  state.update = data;
+  return data;
+}
+
 /* ---------- rendering ---------- */
 
 async function render() {
@@ -380,9 +389,16 @@ async function render() {
   try {
     if (state.view === "dashboard") {
       await refreshStatus();
+      try {
+        await loadUpdate(false);
+      } catch (err) {
+        // A failed check must not replace the whole dashboard with an error.
+        state.update = { current: (state.status || {}).version || "", error: err.message };
+      }
       view.innerHTML = dashboardHtml();
       wireDashboard();
       drawChart();
+      if (state.update && state.update.running) pollUpdateUpgrade();
     } else if (state.view === "clients") {
       await Promise.all([loadClients(), loadSettings()]);
       view.innerHTML = clientsHtml();
@@ -419,11 +435,11 @@ function dashboardHtml() {
   const apiShared = status.apiPort && status.apiPort === status.socksPort;
   return `
     <div class="grid kpi">
-      <button class="card kpi-card link-card" type="button" data-copy="${escapeHtml(status.address || "")}" title="Copy the Yggdrasil address">
+      <a class="card kpi-card link-card" href="#settings" title="Open the Settings tab">
         <div class="label">Yggdrasil address</div>
         <div class="value mono small-value">${escapeHtml(status.address || "—")}</div>
-        <div class="sub">${escapeHtml(status.name || "")} · click to copy</div>
-      </button>
+        <div class="sub">${escapeHtml(status.name || "")}</div>
+      </a>
       <a class="card kpi-card link-card" href="#clients" title="Open the Clients tab">
         <div class="label">Clients</div>
         <div class="value">${status.clients || 0}</div>
@@ -542,7 +558,63 @@ function dashboardHtml() {
           : '<p class="hint">Restarts are disabled: the root helper is not installed. Run install.sh again to enable them.</p>'}
       </div>
     </div>
+
+    ${updateCardHtml(status)}
   `;
+}
+
+// updateCardHtml shows the release check that the daemon keeps for the
+// dashboard. The upgrade itself runs through the root helper, so the button is
+// offered only when the helper is installed and the release has a matching
+// archive with checksums.
+function updateCardHtml(status) {
+  const update = state.update;
+  if (!update) {
+    return `<div class="card section">
+      <header><h3>Update</h3></header>
+      <p class="hint">The release check has not finished yet.</p>
+    </div>`;
+  }
+  const running = Boolean(update.running);
+  const checkFailed = Boolean(update.error && !update.latest);
+  const latest = update.latest || "—";
+  let statePill;
+  if (running) {
+    statePill = '<span class="spinner"></span>upgrading…';
+  } else if (update.available) {
+    statePill = '<span class="pill warn">update available</span>';
+  } else if (checkFailed) {
+    statePill = '<span class="pill bad">check failed</span>';
+  } else {
+    statePill = '<span class="pill ok">up to date</span>';
+  }
+  const canUpgrade = update.available && update.canUpgrade && update.helper && !running;
+  let hint = "The updater downloads the release archive from GitHub, verifies its SHA-256 checksum and replaces the binaries. The service restarts automatically.";
+  if (checkFailed) {
+    hint = "The release check could not reach GitHub. Press \"Check again\" to retry.";
+  } else if (update.available && !update.canUpgrade) {
+    hint = "The latest release has no archive for this platform. Update from the release page on GitHub.";
+  } else if (!update.helper) {
+    hint = "The root helper is not installed, so the dashboard cannot install the release. Run \"sudo x-node update upgrade\" on the server.";
+  }
+  return `<div class="card section">
+    <header>
+      <h3>Update</h3>
+      <span class="muted small">${update.helper ? "root helper connected" : "root helper not installed"}</span>
+    </header>
+    <table class="facts">
+      <tr><th>Installed</th><td class="right mono">${escapeHtml(update.current || status.version || "—")}</td></tr>
+      <tr><th>Latest release</th><td class="right mono">${escapeHtml(latest)}</td></tr>
+      <tr><th>Status</th><td class="right">${statePill}</td></tr>
+    </table>
+    <div class="actions">
+      <button class="btn small" data-update-check ${running ? "disabled" : ""}>Check again</button>
+      ${canUpgrade ? `<button class="btn primary small" data-update-upgrade>Upgrade to ${escapeHtml(latest)}</button>` : ""}
+      ${update.url ? `<a class="btn small" href="${escapeHtml(update.url)}" target="_blank" rel="noopener noreferrer">Release notes</a>` : ""}
+    </div>
+    <p class="hint">${escapeHtml(hint)}</p>
+    ${update.error ? `<p class="error">${escapeHtml(update.error)}</p>` : ""}
+  </div>`;
 }
 
 function peerTableHtml(peers) {
@@ -610,6 +682,70 @@ function wireDashboard() {
       }
     });
   });
+  const updateCheck = $("[data-update-check]");
+  if (updateCheck) {
+    updateCheck.addEventListener("click", async () => {
+      updateCheck.disabled = true;
+      updateCheck.innerHTML = '<span class="spinner"></span>Checking…';
+      try {
+        await loadUpdate(true);
+        renderDashboard();
+        toast(state.update && state.update.available
+          ? "Update available: " + state.update.latest
+          : "x-node is up to date");
+      } catch (err) {
+        toast(err.message, true);
+        renderDashboard();
+      }
+    });
+  }
+  const updateUpgrade = $("[data-update-upgrade]");
+  if (updateUpgrade) {
+    updateUpgrade.addEventListener("click", async () => {
+      const latest = (state.update && state.update.latest) || "the latest release";
+      if (!confirm("Upgrade x-node to " + latest + "? The service restarts and open tunnels reconnect.")) return;
+      updateUpgrade.disabled = true;
+      updateUpgrade.innerHTML = '<span class="spinner"></span>Starting…';
+      try {
+        await api("POST", "api/update");
+        state.update.running = true;
+        renderDashboard();
+        toast("Upgrade started");
+        pollUpdateUpgrade();
+      } catch (err) {
+        toast(err.message, true);
+        renderDashboard();
+      }
+    });
+  }
+}
+
+// pollUpdateUpgrade waits for the helper to replace the binaries and the
+// service to come back. Requests fail while the daemon restarts, so a failed
+// poll is expected and simply retried.
+async function pollUpdateUpgrade() {
+  if (state.updatePolling) return;
+  state.updatePolling = true;
+  try {
+    for (let attempt = 0; attempt < 120; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+      try {
+        await loadUpdate(false);
+      } catch (_) {
+        continue;
+      }
+      if (!state.update || !state.update.running) break;
+    }
+    if (state.view !== "dashboard") return;
+    renderDashboard();
+    if (state.update && state.update.error) {
+      toast("Upgrade failed: " + state.update.error, true);
+    } else if (state.update && !state.update.available) {
+      toast("x-node updated to " + state.update.current);
+    }
+  } finally {
+    state.updatePolling = false;
+  }
 }
 
 function renderDashboard() {
@@ -929,7 +1065,6 @@ function clientDetailsHtml(client) {
     <table class="facts popover-facts">
       ${rows.map(([name, value]) => `<tr><th>${escapeHtml(name)}</th><td class="right">${escapeHtml(value)}</td></tr>`).join("")}
     </table>
-    <p class="hint">Refusals counts the connections the exit turned away since it started: either the per-client connection limit or an exhausted traffic quota. An app that keeps retrying while it is blocked raises the number.</p>
     ${destinations}`;
 }
 
@@ -1498,7 +1633,7 @@ function settingsHtml() {
       <header>
         <h3>Manual Yggdrasil peers</h3>
         <span class="muted small">${manualPeers.length} pinned</span>
-        <button class="btn small" type="button" id="peers-refresh" ${probing ? "disabled" : ""}>${probing ? "Searching…" : "Find peers"}</button>
+        <button class="btn small" type="button" id="peers-refresh" ${probing ? "disabled" : ""}>${probing ? '<span class="spinner"></span>Searching…' : "Find peers"}</button>
       </header>
       <p class="hint">A pinned peer is kept connected on top of the automatic count. It is never replaced or trimmed, so it is the right place for a private peer.</p>
       <div id="manual-peers">${manualRows}</div>
@@ -1593,6 +1728,55 @@ function settingsPayload(kind) {
       };
     default:
       throw new Error("unknown form");
+  }
+}
+
+// setPeerSearchButton keeps the label and the spinner in one place, so the
+// button looks the same whether the probe was started here or was already
+// running when the page opened.
+function setPeerSearchButton(button, probing) {
+  if (!button) return;
+  button.disabled = probing;
+  button.innerHTML = probing ? '<span class="spinner"></span>Searching…' : "Find peers";
+}
+
+// pollPeerProbe watches the daemon until the catalogue probe finishes. The
+// probe walks every public peer, so it can take minutes; a fixed short loop
+// used to give up and leave the button on "Searching…" until a reload.
+async function pollPeerProbe() {
+  if (state.peerPolling) return;
+  state.peerPolling = true;
+  try {
+    let started = false;
+    for (let attempt = 0; attempt < 300; attempt += 1) {
+      // Before the supervisor picks up the refresh request the flag is still
+      // false; poll quickly at first so the button does not stop the spinner
+      // before the probe has even started.
+      await new Promise((resolve) => setTimeout(resolve, started ? 2000 : 500));
+      try {
+        await loadPeers();
+      } catch (_) {
+        continue;
+      }
+      if (state.peers && state.peers.probing) {
+        started = true;
+        continue;
+      }
+      if (started) break;
+      // Ten seconds without a running probe means the request never reached
+      // the supervisor; fall back to the normal label instead of spinning.
+      if (attempt >= 19) break;
+    }
+    if (state.view !== "settings") return;
+    const found = (state.peers && state.peers.candidates)
+      ? state.peers.candidates.length
+      : 0;
+    render();
+    toast(found
+      ? "Peer search finished: " + found + " candidate(s) found"
+      : "Peer search finished: no new candidates");
+  } finally {
+    state.peerPolling = false;
   }
 }
 
@@ -1716,24 +1900,19 @@ function wireSettings() {
   const refresh = $("#peers-refresh");
   if (refresh) {
     refresh.addEventListener("click", async () => {
-      refresh.disabled = true;
-      refresh.textContent = "Searching…";
+      setPeerSearchButton(refresh, true);
       try {
         await api("POST", "api/peers", { refresh: true });
         toast("Peer search started");
-        // The probe runs in the daemon; poll until it reports the result.
-        for (let attempt = 0; attempt < 20; attempt += 1) {
-          await new Promise((resolve) => setTimeout(resolve, 3000));
-          await loadPeers();
-          if (!state.peers || !state.peers.probing) break;
-        }
-        render();
+        pollPeerProbe();
       } catch (err) {
         toast(err.message, true);
-        refresh.disabled = false;
-        refresh.textContent = "Find peers";
+        setPeerSearchButton(refresh, false);
       }
     });
+    // A page that was opened while a probe was already running must keep the
+    // button live as well, otherwise it stays on "Searching…" until a reload.
+    if (state.peers && state.peers.probing) pollPeerProbe();
   }
 
   $$("[data-manual-remove]").forEach((button) => {

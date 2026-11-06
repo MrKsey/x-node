@@ -4,6 +4,33 @@ All notable changes to X-Node are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.6.10] — 2026-11-06
+
+### Added
+
+- `x-node update check` compares the running build with the latest GitHub
+  release and `sudo x-node update upgrade` installs it: the archive for the
+  machine is downloaded, its SHA-256 is checked against `SHA256SUMS.txt`, the
+  new binary must report the expected version, and the previous executable is
+  kept in `/var/backups`. Both commands accept `-json`.
+- The dashboard has an **Update** card with the installed and latest versions,
+  a manual re-check and a one-click upgrade. The upgrade goes through the root
+  helper, so the web interface needs no root of its own.
+
+### Changed
+
+- The **Yggdrasil address** card opens Settings again instead of copying the
+  address.
+- **Find peers** shows a spinner while the catalogue probe runs and returns to
+  its normal label when the probe finishes, without a page reload.
+- The client details window no longer explains the Refusals counter.
+
+### Fixed
+
+- The peer probe button stayed on "Searching…" when the probe was already
+  running as the page opened. The button now follows the daemon until the probe
+  ends.
+
 ## [1.6.9] — 2026-11-06
 
 ### Added

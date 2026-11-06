@@ -36,7 +36,7 @@ type commandHelp struct {
 
 var commandOrder = []string{
 	"serve", "invite", "allow", "clients", "usage", "quota", "peers",
-	"status", "doctor", "web", "keygen", "version", "help",
+	"status", "doctor", "update", "web", "keygen", "version", "help",
 }
 
 var commands = map[string]commandHelp{
@@ -265,6 +265,34 @@ fails, so the command is usable from monitoring.`,
 		},
 		Examples: []string{"x-node doctor", "sudo x-node doctor -config /etc/x-node/config.json"},
 		SeeAlso:  []string{"status", "peers"},
+	},
+	"update": {
+		Name:    "update",
+		Summary: "Check GitHub releases and upgrade the installed binaries",
+		Usage: []string{
+			"x-node update check [-json]",
+			"x-node update upgrade [-json] [-no-restart]",
+		},
+		Details: `"update check" asks GitHub for the latest release and compares it with the
+running build. "update upgrade" downloads the archive that matches the machine,
+verifies the published SHA-256, checks that the new binary reports the expected
+version and replaces /usr/local/bin/x-node and x-node-peerprobe. The previous
+binary is kept in /var/backups. The configuration and the state directory are
+not touched.
+
+The upgrade needs root because it writes the installed binaries. The web
+interface uses the same code through the root helper, so an operator can upgrade
+from the dashboard without a shell.`,
+		Flags: []flagHelp{
+			{Flag: "-json", Default: "off", Text: "print JSON instead of text"},
+			{Flag: "-no-restart", Default: "off", Text: "replace the binaries without restarting the services (upgrade only)"},
+		},
+		Examples: []string{
+			"x-node update check",
+			"x-node update check -json",
+			"sudo x-node update upgrade",
+		},
+		SeeAlso: []string{"version", "status"},
 	},
 	"web": {
 		Name:    "web",

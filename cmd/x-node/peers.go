@@ -971,6 +971,12 @@ func (s *peerSupervisor) ProbeIfEmpty() {
 	if s.probing || len(s.pool) > 0 || s.runCtx == nil {
 		return
 	}
+	// A finished probe with no survivors must not start again on every status
+	// poll: that kept the web button on "Searching…" forever. Wait for the
+	// normal refresh interval before trying the catalogue again.
+	if !s.lastProbe.IsZero() && time.Since(s.lastProbe) < s.settings.RefreshInterval {
+		return
+	}
 	s.startProbeLocked(s.runCtx, s.settings)
 }
 

@@ -134,7 +134,9 @@ func helperServe() error {
 // answer is one JSON document, so neither side has to close anything.
 func helperConnection(conn net.Conn) {
 	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(60 * time.Second))
+	// The upgrade action downloads and verifies a release, which can take a
+	// while on a slow link; the other actions finish long before this limit.
+	_ = conn.SetDeadline(time.Now().Add(20 * time.Minute))
 	var request helperRequest
 	if err := json.NewDecoder(io.LimitReader(conn, 1<<20)).Decode(&request); err != nil {
 		writeJSONTo(conn, map[string]any{"ok": false, "error": "bad request: " + err.Error()})
@@ -163,9 +165,27 @@ func helperDispatch(request helperRequest) (any, error) {
 			return nil, err
 		}
 		return map[string]any{"ok": true, "path": path}, nil
+	case "upgrade":
+		return helperUpgrade()
 	default:
 		return nil, fmt.Errorf("unknown helper action %q", request.Action)
 	}
+}
+
+// helperUpgrade replaces the installed binaries with the latest release and
+// restarts both units. The answer is written before the restart: this process
+// is running the old binary and will be stopped by systemd a second later.
+func helperUpgrade() (any, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	defer cancel()
+	from, to, err := upgradeInstalled(ctx, daemonVersion, func(format string, values ...any) {
+		fmt.Fprintf(os.Stderr, format+"\n", values...)
+	})
+	if err != nil {
+		return nil, err
+	}
+	restartAfterUpgrade()
+	return map[string]any{"ok": true, "from": from, "to": to, "restarted": true}, nil
 }
 
 // helperReadConfig returns a configuration file to the web interface. The

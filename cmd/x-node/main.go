@@ -91,6 +91,8 @@ func run(command string, args []string) error {
 		return cmdStatus(args)
 	case "doctor":
 		return cmdDoctor(args)
+	case "update":
+		return cmdUpdate(args)
 	case "web":
 		return cmdWeb(args)
 	case "version":

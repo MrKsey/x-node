@@ -31,7 +31,9 @@ func runHelper(request helperRequest) (string, error) {
 		return "", fmt.Errorf("the root helper is not running: %w", err)
 	}
 	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(60 * time.Second))
+	// The upgrade action can download a whole release; the other actions answer
+	// immediately, so the generous limit costs nothing.
+	_ = conn.SetDeadline(time.Now().Add(20 * time.Minute))
 	if _, err := conn.Write(payload); err != nil {
 		return "", err
 	}

@@ -421,6 +421,26 @@ The same page shows the node's own peering link, `wss://…/ygg?key=…` (or
 `tls://…?key=…`). Copy it into the peers of another Yggdrasil node to connect
 the two directly.
 
+## Updates
+
+```bash
+x-node update check          # compare the running build with the latest release
+sudo x-node update upgrade   # download, verify and install it
+```
+
+`update check` reads the latest release from GitHub and reports whether a newer
+version exists; `-json` prints the answer for scripts. `update upgrade`
+downloads the archive for this machine, compares its SHA-256 with
+`SHA256SUMS.txt`, checks that the new binary reports the expected version and
+replaces `x-node` and `x-node-peerprobe` next to the running executable. The
+previous binary is kept in `/var/backups`. The service restarts unless
+`-no-restart` is given.
+
+The dashboard shows the same check and a one-click upgrade. It goes through the
+root helper, so it needs the helper installed by `install.sh`. In-place upgrades
+are built for Linux/amd64, Linux/arm64 and Linux/arm; other platforms are
+pointed to the release page.
+
 ## Certificate
 
 The installer creates a self-signed certificate, so the browser warns once. For
