@@ -121,6 +121,13 @@ jobs:
             echo "CHANGELOG.md has no section for ${version}" >&2
             exit 1
           fi
+          # GitHub renders every newline inside a release body as a hard break,
+          # so a bullet wrapped in the changelog would show up as a narrow
+          # column on the release page instead of using the full width.
+          if grep -nE '^[[:space:]]+[^[:space:]-]' release-notes.md; then
+            echo "CHANGELOG.md wraps the ${version} section: keep each bullet on one line" >&2
+            exit 1
+          fi
           cat release-notes.md
 
       - name: publish
