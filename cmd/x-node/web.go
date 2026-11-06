@@ -58,6 +58,9 @@ type webServer struct {
 	guard      *loginGuard
 	assets     fs.FS
 	startedAt  time.Time
+	// conns is the live connection registry of the SOCKS server. It lets the
+	// web interface close every connection of one client.
+	conns *connectionRegistry
 	// supervisor is the peer supervisor of the daemon. It is set by main and
 	// used only to list the probed candidates the operator can pin by hand.
 	supervisor *peerSupervisor
@@ -301,6 +304,10 @@ func (w *webServer) serveAPI(rw http.ResponseWriter, r *http.Request, route stri
 		w.handleClientAdd(rw, r)
 	case strings.HasPrefix(route, "clients/") && strings.HasSuffix(route, "/token") && r.Method == http.MethodPost:
 		w.handleClientToken(rw, r, strings.TrimSuffix(strings.TrimPrefix(route, "clients/"), "/token"))
+	case strings.HasPrefix(route, "clients/") && strings.HasSuffix(route, "/disconnect") && r.Method == http.MethodPost:
+		w.handleClientDisconnect(rw, r, strings.TrimSuffix(strings.TrimPrefix(route, "clients/"), "/disconnect"))
+	case strings.HasPrefix(route, "clients/") && strings.HasSuffix(route, "/suspend") && r.Method == http.MethodPost:
+		w.handleClientSuspend(rw, r, strings.TrimSuffix(strings.TrimPrefix(route, "clients/"), "/suspend"))
 	case strings.HasPrefix(route, "clients/") && r.Method == http.MethodPut:
 		w.handleClientUpdate(rw, r, strings.TrimPrefix(route, "clients/"))
 	case strings.HasPrefix(route, "clients/") && r.Method == http.MethodDelete:
@@ -630,6 +637,7 @@ type webClient struct {
 	Label           string     `json:"label"`
 	Source          string     `json:"source"`
 	State           string     `json:"state"`
+	Suspended       bool       `json:"suspended"`
 	RegisteredAt    time.Time  `json:"registeredAt"`
 	LastSeenAt      time.Time  `json:"lastSeenAt"`
 	Connections     int        `json:"connections"`
@@ -680,6 +688,10 @@ func (w *webServer) handleClients(rw http.ResponseWriter, r *http.Request) {
 			client.HasToken = stored.TokenHash != ""
 			client.DeviceName = stored.DeviceName
 			client.AppVersion = stored.AppVersion
+			client.Suspended = stored.Suspended
+			if stored.Suspended {
+				client.State = "suspended"
+			}
 		}
 		if ip != nil {
 			client.Quota = buildQuotaState(w.quotas, w.usage, ip)
@@ -772,6 +784,64 @@ func (w *webServer) handleClientToken(rw http.ResponseWriter, r *http.Request, a
 	}
 	w.log.info("web: api token issued to %s", ip)
 	writeJSON(rw, http.StatusOK, map[string]any{"ok": true, "token": token})
+}
+
+// handleClientDisconnect closes every TCP and UDP connection of one client.
+// The allowlist entry and the quota stay untouched: the client may reconnect
+// at once, which is what makes this different from a suspension.
+func (w *webServer) handleClientDisconnect(rw http.ResponseWriter, r *http.Request, address string) {
+	ip := net.ParseIP(strings.TrimSpace(address))
+	if ip == nil || !isYggAddress(ip) {
+		writeJSON(rw, http.StatusBadRequest, errorResponse{Error: "bad_address"})
+		return
+	}
+	closed := 0
+	if w.conns != nil {
+		closed = w.conns.closeClient(ip)
+	}
+	w.log.info("web: closed %d connection(s) of %s", closed, ip)
+	writeJSON(rw, http.StatusOK, map[string]any{"ok": true, "closed": closed})
+}
+
+type suspendRequest struct {
+	Suspended bool `json:"suspended"`
+}
+
+// handleClientSuspend blocks or unblocks one allowlisted client. A suspension
+// is a temporary state: the entry, its traffic counters and its token survive,
+// and the operator can lift it with the same call. Suspending closes the
+// connections that are open at that moment.
+func (w *webServer) handleClientSuspend(rw http.ResponseWriter, r *http.Request, address string) {
+	ip := net.ParseIP(strings.TrimSpace(address))
+	if ip == nil || !isYggAddress(ip) {
+		writeJSON(rw, http.StatusBadRequest, errorResponse{Error: "bad_address"})
+		return
+	}
+	r.Body = http.MaxBytesReader(rw, r.Body, 4<<10)
+	var request suspendRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		writeJSON(rw, http.StatusBadRequest, errorResponse{Error: "bad_request"})
+		return
+	}
+	client, err := w.store.SetSuspended(ip, request.Suspended)
+	if err != nil {
+		if errors.Is(err, errNotAllowed) {
+			writeJSON(rw, http.StatusNotFound, errorResponse{Error: "not_found"})
+			return
+		}
+		writeJSON(rw, http.StatusInternalServerError, errorResponse{Error: "store_failed", Message: err.Error()})
+		return
+	}
+	closed := 0
+	if request.Suspended && w.conns != nil {
+		closed = w.conns.closeClient(ip)
+	}
+	state := "resumed"
+	if request.Suspended {
+		state = "suspended"
+	}
+	w.log.info("web: client %s %s (%d connection(s) closed)", ip, state, closed)
+	writeJSON(rw, http.StatusOK, map[string]any{"ok": true, "client": client, "closed": closed})
 }
 
 /* ---------- invites ---------- */
@@ -1037,6 +1107,7 @@ type webPatch struct {
 	SessionTTL      *string `json:"sessionTTL"`
 	MaxFailedLogins *int    `json:"maxFailedLogins"`
 	Lockout         *string `json:"lockout"`
+	Compact         *bool   `json:"compact"`
 }
 
 func (w *webServer) handleSettingsPut(rw http.ResponseWriter, r *http.Request) {
@@ -1133,6 +1204,9 @@ func (w *webServer) handleSettingsPut(rw http.ResponseWriter, r *http.Request) {
 		}
 		if patch.Web.Lockout != nil {
 			next.Web.Lockout = strings.TrimSpace(*patch.Web.Lockout)
+		}
+		if patch.Web.Compact != nil {
+			next.Web.Compact = *patch.Web.Compact
 		}
 	}
 

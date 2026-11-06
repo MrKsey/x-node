@@ -19,7 +19,10 @@ const state = {
   view: "dashboard",
   timer: null,
   logTimer: null,
+  clientTimer: null,
+  clientRefreshing: false,
   editing: "",
+  popover: null,
 };
 
 const $ = (selector, root = document) => root.querySelector(selector);
@@ -165,11 +168,25 @@ function applyTheme(name) {
   });
 }
 
+// Compact keeps the desktop layout 25% narrower. It is a server-side setting,
+// because every browser that opens the interface should see the same page.
+function applyCompact(enabled) {
+  const app = $("#app");
+  if (app) app.classList.toggle("compact", Boolean(enabled));
+}
+
+function currentCompact() {
+  return Boolean(state.settings && state.settings.web && state.settings.web.compact);
+}
+
 /* ---------- auth ---------- */
 
 function showLogin() {
   clearInterval(state.timer);
   clearInterval(state.logTimer);
+  clearInterval(state.clientTimer);
+  hideClientPopover();
+  hideUsagePopover();
   $("#app").classList.add("hidden");
   $("#login").classList.remove("hidden");
   $("#boot").classList.add("hidden");
@@ -180,6 +197,9 @@ function showApp() {
   $("#login").classList.add("hidden");
   $("#app").classList.remove("hidden");
   $("#boot").classList.add("hidden");
+  // The compact layout is stored on the server. Reading it here keeps the
+  // first paint on every browser identical to the saved setting.
+  loadSettings().then(() => applyCompact(currentCompact())).catch(() => {});
   navigate(location.hash.replace("#", "") || "dashboard");
   clearInterval(state.timer);
   state.timer = setInterval(() => {
@@ -241,6 +261,10 @@ function navigate(view) {
   if (!titles[view]) view = "dashboard";
   state.view = view;
   state.editing = "";
+  clearInterval(state.clientTimer);
+  state.clientTimer = null;
+  hideClientPopover();
+  hideUsagePopover();
   $("#view-title").textContent = titles[view];
   $$("#nav a").forEach((link) => link.classList.toggle("active", link.dataset.view === view));
   $("#app").classList.remove("menu-open");
@@ -249,18 +273,32 @@ function navigate(view) {
 
 window.addEventListener("hashchange", () => navigate(location.hash.replace("#", "")));
 $("#menu").addEventListener("click", () => $("#app").classList.toggle("menu-open"));
-// A tap anywhere outside the client card closes it; a tap on another icon opens
-// that client instead, because its own handler runs first.
+// A tap anywhere outside a floating card closes it; a tap on another icon
+// opens that client instead, because its own handler runs first.
 document.addEventListener("click", (event) => {
   const popover = $("#client-popover");
-  if (!popover || popover.classList.contains("hidden")) return;
-  if (event.target.closest("#client-popover") || event.target.closest("[data-client-stats]")) return;
-  hideClientPopover();
+  if (popover && !popover.classList.contains("hidden") &&
+      !event.target.closest("#client-popover") &&
+      !event.target.closest("[data-client-stats]")) {
+    hideClientPopover();
+  }
+  const usage = $("#usage-popover");
+  if (usage && !usage.classList.contains("hidden") &&
+      !event.target.closest("#usage-popover") &&
+      !event.target.closest("[data-usage]")) {
+    hideUsagePopover();
+  }
 });
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") hideClientPopover();
+  if (event.key === "Escape") {
+    hideClientPopover();
+    hideUsagePopover();
+  }
 });
-window.addEventListener("resize", hideClientPopover);
+window.addEventListener("resize", () => {
+  hideClientPopover();
+  hideUsagePopover();
+});
 $("#app").addEventListener("click", (event) => {
   // A tap on the dimmed area closes the mobile menu.
   if (!$("#app").classList.contains("menu-open")) return;
@@ -349,6 +387,7 @@ async function render() {
       await Promise.all([loadClients(), loadSettings()]);
       view.innerHTML = clientsHtml();
       wireClients();
+      startClientAutoRefresh();
     } else if (state.view === "invites") {
       await Promise.all([loadInvites(), loadSettings()]);
       view.innerHTML = invitesHtml();
@@ -380,26 +419,26 @@ function dashboardHtml() {
   const apiShared = status.apiPort && status.apiPort === status.socksPort;
   return `
     <div class="grid kpi">
-      <div class="card kpi-card">
+      <button class="card kpi-card link-card" type="button" data-copy="${escapeHtml(status.address || "")}" title="Copy the Yggdrasil address">
         <div class="label">Yggdrasil address</div>
         <div class="value mono small-value">${escapeHtml(status.address || "—")}</div>
-        <div class="sub">${escapeHtml(status.name || "")}</div>
-      </div>
+        <div class="sub">${escapeHtml(status.name || "")} · click to copy</div>
+      </button>
       <a class="card kpi-card link-card" href="#clients" title="Open the Clients tab">
         <div class="label">Clients</div>
         <div class="value">${status.clients || 0}</div>
         <div class="sub">${status.activeConnections || 0} TCP · ${status.activeUdp || 0} UDP</div>
       </a>
-      <div class="card kpi-card">
+      <button class="card kpi-card link-card" type="button" data-usage="today" title="Traffic by client today">
         <div class="label">Today</div>
         <div class="value">${bytes((status.todayRx || 0) + (status.todayTx || 0))}</div>
         <div class="sub">↑ ${bytes(status.todayRx)} · ↓ ${bytes(status.todayTx)}</div>
-      </div>
-      <div class="card kpi-card">
+      </button>
+      <button class="card kpi-card link-card" type="button" data-usage="month" title="Traffic by client this month">
         <div class="label">This month</div>
         <div class="value">${bytes((status.monthRx || 0) + (status.monthTx || 0))}</div>
         <div class="sub">↑ ${bytes(status.monthRx)} · ↓ ${bytes(status.monthTx)}</div>
-      </div>
+      </button>
     </div>
 
     <div class="card section">
@@ -465,6 +504,14 @@ function dashboardHtml() {
       </div>
     </div>
 
+    <div class="card section">
+      <header>
+        <h3>Yggdrasil peers</h3>
+        <span class="muted small">${(peers.peers || []).length} link(s)</span>
+      </header>
+      ${peerTableHtml(peers.peers || [])}
+    </div>
+
     <div class="grid two">
       <div class="card section">
         <header>
@@ -494,14 +541,6 @@ function dashboardHtml() {
              <p class="hint">Restarting x-node drops the open tunnels for a moment. Restarting yggdrasil rebuilds every peering link.</p>`
           : '<p class="hint">Restarts are disabled: the root helper is not installed. Run install.sh again to enable them.</p>'}
       </div>
-    </div>
-
-    <div class="card section">
-      <header>
-        <h3>Yggdrasil peers</h3>
-        <span class="muted small">${(peers.peers || []).length} link(s)</span>
-      </header>
-      ${peerTableHtml(peers.peers || [])}
     </div>
   `;
 }
@@ -546,6 +585,14 @@ function wireDashboard() {
       try {
         await loadTraffic();
         drawChart();
+      } catch (err) { toast(err.message, true); }
+    });
+  });
+  $$("[data-usage]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      try {
+        await loadClients();
+        showUsagePopover(button, button.dataset.usage);
       } catch (err) { toast(err.message, true); }
     });
   });
@@ -749,7 +796,7 @@ function clientsHtml() {
     <div class="card section">
       <header>
         <h3>Registered clients</h3>
-        <span class="muted small">${state.clients.length} total</span>
+        <span class="muted small" id="clients-count">${state.clients.length} total</span>
       </header>
       ${state.clients.length ? `<div class="table-wrap"><table class="cards">
         <thead><tr>
@@ -757,8 +804,8 @@ function clientsHtml() {
           <th class="right">Today</th><th class="right">Month</th><th>Quota</th>
           <th class="right hide-sm">Last seen</th><th></th>
         </tr></thead>
-        <tbody>${rows}</tbody>
-      </table></div>` : '<div class="empty">No clients yet. Create an invite or add an address.</div>'}
+        <tbody id="clients-body">${rows}</tbody>
+      </table></div>` : '<div class="empty" id="clients-empty">No clients yet. Create an invite or add an address.</div>'}
       <div id="client-editor"></div>
     </div>
 
@@ -808,17 +855,20 @@ function clientRowHtml(client) {
     client.registeredAt ? "registered " + when(client.registeredAt) : "",
   ].filter(Boolean).join(" · ");
   const quotaPill = quota.exhausted ? '<span class="pill bad">quota exhausted</span>' : "";
+  const suspendedPill = client.suspended ? '<span class="pill warn">suspended</span>' : "";
+  const stateClass = client.suspended ? "warn" : client.state === "connected" ? "ok" : "";
   return `
     <tr>
       <td data-label="Client">
         <div class="client-line">
           <span class="mono break">${escapeHtml(client.address)}</span>
           ${client.label ? `<span class="pill">${escapeHtml(client.label)}</span>` : ""}
+          ${suspendedPill}
           <button class="icon-btn stats-btn" type="button" data-client-stats="${escapeHtml(client.address)}" title="Traffic details" aria-label="Traffic details">${INFO_ICON}</button>
         </div>
         ${meta ? `<div class="muted small">${escapeHtml(meta)}</div>` : ""}
       </td>
-      <td data-label="State"><span class="pill ${client.state === "connected" ? "ok" : ""}">${escapeHtml(client.state)}</span></td>
+      <td data-label="State"><span class="pill ${stateClass}">${escapeHtml(client.state)}</span></td>
       <td class="right" data-label="TCP">${client.connections || 0}</td>
       <td class="right" data-label="UDP">${client.udpAssociations || 0}</td>
       <td class="right" data-label="Today">${bytes(client.dayUsed || 0)}</td>
@@ -835,6 +885,8 @@ function clientRowHtml(client) {
       <td class="right nowrap" data-label="Actions">
         <button class="btn small" data-edit="${escapeHtml(client.address)}">Edit</button>
         <button class="btn small" data-token="${escapeHtml(client.address)}">Token</button>
+        <button class="btn small" data-disconnect="${escapeHtml(client.address)}" title="Close all TCP and UDP connections of this client">Disconnect all</button>
+        <button class="btn small ${client.suspended ? "primary" : ""}" data-suspend="${escapeHtml(client.address)}" data-suspended="${client.suspended ? "1" : "0"}">${client.suspended ? "Resume" : "Suspend"}</button>
         <button class="btn small danger" data-remove="${escapeHtml(client.address)}">Remove</button>
       </td>
     </tr>`;
@@ -861,6 +913,7 @@ function clientDetailsHtml(client) {
     ["Refusals", client.refused
       ? client.refused + " (" + (client.quotaRefused || 0) + " by quota)"
       : "none"],
+    ["Suspended", client.suspended ? "yes — the operator blocked this client" : "no"],
   ];
   const destinations = (client.destinations || []).length
     ? `<div class="popover-dest"><span class="muted">Destinations</span><div class="mono small">${client.destinations.map(escapeHtml).join("<br>")}</div></div>`
@@ -876,16 +929,14 @@ function clientDetailsHtml(client) {
     <table class="facts popover-facts">
       ${rows.map(([name, value]) => `<tr><th>${escapeHtml(name)}</th><td class="right">${escapeHtml(value)}</td></tr>`).join("")}
     </table>
+    <p class="hint">Refusals counts the connections the exit turned away since it started: either the per-client connection limit or an exhausted traffic quota. An app that keeps retrying while it is blocked raises the number.</p>
     ${destinations}`;
 }
 
-// showClientPopover opens one floating card next to the icon. It is a separate
-// element instead of a row that grows, so opening it does not move the table.
-function showClientPopover(button, client) {
-  const popover = $("#client-popover");
-  if (!popover) return;
-  popover.innerHTML = clientDetailsHtml(client);
-  popover.classList.remove("hidden");
+// positionPopover puts a floating card next to the control that opened it and
+// keeps it inside the window. The card is measured while invisible, so the
+// first paint never jumps.
+function positionPopover(popover, button) {
   popover.style.visibility = "hidden";
   const rect = button.getBoundingClientRect();
   const width = popover.offsetWidth;
@@ -900,6 +951,17 @@ function showClientPopover(button, client) {
   popover.style.left = Math.round(left) + "px";
   popover.style.top = Math.round(top) + "px";
   popover.style.visibility = "";
+}
+
+// showClientPopover opens one floating card next to the icon. It is a separate
+// element instead of a row that grows, so opening it does not move the table.
+function showClientPopover(button, client) {
+  const popover = $("#client-popover");
+  if (!popover) return;
+  hideUsagePopover();
+  popover.innerHTML = clientDetailsHtml(client);
+  popover.classList.remove("hidden");
+  positionPopover(popover, button);
   popover.querySelector("[data-popover-close]").addEventListener("click", hideClientPopover);
   popover.querySelector("[data-popover-close]").focus({ preventScroll: true });
 }
@@ -909,15 +971,170 @@ function hideClientPopover() {
   if (popover) popover.classList.add("hidden");
 }
 
-function wireClients() {
+// usageHtml is the content of the Today / This month card: how the traffic of
+// the whole exit is split between the clients. The figures are the same ones
+// the Clients table shows, so the two views never disagree.
+function usageHtml(period) {
+  const monthly = period === "month";
+  const key = monthly ? "monthUsed" : "dayUsed";
+  const title = monthly ? "This month by client" : "Today by client";
+  const clients = state.clients
+    .slice()
+    .sort((a, b) => (b[key] || 0) - (a[key] || 0));
+  const total = clients.reduce((sum, client) => sum + (client[key] || 0), 0);
+  const rows = clients.map((client) => {
+    const used = client[key] || 0;
+    const share = total > 0 ? (used / total) * 100 : 0;
+    const name = client.label || client.deviceName || client.address;
+    return `
+      <div class="usage-row">
+        <div class="usage-line">
+          <span class="usage-name">${escapeHtml(name)}</span>
+          <span class="muted small nowrap">${bytes(used)} · ${share.toFixed(share >= 10 ? 0 : 1)}%</span>
+        </div>
+        <div class="usage-address mono small">${escapeHtml(client.address)}</div>
+        <div class="bar"><i style="width:${share}%"></i></div>
+      </div>`;
+  }).join("");
+  return `
+    <header>
+      <div>
+        <h3>${title}</h3>
+        <div class="muted small">${bytes(total)} in total · ${clients.length} client(s)</div>
+      </div>
+      <button class="icon-btn" type="button" data-usage-close aria-label="Close">×</button>
+    </header>
+    ${clients.length ? `<div class="usage-list">${rows}</div>` : '<p class="hint">No clients yet.</p>'}`;
+}
+
+function showUsagePopover(button, period) {
+  const popover = $("#usage-popover");
+  if (!popover) return;
+  hideClientPopover();
+  popover.innerHTML = usageHtml(period);
+  popover.classList.remove("hidden");
+  positionPopover(popover, button);
+  popover.querySelector("[data-usage-close]").addEventListener("click", hideUsagePopover);
+  popover.querySelector("[data-usage-close]").focus({ preventScroll: true });
+}
+
+function hideUsagePopover() {
+  const popover = $("#usage-popover");
+  if (popover) popover.classList.add("hidden");
+}
+
+// wireClientRows attaches the actions of the table rows. It is called again
+// after the automatic refresh replaces the rows, so the handlers use onclick
+// instead of addEventListener and never stack.
+function wireClientRows() {
   $$("[data-client-stats]").forEach((button) => {
-    button.addEventListener("click", (event) => {
+    button.onclick = (event) => {
       event.stopPropagation();
       const client = state.clients.find((item) => item.address === button.dataset.clientStats);
       if (client) showClientPopover(button, client);
-    });
+    };
   });
 
+  $$("[data-edit]").forEach((button) => {
+    button.onclick = () => openClientEditor(button.dataset.edit);
+  });
+
+  $$("[data-remove]").forEach((button) => {
+    button.onclick = async () => {
+      if (!confirm("Remove " + button.dataset.remove + " from the allowlist?")) return;
+      try {
+        await api("DELETE", "api/clients/" + encodeURIComponent(button.dataset.remove));
+        toast("Client removed");
+        render();
+      } catch (err) { toast(err.message, true); }
+    };
+  });
+
+  $$("[data-token]").forEach((button) => {
+    button.onclick = async () => {
+      if (!confirm("Issue a new API token for " + button.dataset.token + "? The previous token stops working.")) return;
+      try {
+        const data = await api("POST", "api/clients/" + encodeURIComponent(button.dataset.token) + "/token");
+        prompt("New API token (shown once):", data.token);
+      } catch (err) { toast(err.message, true); }
+    };
+  });
+
+  $$("[data-disconnect]").forEach((button) => {
+    button.onclick = async () => {
+      const address = button.dataset.disconnect;
+      button.disabled = true;
+      try {
+        const data = await api("POST", "api/clients/" + encodeURIComponent(address) + "/disconnect");
+        toast(data.closed
+          ? "Closed " + data.closed + " connection(s)"
+          : "This client has no open connections");
+        await refreshClientRows();
+      } catch (err) {
+        toast(err.message, true);
+        button.disabled = false;
+      }
+    };
+  });
+
+  $$("[data-suspend]").forEach((button) => {
+    button.onclick = async () => {
+      const address = button.dataset.suspend;
+      const suspend = button.dataset.suspended !== "1";
+      if (suspend && !confirm("Suspend " + address +
+          "?\n\nOpen connections are closed and the client cannot reconnect until you resume it. " +
+          "Its quota, counters and token are kept.")) {
+        return;
+      }
+      button.disabled = true;
+      try {
+        const data = await api("POST", "api/clients/" + encodeURIComponent(address) + "/suspend",
+          { suspended: suspend });
+        toast(suspend
+          ? "Client suspended" + (data.closed ? " · " + data.closed + " connection(s) closed" : "")
+          : "Client resumed");
+        await refreshClientRows();
+      } catch (err) {
+        toast(err.message, true);
+        button.disabled = false;
+      }
+    };
+  });
+}
+
+// startClientAutoRefresh keeps the Clients tab live. The table is rebuilt from
+// a fresh API answer, while the editor and any floating card stay untouched.
+function startClientAutoRefresh() {
+  clearInterval(state.clientTimer);
+  state.clientTimer = setInterval(() => {
+    if (!document.hidden) refreshClientRows();
+  }, 5000);
+}
+
+async function refreshClientRows() {
+  if (state.view !== "clients" || state.clientRefreshing) return;
+  state.clientRefreshing = true;
+  try {
+    await loadClients();
+    const body = $("#clients-body");
+    if (!body || !state.clients.length) {
+      // The empty state and the table are different elements: switch between
+      // them with a full render instead of leaving a stale message behind.
+      if (!state.editing) render();
+      return;
+    }
+    body.innerHTML = state.clients.map((client) => clientRowHtml(client)).join("");
+    const count = $("#clients-count");
+    if (count) count.textContent = state.clients.length + " total";
+    wireClientRows();
+  } catch (_) {
+    // A transient API error is not worth a toast every five seconds.
+  } finally {
+    state.clientRefreshing = false;
+  }
+}
+
+function wireClients() {
   $("#add-client").addEventListener("submit", async (event) => {
     event.preventDefault();
     try {
@@ -928,31 +1145,6 @@ function wireClients() {
       toast("Client added");
       render();
     } catch (err) { toast(err.message, true); }
-  });
-
-  $$("[data-edit]").forEach((button) => {
-    button.addEventListener("click", () => openClientEditor(button.dataset.edit));
-  });
-
-  $$("[data-remove]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      if (!confirm("Remove " + button.dataset.remove + " from the allowlist?")) return;
-      try {
-        await api("DELETE", "api/clients/" + encodeURIComponent(button.dataset.remove));
-        toast("Client removed");
-        render();
-      } catch (err) { toast(err.message, true); }
-    });
-  });
-
-  $$("[data-token]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      if (!confirm("Issue a new API token for " + button.dataset.token + "? The previous token stops working.")) return;
-      try {
-        const data = await api("POST", "api/clients/" + encodeURIComponent(button.dataset.token) + "/token");
-        prompt("New API token (shown once):", data.token);
-      } catch (err) { toast(err.message, true); }
-    });
   });
 
   $("#quota-defaults").addEventListener("submit", async (event) => {
@@ -971,6 +1163,8 @@ function wireClients() {
       render();
     } catch (err) { toast(err.message, true); }
   });
+
+  wireClientRows();
 }
 
 function openClientEditor(address) {
@@ -1251,9 +1445,10 @@ function settingsHtml() {
         <label class="field"><span>Connections total</span><input id="s-maxtotal" type="number" min="1" value="${settings.maxConnsTotal || 512}"></label>
         <label class="field"><span>Idle timeout</span><input id="s-idle" value="${escapeHtml(settings.idleTimeout || "5m")}"></label>
         <label class="field"><span>Dial timeout</span><input id="s-dial" value="${escapeHtml(settings.dialTimeout || "15s")}"></label>
-        <label class="field full"><span>Blocked ports (comma separated)</span><input id="s-blocked" value="${(settings.blockedPorts || []).join(", ")}"></label>
+        <label class="field"><span>Blocked ports (comma separated)</span><input id="s-blocked" value="${(settings.blockedPorts || []).join(", ")}"></label>
       </div>
       <p class="hint">"Clients allowed" is how many Yggdrasil addresses may be in the allowlist. The connection limits are counted per client and for the whole exit.</p>
+      <p class="hint">Dial timeout is how long the exit waits for a destination to accept a TCP connection before it reports an error to the client. Idle timeout closes a connection that carries no traffic for that long.</p>
     </form>
 
     <form class="card section settings-card" data-settings="udp">
@@ -1307,14 +1502,14 @@ function settingsHtml() {
       </header>
       <p class="hint">A pinned peer is kept connected on top of the automatic count. It is never replaced or trimmed, so it is the right place for a private peer.</p>
       <div id="manual-peers">${manualRows}</div>
-      <form id="manual-peer-pick" class="row">
-        <select class="grow" id="manual-candidate" ${candidateOptions ? "" : "disabled"}>
+      <form id="manual-peer-pick" class="manual-peer-form">
+        <select id="manual-candidate" ${candidateOptions ? "" : "disabled"}>
           ${candidateOptions || '<option value="">No probed peers yet — press "Find peers"</option>'}
         </select>
         <button class="btn primary" type="submit" ${candidateOptions ? "" : "disabled"}>Add selected</button>
       </form>
-      <form id="manual-peer-add" class="row">
-        <input class="grow" id="manual-uri" placeholder="tls://peer.example:13338?key=…" required>
+      <form id="manual-peer-add" class="manual-peer-form">
+        <input id="manual-uri" placeholder="tls://peer.example:13338?key=…" required>
         <button class="btn" type="submit">Add by address</button>
       </form>
     </div>
@@ -1332,6 +1527,7 @@ function settingsHtml() {
         <label class="field"><span>Block duration</span><input id="s-lockout" value="${escapeHtml(web.lockout || "15m")}"></label>
         <label class="field"><span>Listen</span><input value="${escapeHtml(web.listen || "all")}" disabled></label>
         <label class="field"><span>Port</span><input value="${web.port || 443}" disabled></label>
+        <label class="switch full"><input type="checkbox" id="s-compact" ${web.compact ? "checked" : ""}><span>Compact layout — keep the interface 25% narrower on a desktop screen</span></label>
       </div>
       <p class="hint">Listen address, port and TLS are read at start: change them in the Configuration tab and restart x-node.</p>
     </form>
@@ -1392,6 +1588,7 @@ function settingsPayload(kind) {
           sessionTTL: $("#s-sessionttl").value.trim(),
           maxFailedLogins: Number($("#s-maxfail").value),
           lockout: $("#s-lockout").value.trim(),
+          compact: $("#s-compact").checked,
         },
       };
     default:
@@ -1449,6 +1646,33 @@ function wireSettings() {
         "can relay traffic through this server.\n\nContinue?"
       );
       if (!ok) allowAll.checked = false;
+    });
+  }
+
+  // The compact layout is a display preference, so it applies immediately
+  // instead of waiting for the Save button of the Web interface card.
+  const compact = $("#s-compact");
+  if (compact) {
+    // The switch fires "input" before "change". Stopping both keeps the card's
+    // Save button hidden while the switch saves itself.
+    compact.addEventListener("input", (event) => event.stopPropagation());
+    compact.addEventListener("change", async (event) => {
+      // The card's own Save button must not appear: this switch saves itself.
+      event.stopPropagation();
+      const enabled = compact.checked;
+      applyCompact(enabled);
+      try {
+        await api("PUT", "api/settings", { web: { compact: enabled } });
+        if (state.settings && state.settings.web) state.settings.web.compact = enabled;
+        const form = compact.closest("[data-settings]");
+        const save = form && form.querySelector(".save-btn");
+        if (save) save.classList.add("hidden");
+        toast(enabled ? "Compact layout on" : "Compact layout off");
+      } catch (err) {
+        compact.checked = !enabled;
+        applyCompact(!enabled);
+        toast(err.message, true);
+      }
     });
   }
 
@@ -1551,7 +1775,6 @@ function configHtml() {
           <option value="main">/etc/x-node/config.json</option>
           <option value="yggdrasil">yggdrasil.conf</option>
         </select>
-        <button class="btn small" id="config-load" type="button">Load</button>
         <button class="btn primary small" id="config-save" type="button">Validate and save</button>
         <button class="btn small" data-restart="x-node" type="button">Restart x-node</button>
         <button class="btn small" data-restart="yggdrasil" type="button">Restart yggdrasil</button>
@@ -1578,7 +1801,6 @@ function wireConfig() {
     }
   };
   $("#config-file").addEventListener("change", loadConfig);
-  $("#config-load").addEventListener("click", loadConfig);
   $("#config-save").addEventListener("click", async () => {
     const file = $("#config-file").value;
     if (!confirm("Validate and save this file? A backup is kept in /var/backups.")) return;

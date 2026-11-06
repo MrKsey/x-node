@@ -55,6 +55,10 @@ type socksServer struct {
 	// connection limits because one association is a long-lived relay socket.
 	udp *udpRelay
 
+	// conns tracks the client sockets that are open right now, so a quota or a
+	// suspension can close the connections that are already carrying traffic.
+	conns *connectionRegistry
+
 	// sourceOK is the Yggdrasil source check. It is a field so the UDP tests can
 	// run over loopback; production always uses isYggAddress.
 	sourceOK func(net.IP) bool
@@ -77,6 +81,7 @@ func newSocksServer(cfg Config, store *Store, tracker *runtimeTracker, log *logg
 		log:       log,
 		api:       api,
 		udp:       newUDPRelay(cfg),
+		conns:     newConnectionRegistry(),
 		sourceOK:  isYggAddress,
 		policy:    destinationAllowed,
 		perClient: make(map[string]int),
@@ -186,6 +191,22 @@ func (s *socksServer) serveConn(conn net.Conn) {
 		}
 		return
 	}
+	if client, ok := s.store.Get(source); ok && client.Suspended {
+		s.log.info("client %s refused: suspended by the operator", s.clientName(source))
+		if s.usage != nil {
+			s.usage.addRefused(source)
+		}
+		if s.tracker != nil {
+			s.tracker.refused(source)
+		}
+		_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
+		_ = readGreeting(reader)
+		_ = writeMethod(conn)
+		if _, err := readRequest(reader); err == nil {
+			_ = writeReply(conn, socksReplyNotAllowed, net.IPv4zero, 0)
+		}
+		return
+	}
 	if allowed, reason := s.quotas.allow(source, s.usage); !allowed {
 		s.log.info("client %s refused: %s", s.clientName(source), reason)
 		if s.usage != nil {
@@ -205,6 +226,10 @@ func (s *socksServer) serveConn(conn net.Conn) {
 	s.store.Touch(source)
 	if s.tracker != nil {
 		s.tracker.touch(source)
+	}
+	if s.conns != nil {
+		release := s.conns.track(source, conn)
+		defer release()
 	}
 
 	_ = conn.SetDeadline(time.Now().Add(15 * time.Second))
@@ -501,6 +526,45 @@ func (s *socksServer) release(source net.IP) {
 	}
 	s.mu.Unlock()
 	s.total.Add(-1)
+}
+
+// watchQuotas closes the connections of a client whose quota ran out while
+// they were open. Without it a single long download could keep going after the
+// cap was reached, because the quota is checked only when a connection starts.
+func (s *socksServer) watchQuotas(ctx context.Context) {
+	if s.conns == nil {
+		return
+	}
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.enforceLimits()
+		}
+	}
+}
+
+func (s *socksServer) enforceLimits() {
+	for _, address := range s.conns.addresses() {
+		ip := net.ParseIP(address)
+		if ip == nil {
+			continue
+		}
+		if client, ok := s.store.Get(ip); ok && client.Suspended {
+			if closed := s.conns.closeClient(ip); closed > 0 {
+				s.log.info("client %s: closed %d connection(s): suspended by the operator", s.clientName(ip), closed)
+			}
+			continue
+		}
+		if allowed, reason := s.quotas.allow(ip, s.usage); !allowed {
+			if closed := s.conns.closeClient(ip); closed > 0 {
+				s.log.info("client %s: closed %d connection(s): %s", s.clientName(ip), closed, reason)
+			}
+		}
+	}
 }
 
 func remoteTCPIP(conn net.Conn) net.IP {

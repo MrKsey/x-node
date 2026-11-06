@@ -881,13 +881,14 @@ func (s *peerSupervisor) startProbeLocked(ctx context.Context, settings peerSett
 	s.probing = true
 	// The probe result also feeds the manual peer picker, and the peers that are
 	// already connected are filtered out of it. Ask for the automatic count plus
-	// a dozen spare candidates, so the picker always has something to show.
-	count := settings.Count + 12
-	if count < 15 {
-		count = 15
+	// a couple of dozen spare candidates, so the picker always has something to
+	// show even after the supervisor took its share.
+	count := settings.Count + 25
+	if count < 25 {
+		count = 25
 	}
-	if count > 40 {
-		count = 40
+	if count > 60 {
+		count = 60
 	}
 	go func() {
 		results, err := s.probe(ctx, count)

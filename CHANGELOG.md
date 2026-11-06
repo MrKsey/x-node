@@ -4,6 +4,51 @@ All notable changes to X-Node are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.6.9] — 2026-11-06
+
+### Added
+
+- The Clients tab refreshes itself every five seconds while it is open, so a
+  connection that starts or ends no longer needs a page reload or a tab switch.
+- Each client row has **Disconnect all**, which closes every TCP connection and
+  UDP association of that client without touching its allowlist entry.
+- Each client row has **Suspend / Resume**. A suspended client stays in the
+  allowlist with its counters, quota and token, but the exit closes its open
+  connections and refuses new ones. The state is reported by the status API and
+  shown by Y-Node in the exit card and in the notification.
+- The dashboard **Today** and **This month** cards open a floating window with
+  the traffic of every client and its share of the total.
+- The Web interface settings have a **Compact** switch: on a desktop screen the
+  interface becomes 25% narrower. The setting is stored on the server and is
+  ignored on a phone, where the layout already fills the screen.
+
+### Changed
+
+- The quota watcher closes open TCP and UDP connections when a client reaches
+  its daily or monthly cap. Previously the quota was checked only when a
+  connection started, so a long download could keep running after the cap.
+- The dashboard shows **Yggdrasil peers** between the X-Node/Yggdrasil pair and
+  the Quotas/Web interface pair, which is now at the bottom.
+- The **Yggdrasil address** card copies the address instead of opening Settings.
+- Settings cards are packed into two independent columns on a desktop, so a
+  short card is followed by the next one instead of a gap left by its taller
+  neighbour. **Blocked ports** is a normal-width field and shares a row with
+  **Dial timeout**.
+- Both **Manual Yggdrasil peers** forms use the same width for the field and
+  the button, and the peer probe asks for 25 spare candidates instead of 15.
+- The Configuration and Logs text areas follow the browser height.
+- The **Load** button is gone from Configuration: choosing a file loads it.
+- Settings explains **Refusals** (connection-limit or quota refusals since the
+  exit started) and **Dial timeout** (how long a destination may take to accept
+  a TCP connection).
+
+### Fixed
+
+- The **Resolve domain names (ATYP=domain)** switch was squeezed by the flex
+  layout and rendered as a stretched pill instead of a toggle.
+- The web interface password is kept on any reinstall, not only when
+  `install.sh --upgrade` is used, as long as `web.json` already exists.
+
 ## [1.6.8] — 2026-11-05
 
 ### Fixed

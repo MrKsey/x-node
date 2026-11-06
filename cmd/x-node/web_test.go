@@ -241,6 +241,68 @@ func TestWebClientAndQuota(t *testing.T) {
 	}
 }
 
+func TestWebClientSuspensionAndDisconnect(t *testing.T) {
+	server, _ := newTestWebServer(t)
+	server.conns = newConnectionRegistry()
+	ts := httptest.NewServer(server)
+	defer ts.Close()
+	client := testClient(t)
+
+	if code, _ := doJSON(t, client, http.MethodPost, ts.URL+"/test/web/api/login",
+		map[string]string{"username": "admin", "password": "correct horse battery staple"}, true); code != http.StatusOK {
+		t.Fatalf("login failed")
+	}
+	address := testAddr(t, 8).String()
+	if code, payload := doJSON(t, client, http.MethodPost, ts.URL+"/test/web/api/clients",
+		map[string]string{"address": address}, true); code != http.StatusOK {
+		t.Fatalf("add client = %d %v", code, payload)
+	}
+	ip := net.ParseIP(address)
+
+	// A tracked socket stands in for a live tunnel; Disconnect must close it.
+	local, remote := net.Pipe()
+	defer remote.Close()
+	release := server.conns.track(ip, local)
+	defer release()
+	code, payload := doJSON(t, client, http.MethodPost,
+		ts.URL+"/test/web/api/clients/"+address+"/disconnect", nil, true)
+	if code != http.StatusOK || payload["closed"].(float64) != 1 {
+		t.Fatalf("disconnect = %d %v", code, payload)
+	}
+	_ = remote.SetReadDeadline(time.Now().Add(time.Second))
+	if _, err := remote.Read(make([]byte, 1)); err == nil {
+		t.Fatal("the tracked connection is still open")
+	}
+
+	code, payload = doJSON(t, client, http.MethodPost,
+		ts.URL+"/test/web/api/clients/"+address+"/suspend",
+		map[string]any{"suspended": true}, true)
+	if code != http.StatusOK {
+		t.Fatalf("suspend = %d %v", code, payload)
+	}
+	stored, ok := server.store.Get(ip)
+	if !ok || !stored.Suspended || stored.SuspendedAt.IsZero() {
+		t.Fatalf("stored suspension = %+v", stored)
+	}
+	_, payload = doJSON(t, client, http.MethodGet, ts.URL+"/test/web/api/clients", nil, false)
+	clients, _ := payload["clients"].([]any)
+	row, _ := clients[0].(map[string]any)
+	if row["suspended"] != true || row["state"] != "suspended" {
+		t.Fatalf("suspended client row = %v", row)
+	}
+
+	code, payload = doJSON(t, client, http.MethodPost,
+		ts.URL+"/test/web/api/clients/"+address+"/suspend",
+		map[string]any{"suspended": false}, true)
+	if code != http.StatusOK {
+		t.Fatalf("resume = %d %v", code, payload)
+	}
+	stored, _ = server.store.Get(ip)
+	if stored.Suspended || !stored.SuspendedAt.IsZero() {
+		t.Fatalf("resumed client = %+v", stored)
+	}
+}
+
 func TestWebSettingsPatch(t *testing.T) {
 	server, cfg := newTestWebServer(t)
 	ts := httptest.NewServer(server)
@@ -252,18 +314,22 @@ func TestWebSettingsPatch(t *testing.T) {
 		t.Fatalf("login failed")
 	}
 	code, payload := doJSON(t, client, http.MethodPut, ts.URL+"/test/web/api/settings",
-		map[string]any{"maxConnsPerClient": 42, "logLevel": "warn"}, true)
+		map[string]any{"maxConnsPerClient": 42, "logLevel": "warn",
+			"web": map[string]any{"compact": true}}, true)
 	if code != http.StatusOK {
 		t.Fatalf("settings = %d %v", code, payload)
 	}
 	if got := server.live.get().MaxConnsPerClient; got != 42 {
 		t.Fatalf("maxConnsPerClient = %d", got)
 	}
+	if !server.live.get().Web.Compact {
+		t.Fatal("the compact layout was not saved")
+	}
 	merged, err := loadSettingsOverlay(cfg)
 	if err != nil {
 		t.Fatalf("overlay was not written: %v", err)
 	}
-	if merged.MaxConnsPerClient != 42 || merged.LogLevel != "warn" {
+	if merged.MaxConnsPerClient != 42 || merged.LogLevel != "warn" || !merged.Web.Compact {
 		t.Fatalf("overlay = %+v", merged)
 	}
 }

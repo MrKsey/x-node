@@ -1481,9 +1481,10 @@ if [ "$WEB_ENABLED" -eq 1 ]; then
             -config "$EXIT_CONFIG" -user "$WEB_USER" -password "$WEB_PASSWORD" >/dev/null \
             || die "could not store the web password"
         WEB_LOGIN="$WEB_USER"
-    elif [ "$UPGRADE" -eq 1 ] && [ -f "$STATE_DIR/web.json" ]; then
-        # An upgrade keeps the password: web.json already holds its hash, and a
-        # silent change would lock the operator out of the interface.
+    elif [ -f "$STATE_DIR/web.json" ]; then
+        # Any reinstall keeps the password: web.json already holds its hash,
+        # and a silent change would lock the operator out of the interface.
+        # The same applies to a plain reinstall, not only to --upgrade.
         log "Keeping the existing web interface password"
         WEB_LOGIN="$WEB_USER"
     else

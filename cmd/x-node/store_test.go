@@ -136,6 +136,40 @@ func TestStoreManualAllowlist(t *testing.T) {
 	}
 }
 
+func TestStoreSuspension(t *testing.T) {
+	cfg := testConfig(t)
+	store, err := openStore(cfg, newLogger("error"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ip := testAddr(t, 21)
+	if _, _, err := store.AddClient(ip, "phone"); err != nil {
+		t.Fatal(err)
+	}
+	client, err := store.SetSuspended(ip, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !client.Suspended || client.SuspendedAt.IsZero() {
+		t.Fatalf("suspended client = %+v", client)
+	}
+	// A suspension is temporary: the entry stays in the allowlist, so the
+	// client keeps its counters and token.
+	if !store.Allowed(ip) {
+		t.Fatal("a suspended client was removed from the allowlist")
+	}
+	client, err = store.SetSuspended(ip, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if client.Suspended || !client.SuspendedAt.IsZero() {
+		t.Fatalf("resumed client = %+v", client)
+	}
+	if _, err := store.SetSuspended(testAddr(t, 22), true); !errors.Is(err, errNotAllowed) {
+		t.Fatalf("unknown client error = %v, want errNotAllowed", err)
+	}
+}
+
 func TestStorePicksUpCLIChanges(t *testing.T) {
 	cfg := testConfig(t)
 	service, err := openStore(cfg, newLogger("error"))

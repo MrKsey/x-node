@@ -37,6 +37,12 @@ type Client struct {
 	RegisteredAt time.Time `json:"registeredAt"`
 	LastSeenAt   time.Time `json:"lastSeenAt"`
 
+	// Suspended blocks the client even when its quota is not used up. The
+	// operator turns it on from the web interface, for example while a device
+	// is lost or misbehaving. Open connections are closed at the same time.
+	Suspended   bool      `json:"suspended,omitempty"`
+	SuspendedAt time.Time `json:"suspendedAt,omitempty"`
+
 	// TokenHash is the SHA-256 of the API token of this client. Only the hash
 	// is stored: a leaked allowlist file must not hand out a working
 	// credential. The token itself is shown once, when it is issued.
@@ -367,6 +373,36 @@ func (s *Store) UpdateClient(ip net.IP, label string) (Client, error) {
 		return Client{}, errNotAllowed
 	}
 	client.Label = strings.TrimSpace(label)
+	s.clients[key] = client
+	if err := s.saveAllowlistLocked(); err != nil {
+		return Client{}, err
+	}
+	return client, nil
+}
+
+// SetSuspended blocks or unblocks one allowlisted client. The entry stays in
+// the allowlist: a suspension is a temporary state, not a removal, so the
+// traffic counters and the token survive it.
+func (s *Store) SetSuspended(ip net.IP, suspended bool) (Client, error) {
+	if ip == nil || !isYggAddress(ip) {
+		return Client{}, fmt.Errorf("address must be a Yggdrasil node address")
+	}
+	release, err := s.beginWrite()
+	if err != nil {
+		return Client{}, err
+	}
+	defer release()
+	key := ip.String()
+	client, ok := s.clients[key]
+	if !ok {
+		return Client{}, errNotAllowed
+	}
+	client.Suspended = suspended
+	if suspended {
+		client.SuspendedAt = time.Now()
+	} else {
+		client.SuspendedAt = time.Time{}
+	}
 	s.clients[key] = client
 	if err := s.saveAllowlistLocked(); err != nil {
 		return Client{}, err

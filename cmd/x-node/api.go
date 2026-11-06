@@ -17,7 +17,7 @@ import (
 
 // daemonVersion is stamped by build.sh (-ldflags -X main.daemonVersion=...).
 // The default is what a plain "go build" reports.
-var daemonVersion = "1.6.8"
+var daemonVersion = "1.6.9"
 
 type apiServer struct {
 	cfg     Config
@@ -82,6 +82,7 @@ type statusResponse struct {
 	// nothing about the exit, its clients, their limits or their addresses.
 	Allowlisted  *bool         `json:"allowlisted,omitempty"`
 	Open         bool          `json:"open,omitempty"`
+	Suspended    bool          `json:"suspended,omitempty"`
 	ExitName     string        `json:"exitName,omitempty"`
 	Version      string        `json:"version,omitempty"`
 	Capabilities *capabilities `json:"capabilities,omitempty"`
@@ -261,6 +262,7 @@ func (a *apiServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 	response.Capabilities = &caps
 	response.Address = source.String()
 	response.Label = client.Label
+	response.Suspended = client.Suspended
 	response.MaxConns = a.config().MaxConnsPerClient
 	response.Connections = live.Connections
 	response.Refused = live.Refused

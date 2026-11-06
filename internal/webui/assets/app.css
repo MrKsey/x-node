@@ -197,7 +197,7 @@ input[type="checkbox"] { width: auto; accent-color: var(--accent); }
 .kpi-card .sub { font-size: 12.5px; color: var(--muted); }
 /* A KPI card that opens another tab. It keeps the card look and only reacts
    to the pointer, so it does not read as a button. */
-.link-card { color: inherit; cursor: pointer; transition: border-color .15s, transform .05s; }
+.link-card { color: inherit; cursor: pointer; transition: border-color .15s, transform .05s; text-align: left; font: inherit; }
 .link-card:hover { text-decoration: none; border-color: var(--accent); }
 .link-card:active { transform: translateY(1px); }
 
@@ -225,14 +225,15 @@ tr:last-child td { border-bottom: 0; }
 .form-grid > * { min-width: 0; }
 .switch { display: flex; align-items: center; gap: 10px; min-height: 41px; padding: 0; flex-wrap: nowrap; }
 .switch > span { flex: 1 1 auto; min-width: 0; }
-.switch input { width: 40px; height: 22px; appearance: none; background: var(--bg-soft); border-radius: 999px; position: relative; cursor: pointer; transition: background .15s; }
+.switch input { width: 40px; height: 22px; flex: 0 0 auto; padding: 0; margin: 0; appearance: none; background: var(--bg-soft); border-radius: 999px; position: relative; cursor: pointer; transition: background .15s; }
 .switch input::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: var(--bg-elev); box-shadow: var(--shadow); transition: transform .15s; }
 .switch input:checked { background: var(--accent); }
 .switch input:checked::after { transform: translateX(18px); }
 
 pre.logs {
   margin: 0; padding: 14px; border-radius: 12px; background: var(--bg-soft);
-  max-height: 60vh; overflow: auto; font-size: 12.5px; line-height: 1.55;
+  height: calc(100vh - 230px); min-height: 320px; overflow: auto;
+  font-size: 12.5px; line-height: 1.55;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   white-space: pre-wrap; word-break: break-word;
 }
@@ -275,7 +276,8 @@ canvas.chart { width: 100%; height: 250px; display: block; }
 .invite-text { flex: 1 1 260px; display: grid; gap: 10px; min-width: 0; }
 
 .config-editor {
-  min-height: 340px; resize: vertical; white-space: pre; overflow: auto;
+  height: calc(100vh - 230px); min-height: 320px; resize: vertical;
+  white-space: pre; overflow: auto;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12.5px; line-height: 1.55;
 }
@@ -284,6 +286,13 @@ canvas.chart { width: 100%; height: 250px; display: block; }
   padding: 10px 0; border-bottom: 1px solid var(--border); flex-wrap: wrap;
 }
 .manual-peer:last-child { border-bottom: 0; }
+/* Both manual peer forms use the same column for the field and for the button,
+   so the picker and the free-text address are exactly the same width. */
+.manual-peer-form {
+  display: grid; grid-template-columns: minmax(0, 1fr) 160px;
+  gap: 12px; align-items: center;
+}
+.manual-peer-form .btn { width: 160px; }
 
 /* The client row keeps the address and the label on one line. The details open
    in a floating card next to the icon, so the table does not move. */
@@ -317,19 +326,40 @@ canvas.chart { width: 100%; height: 250px; display: block; }
 .client-popover .popover-facts td { font-size: 12.5px; }
 .client-popover .popover-dest { display: grid; gap: 4px; }
 
+/* The traffic card behind Today / This month: the same floating panel as the
+   client details, with one row per client. */
+.usage-popover { width: min(420px, calc(100vw - 16px)); }
+.usage-list { display: grid; gap: 10px; max-height: 55vh; overflow-y: auto; }
+.usage-row { display: grid; gap: 3px; }
+.usage-line { display: flex; align-items: baseline; gap: 8px; }
+.usage-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 550; }
+.usage-address { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.usage-row .bar { min-width: 0; }
+
+/* Compact keeps the whole desktop interface 25% narrower than the browser
+   window. On a phone the layout already fills the screen, so the setting is
+   deliberately ignored there. */
+@media (min-width: 901px) {
+  .app.compact { max-width: 75%; margin-left: auto; margin-right: auto; }
+}
+
 /* A settings card owns its Save button: the button appears only after the
    card is edited, so there is no page-wide save that hides which form it
    applies to. */
 .settings-card > header .save-btn { flex: 0 0 auto; }
 
-/* Two cards per row on a desktop: the forms are short, and one card per row
-   left most of the screen empty. */
+/* Two cards per row on a desktop. Multi-column layout packs every column on
+   its own, so a short card is followed by the next one instead of leaving a
+   gap that matches the taller card beside it. */
 .settings-grid {
-  display: grid; gap: 16px; align-items: start;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-count: 2; column-gap: 16px;
 }
+.settings-grid > * {
+  break-inside: avoid; margin: 0 0 16px; width: 100%;
+}
+.settings-grid > *:last-child { margin-bottom: 0; }
 @media (max-width: 1024px) {
-  .settings-grid { grid-template-columns: 1fr; }
+  .settings-grid { column-count: 1; }
 }
 
 .empty { padding: 28px; text-align: center; color: var(--muted); }
@@ -337,7 +367,7 @@ canvas.chart { width: 100%; height: 250px; display: block; }
 /* mobile */
 @media (max-width: 900px) {
   .app { grid-template-columns: 1fr; }
-  .settings-grid { grid-template-columns: 1fr; }
+  .settings-grid { column-count: 1; }
   .sidebar {
     position: fixed; inset: 0 auto 0 0; width: min(300px, 86vw); z-index: 40;
     transform: translateX(-102%); transition: transform .2s ease;
@@ -374,6 +404,9 @@ canvas.chart { width: 100%; height: 250px; display: block; }
   .login-card { padding: 22px; }
   .row { gap: 8px; }
   .row > input, .row > select, .row > .btn { width: 100%; }
+  .manual-peer-form { grid-template-columns: 1fr; }
+  .manual-peer-form .btn { width: 100%; }
+  .config-editor, pre.logs { height: calc(100vh - 210px); min-height: 260px; }
   .settings-card > header { align-items: flex-start; }
   .settings-card > header .save-btn { width: 100%; }
 

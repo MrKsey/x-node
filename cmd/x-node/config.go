@@ -174,6 +174,9 @@ type WebConfig struct {
 	// TrustedProxies lists the addresses whose X-Forwarded-For header is
 	// believed. The installer adds the loopback addresses for nginx.
 	TrustedProxies []string `json:"trustedProxies"`
+	// Compact keeps the interface 25% narrower on a desktop screen. On a phone
+	// the layout already fills the width, so the switch has no effect there.
+	Compact bool `json:"compact"`
 }
 
 // QuotaDefaults are the limits of a client without its own quota entry.

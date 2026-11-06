@@ -171,6 +171,7 @@ func cmdServe(args []string) error {
 			return err
 		}
 		web.supervisor = supervisor
+		web.conns = socks.conns
 	}
 
 	errs := make(chan error, 3)
@@ -184,6 +185,7 @@ func cmdServe(args []string) error {
 	go supervisor.run(ctx)
 	go usage.run(ctx)
 	go family.run(ctx)
+	go socks.watchQuotas(ctx)
 	go watchSettings(ctx, base, live, quotas, log)
 	go func() {
 		ticker := time.NewTicker(time.Hour)
