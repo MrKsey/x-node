@@ -61,6 +61,30 @@ type probedPeer struct {
 	City      string  `json:"city,omitempty"`
 }
 
+// progressReport is one "progress {json}" line on stderr. The daemon forwards
+// these numbers to the web interface, so a search that takes minutes shows how
+// many peers were checked instead of looking stuck.
+type progressReport struct {
+	Stage   string `json:"stage"`
+	Total   int    `json:"total"`
+	Pool    int    `json:"pool,omitempty"`
+	Checked int    `json:"checked"`
+	Alive   int    `json:"alive"`
+}
+
+var progressEnabled bool
+
+func reportProgress(report progressReport) {
+	if !progressEnabled {
+		return
+	}
+	raw, err := json.Marshal(report)
+	if err != nil {
+		return
+	}
+	fmt.Fprintln(os.Stderr, "progress "+string(raw))
+}
+
 type silentLogger struct{}
 
 func (silentLogger) Printf(string, ...any) {}
@@ -82,7 +106,9 @@ func main() {
 	batch := flag.Int("batch", 5, "peers probed at once")
 	source := flag.String("source", defaultPeersURL, "public peer list archive")
 	plain := flag.Bool("plain", false, "print one URI per line instead of JSON")
+	progress := flag.Bool("progress", false, "print progress lines to stderr")
 	flag.Parse()
+	progressEnabled = *progress
 
 	if *count < 1 {
 		*count = 1
@@ -98,9 +124,11 @@ func main() {
 		}
 		peers = seeds()
 	}
+	reportProgress(progressReport{Stage: "catalogue", Total: len(peers)})
 
 	ranked := rankByTCP(peers, *pool)
-	alive := probeUntil(ranked, *count, *batch, *timeout)
+	reportProgress(progressReport{Stage: "ranked", Total: len(peers), Pool: len(ranked)})
+	alive, checked := probeUntil(ranked, *count, *batch, *timeout, len(peers))
 	if len(alive) == 0 {
 		// The network may block the probe itself; the seeds are still better
 		// than an empty Peers list in the Yggdrasil config.
@@ -114,6 +142,10 @@ func main() {
 	if len(alive) > *count {
 		alive = alive[:*count]
 	}
+	reportProgress(progressReport{
+		Stage: "done", Total: len(peers), Pool: len(ranked),
+		Checked: checked, Alive: len(alive),
+	})
 
 	if *plain {
 		for _, peer := range alive {
@@ -329,12 +361,13 @@ func rankByTCP(peers []candidate, pool int) []candidate {
 	return out
 }
 
-func probeUntil(peers []candidate, count, batch int, timeout time.Duration) []probedPeer {
+func probeUntil(peers []candidate, count, batch int, timeout time.Duration, total int) ([]probedPeer, int) {
 	alive := make([]probedPeer, 0, count)
 	byURI := make(map[string]candidate, len(peers))
 	for _, item := range peers {
 		byURI[item.URI] = item
 	}
+	checked := 0
 	for start := 0; start < len(peers) && len(alive) < count; start += batch {
 		end := start + batch
 		if end > len(peers) {
@@ -346,6 +379,7 @@ func probeUntil(peers []candidate, count, batch int, timeout time.Duration) []pr
 			uris = append(uris, item.URI)
 		}
 		results := probeBatch(uris, timeout)
+		checked += len(uris)
 		for _, uri := range uris {
 			if latency := results[uri]; latency > 0 {
 				entry := probedPeer{URI: uri, LatencyMs: latency}
@@ -356,8 +390,11 @@ func probeUntil(peers []candidate, count, batch int, timeout time.Duration) []pr
 				alive = append(alive, entry)
 			}
 		}
+		reportProgress(progressReport{
+			Stage: "probe", Total: total, Pool: len(peers), Checked: checked, Alive: len(alive),
+		})
 	}
-	return alive
+	return alive, checked
 }
 
 func probeBatch(uris []string, timeout time.Duration) map[string]float64 {

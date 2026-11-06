@@ -197,7 +197,7 @@ func (s *socksServer) serveConn(conn net.Conn) {
 			s.usage.addRefused(source)
 		}
 		if s.tracker != nil {
-			s.tracker.refused(source)
+			s.tracker.suspendedRefused(source)
 		}
 		_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
 		_ = readGreeting(reader)

@@ -47,6 +47,7 @@ type webServer struct {
 	family  *ipv6Monitor
 	log     *logger
 	history *trafficHistory
+	system  *systemMonitor
 
 	credsPath  string
 	sessionTTL time.Duration
@@ -89,6 +90,7 @@ func newWebServer(cfg Config, configPath string, live *settings, store *Store, t
 		family:     family,
 		log:        log,
 		history:    newTrafficHistory(usage),
+		system:     newSystemMonitor(),
 		credsPath:  cfg.statePath(webCredentialsFileName),
 		assets:     webui.Assets(),
 		startedAt:  time.Now(),
@@ -354,6 +356,8 @@ func (w *webServer) serveAPI(rw http.ResponseWriter, r *http.Request, route stri
 		w.handlePeers(rw, r)
 	case route == "traffic" && r.Method == http.MethodGet:
 		w.handleTraffic(rw, r)
+	case route == "system" && r.Method == http.MethodGet:
+		w.handleSystem(rw, r)
 	case route == "peers" && r.Method == http.MethodPost:
 		w.handlePeersUpdate(rw, r)
 	case route == "logs" && r.Method == http.MethodGet:
@@ -1282,12 +1286,21 @@ func (w *webServer) handlePeers(rw http.ResponseWriter, r *http.Request) {
 	if state, err := readPeersState(cfg.statePath(peersStateFile)); err == nil && len(state.Managed) > 0 {
 		list = cleanPeerList(state.Managed)
 	}
-	wanted := make(map[string]bool, len(list))
-	for _, uri := range list {
-		wanted[peerKeyOfURI(uri)] = true
-	}
 	manualList := cleanPeerList(cfg.ManualPeers)
 	manualKeys := peerKeySet(manualList)
+	wanted := make(map[string]bool, len(list))
+	automatic := 0
+	for _, uri := range list {
+		key := peerKeyOfURI(uri)
+		// A manual peer can be present in the managed list as well (it is also
+		// written to yggdrasil.conf). It is not an automatic peer, so it must
+		// not carry both badges or inflate the automatic count.
+		if manualKeys[key] {
+			continue
+		}
+		wanted[key] = true
+		automatic++
+	}
 	socket := newAdminSocket(cfg.AdminSocket, 3*time.Second)
 	live, err := socket.Peers()
 	self, selfErr := socket.Self()
@@ -1333,7 +1346,7 @@ func (w *webServer) handlePeers(rw http.ResponseWriter, r *http.Request) {
 		"adminReachable": err == nil,
 		"peerCount":      cfg.PeerCount,
 		"autoReplace":    cfg.PeerAutoReplace,
-		"managed":        len(list),
+		"managed":        automatic,
 		"manualPeers":    manualList,
 		"up":             up,
 		"inbound":        inbound,
@@ -1342,7 +1355,17 @@ func (w *webServer) handlePeers(rw http.ResponseWriter, r *http.Request) {
 		"selfOk":         selfErr == nil,
 		"candidates":     w.peerCandidates(manualList),
 		"probing":        w.supervisor != nil && w.supervisor.Probing(),
+		"probe":          w.peerProbeProgress(),
 	})
+}
+
+// peerProbeProgress reports how far the catalogue search got. The settings page
+// shows "total / checked / alive" while the probe runs.
+func (w *webServer) peerProbeProgress() peerProbeProgress {
+	if w.supervisor == nil {
+		return peerProbeProgress{}
+	}
+	return w.supervisor.Progress()
 }
 
 // peerCandidates is the probed list the operator can pin by hand. Peers that

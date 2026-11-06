@@ -182,6 +182,7 @@ func cmdServe(args []string) error {
 	if web != nil {
 		go func() { errs <- web.listenAndServe(ctx) }()
 		go web.history.run(ctx)
+		go web.system.run(ctx)
 	}
 	go tracker.run(ctx)
 	go supervisor.run(ctx)

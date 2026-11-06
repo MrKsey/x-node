@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -219,6 +220,18 @@ type probeResult struct {
 	City      string  `json:"city,omitempty"`
 }
 
+// peerProbeProgress is what x-node-peerprobe reports while it walks the public
+// catalogue. The dashboard shows it next to "Find peers", so a search that
+// takes minutes explains itself instead of looking stuck.
+type peerProbeProgress struct {
+	Stage     string    `json:"stage"`
+	Total     int       `json:"total"`
+	Pool      int       `json:"pool,omitempty"`
+	Checked   int       `json:"checked"`
+	Alive     int       `json:"alive"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
 // peerSettings is the part of the config the supervisor applies. It is
 // re-read on every check, so the count and the switch can be changed without
 // restarting the service.
@@ -261,6 +274,7 @@ type peerSupervisor struct {
 	pool      []probeResult
 	lastProbe time.Time
 	probing   bool
+	progress  peerProbeProgress
 	changed   bool
 	stamp     string
 
@@ -284,13 +298,13 @@ func newPeerSupervisor(cfg Config, cfgPath string, log *logger) *peerSupervisor 
 		statePath: cfg.statePath(peersStateFile),
 		log:       log,
 		node:      newAdminSocket(cfg.AdminSocket, peerAdminTimeout),
-		probe:     newPeerProbe(cfg.PeerProbePath),
 		settings:  peerSettingsFrom(cfg),
 		deadSince: map[string]time.Time{},
 		addedAt:   map[string]time.Time{},
 		penalised: map[string]time.Time{},
 		wake:      make(chan struct{}, 1),
 	}
+	s.probe = newPeerProbe(cfg.PeerProbePath, s.setProbeProgress)
 	s.loadState(cfg.Peers)
 	return s
 }
@@ -879,6 +893,7 @@ func (s *peerSupervisor) startProbeLocked(ctx context.Context, settings peerSett
 		return
 	}
 	s.probing = true
+	s.progress = peerProbeProgress{Stage: "starting", UpdatedAt: time.Now()}
 	// The probe result also feeds the manual peer picker, and the peers that are
 	// already connected are filtered out of it. Ask for the automatic count plus
 	// a couple of dozen spare candidates, so the picker always has something to
@@ -896,6 +911,8 @@ func (s *peerSupervisor) startProbeLocked(ctx context.Context, settings peerSett
 		s.probing = false
 		s.lastProbe = time.Now()
 		if err != nil {
+			s.progress.Stage = "failed"
+			s.progress.UpdatedAt = time.Now()
 			s.mu.Unlock()
 			s.warn("peer probe failed: %v", err)
 			return
@@ -904,6 +921,21 @@ func (s *peerSupervisor) startProbeLocked(ctx context.Context, settings peerSett
 		s.mu.Unlock()
 		s.log.info("peer probe: %d candidate(s) alive", len(results))
 	}()
+}
+
+// setProbeProgress is called by x-node-peerprobe for every batch it checks.
+func (s *peerSupervisor) setProbeProgress(item peerProbeProgress) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	item.UpdatedAt = time.Now()
+	s.progress = item
+}
+
+// Progress reports how far the current (or last) catalogue probe got.
+func (s *peerSupervisor) Progress() peerProbeProgress {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.progress
 }
 
 func (s *peerSupervisor) filterPoolLocked(results []probeResult) []probeResult {
@@ -1055,9 +1087,54 @@ func writePeersState(path string, state peersState) error {
 	return nil
 }
 
+// probeStderr splits the stderr of x-node-peerprobe into progress lines and
+// ordinary error text. The command writes both, so the daemon cannot simply
+// buffer one of them.
+type probeStderr struct {
+	report func(peerProbeProgress)
+	errors bytes.Buffer
+	line   []byte
+}
+
+func (w *probeStderr) Write(chunk []byte) (int, error) {
+	w.line = append(w.line, chunk...)
+	for {
+		index := bytes.IndexByte(w.line, '\n')
+		if index < 0 {
+			break
+		}
+		w.handle(string(w.line[:index]))
+		w.line = w.line[index+1:]
+	}
+	return len(chunk), nil
+}
+
+func (w *probeStderr) flush() {
+	if len(w.line) > 0 {
+		w.handle(string(w.line))
+		w.line = nil
+	}
+}
+
+func (w *probeStderr) handle(line string) {
+	line = strings.TrimRight(line, "\r")
+	payload, ok := strings.CutPrefix(line, "progress ")
+	if !ok {
+		w.errors.WriteString(line)
+		w.errors.WriteByte('\n')
+		return
+	}
+	var item peerProbeProgress
+	if err := json.Unmarshal([]byte(payload), &item); err == nil && w.report != nil {
+		w.report(item)
+	}
+}
+
 // newPeerProbe runs x-node-peerprobe, which downloads the public peer list and
-// completes a real Yggdrasil handshake with every candidate it reports.
-func newPeerProbe(path string) func(context.Context, int) ([]probeResult, error) {
+// completes a real Yggdrasil handshake with every candidate it reports. The
+// probe prints "progress {json}" lines to stderr; they are forwarded to report
+// while the search is running.
+func newPeerProbe(path string, report func(peerProbeProgress)) func(context.Context, int) ([]probeResult, error) {
 	return func(ctx context.Context, count int) ([]probeResult, error) {
 		binary := strings.TrimSpace(path)
 		// A configuration written by an older version may point at a binary the
@@ -1069,16 +1146,22 @@ func newPeerProbe(path string) func(context.Context, int) ([]probeResult, error)
 		}
 		runCtx, cancel := context.WithTimeout(ctx, peerProbeTimeout)
 		defer cancel()
-		out, err := exec.CommandContext(runCtx, binary, "-count", strconv.Itoa(count)).Output()
+		cmd := exec.CommandContext(runCtx, binary, "-count", strconv.Itoa(count), "-progress")
+		var stdout bytes.Buffer
+		cmd.Stdout = &stdout
+		stderr := &probeStderr{report: report}
+		cmd.Stderr = stderr
+		err := cmd.Run()
+		stderr.flush()
 		if err != nil {
 			var exit *exec.ExitError
 			if errors.As(err, &exit) {
-				return nil, fmt.Errorf("%v: %s", err, strings.TrimSpace(string(exit.Stderr)))
+				return nil, fmt.Errorf("%v: %s", err, strings.TrimSpace(stderr.errors.String()))
 			}
 			return nil, err
 		}
 		var results []probeResult
-		if err := json.Unmarshal(out, &results); err != nil {
+		if err := json.Unmarshal(stdout.Bytes(), &results); err != nil {
 			return nil, fmt.Errorf("decode probe output: %w", err)
 		}
 		sort.SliceStable(results, func(i, j int) bool {

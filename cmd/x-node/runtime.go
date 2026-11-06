@@ -28,10 +28,13 @@ type runtimeClient struct {
 	Destinations []string  `json:"destinations,omitempty"`
 
 	// Refused counts the connections the limits turned away since the service
-	// started. QuotaRefused is the part caused by a traffic quota, so a client
-	// can tell "maxConnsPerClient" from "you are out of traffic".
-	Refused      int `json:"refused,omitempty"`
-	QuotaRefused int `json:"quotaRefused,omitempty"`
+	// started. QuotaRefused is the part caused by a traffic quota and
+	// SuspendedRefused the part caused by the operator's block, so a client can
+	// tell "maxConnsPerClient" from "you are out of traffic" or "you are
+	// suspended".
+	Refused          int `json:"refused,omitempty"`
+	QuotaRefused     int `json:"quotaRefused,omitempty"`
+	SuspendedRefused int `json:"suspendedRefused,omitempty"`
 
 	UDPAssociations int    `json:"udpAssociations,omitempty"`
 	UDPDatagramsIn  uint64 `json:"udpDatagramsIn,omitempty"`
@@ -190,17 +193,24 @@ func (t *runtimeTracker) touch(ip net.IP) {
 // refused records one connection the limits turned away. The counter is what
 // the client's status call reads to tell a limit problem from a dead exit.
 func (t *runtimeTracker) refused(ip net.IP) {
-	t.countRefused(ip, false)
+	t.countRefused(ip, false, false)
 }
 
 // quotaRefused records a refusal caused by a traffic quota. The total grows as
 // well, so an old client still sees that something was refused; the new field
 // lets a current client name the actual reason.
 func (t *runtimeTracker) quotaRefused(ip net.IP) {
-	t.countRefused(ip, true)
+	t.countRefused(ip, true, false)
 }
 
-func (t *runtimeTracker) countRefused(ip net.IP, quota bool) {
+// suspendedRefused records a connection refused because the operator suspended
+// the client. It is counted separately: a suspension is not a connection limit,
+// and reporting it as one made the app warn about a limit that never existed.
+func (t *runtimeTracker) suspendedRefused(ip net.IP) {
+	t.countRefused(ip, false, true)
+}
+
+func (t *runtimeTracker) countRefused(ip net.IP, quota, suspended bool) {
 	if ip == nil {
 		return
 	}
@@ -215,6 +225,9 @@ func (t *runtimeTracker) countRefused(ip net.IP, quota bool) {
 	client.Refused++
 	if quota {
 		client.QuotaRefused++
+	}
+	if suspended {
+		client.SuspendedRefused++
 	}
 	client.LastSeenAt = now
 	t.totalRefused++

@@ -4,6 +4,39 @@ All notable changes to X-Node are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.6.11] — 2026-11-06
+
+### Added
+
+- The dashboard has a **System Info** card left of **Update** with CPU and
+  memory charts for the last 15 minutes. The daemon samples `/proc` every five
+  seconds, so the history survives a page reload and starts empty after a
+  restart.
+- **Find peers** now reports how many peers the public catalogue contains, how
+  many were checked and how many answered. The numbers update while the search
+  runs.
+- `/api/system` serves the CPU and memory history. On a non-Linux host the card
+  says that the history is unavailable.
+
+### Changed
+
+- **Max UDP associations** and **UDP idle timeout** share one row on a desktop
+  screen; a phone still stacks them.
+- A manual peer no longer shows both `auto` and `manual`: the operator's peer is
+  manual, and the automatic count no longer includes it.
+- On a phone the action buttons of a client or an invite fill the card width
+  evenly, and the "Actions" label is gone.
+- On a phone a table row and its value are aligned on the same baseline instead
+  of the value sitting lower than its label.
+
+### Fixed
+
+- A client suspended by the operator was reported as hitting the connection
+  limit ("The exit refused 2 connection(s) at its limit of 256"), and the
+  warning stayed after Resume. Suspension refusals are counted separately now,
+  and `limitRefused` in the status API excludes both quota and suspension
+  refusals.
+
 ## [1.6.10] — 2026-11-06
 
 ### Added

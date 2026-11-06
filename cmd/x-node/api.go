@@ -17,7 +17,7 @@ import (
 
 // daemonVersion is stamped by build.sh (-ldflags -X main.daemonVersion=...).
 // The default is what a plain "go build" reports.
-var daemonVersion = "1.6.10"
+var daemonVersion = "1.6.11"
 
 type apiServer struct {
 	cfg     Config
@@ -95,8 +95,9 @@ type statusResponse struct {
 	// through the exit.
 	Connections        int `json:"connections,omitempty"`
 	Refused            int `json:"refused,omitempty"`
-	LimitRefused       int `json:"limitRefused,omitempty"`
+	LimitRefused       int `json:"limitRefused"`
 	QuotaRefused       int `json:"quotaRefused,omitempty"`
+	SuspendedRefused   int `json:"suspendedRefused,omitempty"`
 	UDPAssociations    int `json:"udpAssociations,omitempty"`
 	MaxUDPAssociations int `json:"maxUdpAssociations,omitempty"`
 
@@ -267,7 +268,11 @@ func (a *apiServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 	response.Connections = live.Connections
 	response.Refused = live.Refused
 	response.QuotaRefused = live.QuotaRefused
-	response.LimitRefused = live.Refused - live.QuotaRefused
+	response.SuspendedRefused = live.SuspendedRefused
+	// A suspension and an exhausted quota are refusals, but neither is a
+	// connection limit. Reporting them here made the app warn about a limit
+	// that never existed.
+	response.LimitRefused = live.Refused - live.QuotaRefused - live.SuspendedRefused
 	if response.LimitRefused < 0 {
 		response.LimitRefused = 0
 	}

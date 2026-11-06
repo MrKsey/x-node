@@ -93,6 +93,28 @@ func TestRuntimeTrackerCountsRefusals(t *testing.T) {
 	tracker.shutdown()
 }
 
+func TestRuntimeTrackerSeparatesSuspendedRefusals(t *testing.T) {
+	cfg := testConfig(t)
+	tracker := newRuntimeTracker(cfg, newLogger("error"))
+	client := testAddr(t, 6)
+
+	tracker.refused(client)
+	tracker.suspendedRefused(client)
+	tracker.suspendedRefused(client)
+
+	live := tracker.live(client)
+	if live.Refused != 3 {
+		t.Fatalf("refused = %d, want 3", live.Refused)
+	}
+	if live.SuspendedRefused != 2 {
+		t.Fatalf("suspended refused = %d, want 2", live.SuspendedRefused)
+	}
+	if live.QuotaRefused != 0 {
+		t.Fatalf("quota refused = %d, want 0", live.QuotaRefused)
+	}
+	tracker.shutdown()
+}
+
 func TestMergeClientsWithLiveState(t *testing.T) {
 	now := time.Now()
 	first := testAddr(t, 1)

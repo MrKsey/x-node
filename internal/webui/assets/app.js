@@ -17,6 +17,7 @@ const state = {
   updatePolling: false,
   traffic: null,
   trafficRange: "1h",
+  system: null,
   logs: [],
   view: "dashboard",
   timer: null,
@@ -333,7 +334,7 @@ async function refreshStatus() {
   $("#side-name").textContent = status.name || "";
   $("#clock").textContent = new Date().toLocaleTimeString();
   if (state.view === "dashboard") {
-    await Promise.allSettled([loadPeers(), loadTraffic()]);
+    await Promise.allSettled([loadPeers(), loadTraffic(), loadSystem()]);
     // During the first render the dashboard is not in the DOM yet: render()
     // builds it right after this call and draws the chart itself.
     if ($("#chart")) renderDashboard();
@@ -370,6 +371,14 @@ async function loadTraffic() {
   return data;
 }
 
+// loadSystem fetches the CPU and memory history the daemon samples from /proc.
+// It is separate from the traffic history: the card shows the last 15 minutes.
+async function loadSystem() {
+  const data = await api("GET", "api/system");
+  state.system = data;
+  return data;
+}
+
 async function loadLogs() {
   const data = await api("GET", "api/logs?limit=300");
   state.logs = data.entries || [];
@@ -398,6 +407,7 @@ async function render() {
       view.innerHTML = dashboardHtml();
       wireDashboard();
       drawChart();
+      drawSystemCharts();
       if (state.update && state.update.running) pollUpdateUpgrade();
     } else if (state.view === "clients") {
       await Promise.all([loadClients(), loadSettings()]);
@@ -559,8 +569,35 @@ function dashboardHtml() {
       </div>
     </div>
 
-    ${updateCardHtml(status)}
+    <div class="grid two">
+      ${systemCardHtml()}
+      ${updateCardHtml(status)}
+    </div>
   `;
+}
+
+// systemCardHtml shows the host load next to the update card. System Info sits
+// on the left and Update on the right; the grid stacks them on a phone.
+function systemCardHtml() {
+  const data = state.system;
+  const available = !data || data.available !== false;
+  return `<div class="card section">
+    <header>
+      <h3>System Info</h3>
+      <span class="muted small">last 15 minutes</span>
+    </header>
+    ${available ? `
+      <div class="system-chart">
+        <div class="chart-label"><span>CPU</span><span id="system-cpu">—</span></div>
+        <canvas class="chart mini" id="system-cpu-chart"></canvas>
+      </div>
+      <div class="system-chart">
+        <div class="chart-label"><span>Memory</span><span id="system-mem">—</span></div>
+        <canvas class="chart mini" id="system-mem-chart"></canvas>
+      </div>
+      <p class="hint" id="system-hint">Sampled every 5 seconds. The history starts empty after a restart.</p>
+    ` : '<p class="hint">CPU and memory history is read from /proc and is available on Linux only.</p>'}
+  </div>`;
 }
 
 // updateCardHtml shows the release check that the daemon keeps for the
@@ -624,7 +661,9 @@ function peerTableHtml(peers) {
   const rows = peers.map((peer) => {
     const statePill = peer.up ? '<span class="pill ok">up</span>' : '<span class="pill bad">down</span>';
     const direction = peer.inbound ? '<span class="pill warn">in</span>' : '<span class="pill">out</span>';
-    const managed = peer.managed ? '<span class="pill ok">auto</span>' : "";
+    // A manual peer is also kept in the managed list, so the automatic flag
+    // alone would put both badges on it. The operator's peer is manual first.
+    const managed = peer.managed && !peer.manual ? '<span class="pill ok">auto</span>' : "";
     const manual = peer.manual ? '<span class="pill">manual</span>' : "";
     return `
       <tr>
@@ -755,6 +794,7 @@ function renderDashboard() {
   view.innerHTML = dashboardHtml();
   wireDashboard();
   drawChart();
+  drawSystemCharts();
 }
 
 let chartGeometry = null;
@@ -919,8 +959,123 @@ function wireChartTooltip(canvas) {
   canvas.ontouchend = () => tip.classList.add("hidden");
 }
 
+// drawSystemCharts draws the CPU and memory history of the System Info card.
+// Both charts share the 0–100% scale, so the two lines can be compared at a
+// glance; the value next to each title is the current reading.
+function drawSystemCharts() {
+  const data = state.system;
+  if (!data || data.available === false) return;
+  const points = data.points || [];
+  const last = points.length ? points[points.length - 1] : null;
+  const cpu = Number(data.cpu) || (last ? Number(last.cpu) || 0 : 0);
+  const mem = Number(data.mem) || (last ? Number(last.mem) || 0 : 0);
+  const cpuNode = $("#system-cpu");
+  if (cpuNode) cpuNode.textContent = percent(cpu);
+  const memNode = $("#system-mem");
+  if (memNode) {
+    const detail = data.memTotal ? " · " + bytes(data.memUsed) + " of " + bytes(data.memTotal) : "";
+    memNode.textContent = percent(mem) + detail;
+  }
+  const hint = $("#system-hint");
+  if (hint) {
+    const generated = last ? new Date(last.at) : null;
+    const age = generated && !Number.isNaN(generated.getTime())
+      ? Math.max(0, Math.round((Date.now() - generated.getTime()) / 1000))
+      : null;
+    hint.textContent = points.length < 3
+      ? "Collecting samples: the chart fills up within a few minutes."
+      : "Sampled every 5 seconds." + (age == null ? "" : " Last sample " + (age < 2 ? "just now" : age + " s ago") + ".");
+  }
+  const style = getComputedStyle(document.documentElement);
+  const accent = style.getPropertyValue("--accent").trim() || "#3d5afe";
+  const ok = style.getPropertyValue("--ok").trim() || "#12805c";
+  drawPercentChart($("#system-cpu-chart"), points, "cpu", accent);
+  drawPercentChart($("#system-mem-chart"), points, "mem", ok);
+}
+
+function percent(value) {
+  return (Math.max(0, Math.min(100, Number(value) || 0))).toFixed(0) + " %";
+}
+
+function drawPercentChart(canvas, points, key, color) {
+  if (!canvas) return;
+  const ratio = window.devicePixelRatio || 1;
+  const width = canvas.clientWidth || 320;
+  const height = canvas.clientHeight || 110;
+  canvas.width = width * ratio;
+  canvas.height = height * ratio;
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+  ctx.clearRect(0, 0, width, height);
+
+  const style = getComputedStyle(document.documentElement);
+  const border = style.getPropertyValue("--border").trim() || "#ddd";
+  const muted = style.getPropertyValue("--muted").trim() || "#888";
+  const padLeft = 34;
+  const padBottom = 18;
+  const padTop = 6;
+  const plotW = width - padLeft;
+  const plotH = height - padBottom - padTop;
+
+  ctx.strokeStyle = border;
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 2; i += 1) {
+    const y = padTop + (plotH / 2) * i;
+    ctx.beginPath();
+    ctx.moveTo(padLeft, y);
+    ctx.lineTo(width, y);
+    ctx.stroke();
+  }
+  ctx.fillStyle = muted;
+  ctx.font = "10px sans-serif";
+  ctx.fillText("100", 2, padTop + 4);
+  ctx.fillText("50", 8, padTop + plotH / 2 + 4);
+  ctx.fillText("0", 20, padTop + plotH + 4);
+
+  if (points.length < 2) {
+    ctx.fillStyle = muted;
+    ctx.font = "12px sans-serif";
+    ctx.fillText("Collecting samples…", padLeft + 8, padTop + 20);
+    return;
+  }
+
+  const xAt = (index) => padLeft + (index / (points.length - 1)) * plotW;
+  const yAt = (value) => padTop + plotH - (Math.max(0, Math.min(100, value)) / 100) * plotH;
+
+  ctx.beginPath();
+  points.forEach((point, index) => {
+    const x = xAt(index);
+    const y = yAt(Number(point[key]) || 0);
+    if (index === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  });
+  ctx.lineTo(xAt(points.length - 1), padTop + plotH);
+  ctx.lineTo(xAt(0), padTop + plotH);
+  ctx.closePath();
+  ctx.fillStyle = color + "22";
+  ctx.fill();
+
+  ctx.beginPath();
+  points.forEach((point, index) => {
+    const x = xAt(index);
+    const y = yAt(Number(point[key]) || 0);
+    if (index === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  });
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  ctx.fillStyle = muted;
+  ctx.font = "10px sans-serif";
+  ctx.fillText(clockTime(points[0].at), padLeft, height - 3);
+  const end = clockTime(points[points.length - 1].at);
+  ctx.fillText(end, width - ctx.measureText(end).width, height - 3);
+}
+
 window.addEventListener("resize", () => {
-  if (state.view === "dashboard") drawChart();
+  if (state.view === "dashboard") {
+    drawChart();
+    drawSystemCharts();
+  }
 });
 
 /* clients */
@@ -1018,7 +1173,7 @@ function clientRowHtml(client) {
         ${quota.reason ? `<div class="muted small">${escapeHtml(quota.reason)}</div>` : ""}
       </td>
       <td class="right hide-sm" data-label="Last seen">${when(client.lastSeenAt)}</td>
-      <td class="right nowrap" data-label="Actions">
+      <td class="right nowrap row-actions" data-label="">
         <button class="btn small" data-edit="${escapeHtml(client.address)}">Edit</button>
         <button class="btn small" data-token="${escapeHtml(client.address)}">Token</button>
         <button class="btn small" data-disconnect="${escapeHtml(client.address)}" title="Close all TCP and UDP connections of this client">Disconnect all</button>
@@ -1376,7 +1531,7 @@ function invitesHtml() {
       <td data-label="Note">${escapeHtml(invite.note || "—")}</td>
       <td class="right" data-label="Devices">${invite.used} / ${invite.uses}</td>
       <td class="right" data-label="Expires">${new Date(invite.expiresAt).toLocaleString()}</td>
-      <td class="right nowrap" data-label="">
+      <td class="right nowrap row-actions" data-label="">
         ${invite.link ? `<button class="btn small" data-qr="${escapeHtml(invite.hash)}">QR</button>
         <button class="btn small" data-invite-copy="${escapeHtml(invite.link)}">Copy link</button>` : ""}
         <button class="btn small danger" data-invite="${escapeHtml(invite.hash)}">Delete</button>
@@ -1508,6 +1663,7 @@ function settingsHtml() {
   const manualPeers = (state.peers && state.peers.manualPeers) || [];
   const candidates = (state.peers && state.peers.candidates) || [];
   const probing = Boolean(state.peers && state.peers.probing);
+  const probe = (state.peers && state.peers.probe) || {};
   const manualRows = manualPeers.length
     ? manualPeers.map((uri) => `
         <div class="manual-peer">
@@ -1594,8 +1750,10 @@ function settingsHtml() {
       <div class="form-grid">
         <label class="switch"><input type="checkbox" id="s-udp" ${settings.udpEnabled ? "checked" : ""}><span>Relay UDP through the exit</span></label>
         <label class="switch"><input type="checkbox" id="s-domain" ${settings.domainResolution ? "checked" : ""}><span>Resolve domain names (ATYP=domain)</span></label>
-        <label class="field"><span>Max UDP associations</span><input id="s-maxudp" type="number" min="1" value="${settings.maxUDPAssociations || 64}"></label>
-        <label class="field"><span>UDP idle timeout</span><input id="s-udpidle" value="${escapeHtml(settings.udpIdleTimeout || "2m")}"></label>
+        <div class="field-pair full">
+          <label class="field"><span>Max UDP associations</span><input id="s-maxudp" type="number" min="1" value="${settings.maxUDPAssociations || 64}"></label>
+          <label class="field"><span>UDP idle timeout</span><input id="s-udpidle" value="${escapeHtml(settings.udpIdleTimeout || "2m")}"></label>
+        </div>
       </div>
       <p class="hint">UDP is what DNS and QUIC need. Without the relay, apps fall back to TCP or lose those lookups.</p>
     </form>
@@ -1635,6 +1793,7 @@ function settingsHtml() {
         <span class="muted small">${manualPeers.length} pinned</span>
         <button class="btn small" type="button" id="peers-refresh" ${probing ? "disabled" : ""}>${probing ? '<span class="spinner"></span>Searching…' : "Find peers"}</button>
       </header>
+      <p class="hint" id="peer-progress">${escapeHtml(peerProgressText(probe, probing))}</p>
       <p class="hint">A pinned peer is kept connected on top of the automatic count. It is never replaced or trimmed, so it is the right place for a private peer.</p>
       <div id="manual-peers">${manualRows}</div>
       <form id="manual-peer-pick" class="manual-peer-form">
@@ -1740,6 +1899,35 @@ function setPeerSearchButton(button, probing) {
   button.innerHTML = probing ? '<span class="spinner"></span>Searching…' : "Find peers";
 }
 
+// peerProgressText explains what the catalogue search is doing. "Total" is the
+// public catalogue, "checked" is how many peers got a protocol probe, and
+// "alive" is how many completed a handshake.
+function peerProgressText(probe, probing) {
+  const total = Number(probe && probe.total) || 0;
+  const checked = Number(probe && probe.checked) || 0;
+  const alive = Number(probe && probe.alive) || 0;
+  if (!total && !checked) {
+    if (probing) return "Downloading the public peer catalogue…";
+    if (probe && probe.stage === "failed") return "The last search failed. Check the log for the reason.";
+    return "";
+  }
+  const parts = [
+    total + " in the catalogue",
+    checked + " checked",
+    alive + " alive",
+  ];
+  return (probing ? "Searching: " : "Last search: ") + parts.join(" · ");
+}
+
+// updatePeerProgress refreshes only the progress line while the poll loop runs;
+// a full render would rebuild the form and lose the current selection.
+function updatePeerProgress() {
+  const node = $("#peer-progress");
+  if (!node) return;
+  const probe = (state.peers && state.peers.probe) || {};
+  node.textContent = peerProgressText(probe, Boolean(state.peers && state.peers.probing));
+}
+
 // pollPeerProbe watches the daemon until the catalogue probe finishes. The
 // probe walks every public peer, so it can take minutes; a fixed short loop
 // used to give up and leave the button on "Searching…" until a reload.
@@ -1758,6 +1946,7 @@ async function pollPeerProbe() {
       } catch (_) {
         continue;
       }
+      updatePeerProgress();
       if (state.peers && state.peers.probing) {
         started = true;
         continue;

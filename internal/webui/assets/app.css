@@ -224,6 +224,10 @@ tr:last-child td { border-bottom: 0; }
 .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; align-items: end; }
 .form-grid .full { grid-column: 1 / -1; }
 .form-grid > * { min-width: 0; }
+/* Two related fields that belong on one line even when the card is narrow.
+   The pair spans the whole form grid, so the switches above keep their own
+   auto-fit columns. */
+.field-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: end; }
 .switch { display: flex; align-items: center; gap: 10px; min-height: 41px; padding: 0; flex-wrap: nowrap; }
 .switch > span { flex: 1 1 auto; min-width: 0; }
 .switch input { width: 40px; height: 22px; flex: 0 0 auto; padding: 0; margin: 0; appearance: none; background: var(--bg-soft); border-radius: 999px; position: relative; cursor: pointer; transition: background .15s; }
@@ -243,6 +247,15 @@ pre.logs .error { color: var(--bad); }
 pre.logs .debug { color: var(--muted); }
 
 canvas.chart { width: 100%; height: 250px; display: block; }
+/* The System Info card puts two compact charts beside the Update card, so they
+   share the card width instead of the full dashboard width. */
+canvas.chart.mini { height: 108px; }
+.system-chart { display: grid; gap: 4px; }
+.chart-label {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+  font-size: 12.5px; color: var(--muted);
+}
+.chart-label span:last-child { color: var(--text); font-weight: 550; }
 
 .chart-wrap { position: relative; }
 .chart-legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12.5px; color: var(--muted); }
@@ -436,16 +449,32 @@ canvas.chart { width: 100%; height: 250px; display: block; }
   .table-wrap table.cards td {
     border: 0; padding: 4px 0; text-align: left !important; white-space: normal;
   }
+  /* The label and its value sit on one line. Baseline alignment is what keeps
+     the value's bottom edge level with the label: vertical-align: top pushed
+     the larger value text below the row. */
   .table-wrap table.cards td::before {
     content: attr(data-label); display: inline-block; min-width: 92px;
-    color: var(--muted); font-size: 11.5px; text-transform: uppercase;
-    letter-spacing: .04em; vertical-align: top;
+    margin-right: 6px; color: var(--muted); font-size: 11.5px;
+    text-transform: uppercase; letter-spacing: .04em; vertical-align: baseline;
   }
-  .table-wrap table.cards td[data-label=""]::before { content: ""; min-width: 0; }
+  .table-wrap table.cards td[data-label=""]::before { content: ""; min-width: 0; margin-right: 0; }
   .table-wrap table.cards td .bar { min-width: 0; margin-top: 4px; }
   .table-wrap table.cards td .mono { display: inline; max-width: 100%; word-break: break-all; }
   .table-wrap table.cards td.nowrap { white-space: normal; }
   .table-wrap table.cards td.nowrap .btn { margin: 2px 4px 2px 0; }
+  /* The action row is not a label/value pair. The label is gone, and the
+     buttons fill the width evenly: one line when they fit, otherwise two
+     balanced lines. */
+  .table-wrap table.cards td.row-actions {
+    display: flex; flex-wrap: wrap; gap: 8px;
+    margin-top: 6px; padding-top: 8px; border-top: 1px solid var(--border);
+  }
+  .table-wrap table.cards td.row-actions::before { display: none; }
+  .table-wrap table.cards td.row-actions .btn {
+    flex: 1 1 28%; min-width: max-content; margin: 0;
+  }
   .client-line { gap: 6px; }
+  .field-pair { grid-template-columns: 1fr; }
+  canvas.chart.mini { height: 96px; }
 }
 
