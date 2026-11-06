@@ -268,7 +268,11 @@ func (w *webServer) serveStatic(rw http.ResponseWriter, r *http.Request, name st
 	default:
 		rw.Header().Set("Content-Type", "application/octet-stream")
 	}
-	rw.Header().Set("Cache-Control", "public, max-age=300")
+	// The assets are embedded in the binary, so a new release replaces them
+	// without changing the URL. Revalidation on every load is what makes an
+	// upgrade visible at once; a max-age would keep the old interface for
+	// minutes after the service restarted.
+	rw.Header().Set("Cache-Control", "no-cache")
 	_, _ = rw.Write(raw)
 }
 

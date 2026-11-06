@@ -471,10 +471,17 @@ canvas.chart.mini { height: 108px; }
   }
   .table-wrap table.cards td.row-actions::before { display: none; }
   .table-wrap table.cards td.row-actions .btn {
-    flex: 1 1 28%; min-width: max-content; margin: 0;
+    flex: 1 1 auto; min-width: max-content; margin: 0;
   }
   .client-line { gap: 6px; }
   .field-pair { grid-template-columns: 1fr; }
   canvas.chart.mini { height: 96px; }
+}
+
+/* On a narrow phone the five client buttons cannot fit in one row. A 28% basis
+   makes the first row take three buttons and the second row two, instead of
+   leaving a single stretched button alone. */
+@media (max-width: 480px) {
+  .table-wrap table.cards td.row-actions .btn { flex: 1 1 28%; }
 }
 

@@ -4,6 +4,15 @@ All notable changes to X-Node are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.6.12] — 2026-11-06
+
+### Changed
+
+- On a phone narrower than 480 px the client action buttons wrap into three and
+  two per row; on a wider screen they stay on one row.
+- The web assets are revalidated on every load, so an upgrade shows the new
+  interface without a hard refresh.
+
 ## [1.6.11] — 2026-11-06
 
 ### Added
