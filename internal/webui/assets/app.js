@@ -530,12 +530,9 @@ function dashboardHtml() {
       </div>
     </div>
 
-    <div class="card section">
-      <header>
-        <h3>Yggdrasil peers</h3>
-        <span class="muted small">${(peers.peers || []).length} link(s)</span>
-      </header>
-      ${peerTableHtml(peers.peers || [])}
+    <div class="grid two">
+      ${systemCardHtml()}
+      ${updateCardHtml(status)}
     </div>
 
     <div class="grid two">
@@ -569,9 +566,12 @@ function dashboardHtml() {
       </div>
     </div>
 
-    <div class="grid two">
-      ${systemCardHtml()}
-      ${updateCardHtml(status)}
+    <div class="card section">
+      <header>
+        <h3>Yggdrasil peers</h3>
+        <span class="muted small">${(peers.peers || []).length} link(s)</span>
+      </header>
+      ${peerTableHtml(peers.peers || [])}
     </div>
   `;
 }

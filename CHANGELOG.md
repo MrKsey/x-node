@@ -4,6 +4,14 @@ All notable changes to X-Node are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.6.13] — 2026-11-06
+
+### Changed
+
+- On the dashboard **System Info** and **Update** now sit directly under the
+  X-Node/Yggdrasil pair, and the **Yggdrasil peers** table moved to the bottom
+  of the page.
+
 ## [1.6.12] — 2026-11-06
 
 ### Changed
