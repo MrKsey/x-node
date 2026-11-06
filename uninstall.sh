@@ -61,6 +61,10 @@ Examples:
   sudo ./uninstall.sh --yes
   sudo ./uninstall.sh --purge --yes
   sudo ./uninstall.sh --purge --keep-yggdrasil --yes
+
+Without a local copy of this script, the same uninstaller runs as a single
+command:
+  sudo bash <(curl -fsSL https://raw.githubusercontent.com/MrKsey/x-node/main/uninstall.sh)
 EOF
 }
 

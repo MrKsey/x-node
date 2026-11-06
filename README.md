@@ -22,6 +22,26 @@ An **exit node** acts as a gateway between Yggdrasil and external networks: it a
 
 To connect, a client needs a working Yggdrasil node and must be registered in the list of addresses allowed by X-Node. Identification is performed by the node's IPv6 address in the Yggdrasil network.
 
+How traffic flows for both types of clients:
+
+```text
+Y-Node client (Android)                  X-Node (Ubuntu)                    Internet
+┌──────────────────────────┐             ┌───────────────────────┐          ┌──────────┐
+│ apps on the phone        │ ──────────► │ SOCKS5 [200:...]:1080 │ ───────► │ sites    │
+│ VPN → Yggdrasil node     │ ◄────────── │ allowlist, quotas     │ ◄─────── │ services │
+└──────────────────────────┘             └───────────────────────┘          └──────────┘
+      Yggdrasil, IPv6, encryption                outbound IPv4/IPv6
+
+Plain SOCKS5 client (PC)                 X-Node (Ubuntu)                    Internet
+┌───────────────────────────┐            ┌───────────────────────┐          ┌──────────┐
+│ browser, application      │ ─────────► │ SOCKS5 [200:...]:1080 │ ───────► │ sites    │
+│ SOCKS5 proxy → Yggdrasil  │ ◄───────── │ allowlist, quotas     │ ◄─────── │ services │
+└───────────────────────────┘            └───────────────────────┘          └──────────┘
+      Yggdrasil, IPv6, encryption                outbound IPv4/IPv6
+```
+
+In both cases traffic travels over the Yggdrasil IPv6 tunnel to X-Node and only then to the regular Internet. The only difference is who runs the Yggdrasil node and the SOCKS5 client: in Y-Node it is a single app, otherwise they are separate programs on the device.
+
 ## Key features
 
 - **SOCKS5 proxy.** Handling of TCP and UDP traffic, including DNS queries and QUIC.
@@ -123,6 +143,9 @@ Main CLI commands:
 ```bash
 sudo x-node status                 # server and component state
 sudo x-node clients                # client list and statistics
+sudo x-node allow list             # allowed addresses
+sudo x-node allow add <address>    # allow a client without an invite
+sudo x-node allow remove <address> # revoke access
 sudo x-node invite                 # create an invite and QR code
 sudo x-node invite list            # list active invites
 sudo x-node invite remove <id>     # revoke an invite
@@ -151,35 +174,94 @@ sudo x-node web password           # change the web interface password
 
 An invite is intended for one-time registration. After registration the device is added to the client allowlist.
 
+### Allowing a client without an invite
+
+An invite is not the only way in. A client address can be added to the allowlist directly from the command line:
+
+```bash
+sudo x-node allow add 201:1ba8:15c:b1be:7555:b3d7:7651:8e2e -label "laptop"
+```
+
+`-label` is an optional name shown in the web interface and in `x-node clients`. The command works while the service is running: the change is picked up immediately, no restart is needed.
+
+Listing the allowlist and revoking access:
+
+```bash
+sudo x-node allow list
+sudo x-node allow remove 201:1ba8:15c:b1be:7555:b3d7:7651:8e2e
+```
+
+Only Yggdrasil node addresses from the `200::/7` range are accepted — the same address the client shows on its side. No SOCKS5 login or password is involved: access is decided by the source address the connection comes from. A separate token (`sudo x-node allow token <address>`) is only needed for the HTTP API, for example for status requests from Y-Node.
+
 ### Other SOCKS5 clients
 
-X-Node is compatible with SOCKS5 clients on Linux, Windows and other platforms. A Yggdrasil client must be running on the device to provide access to the server's Yggdrasil address.
+X-Node works with any SOCKS5 client: a browser, Telegram, a mail client, `curl`, the proxy settings of the operating system. The only difference from Y-Node is that a third-party program cannot bring up Yggdrasil or register by QR code on its own, so the connection is configured by hand.
 
-The SOCKS5 address can be seen in the output of:
+How to connect:
 
-```bash
-sudo x-node status
-```
+1. **Install Yggdrasil on the client device.** Use the official client from [yggdrasil-network.github.io](https://yggdrasil-network.github.io/); ready-made builds exist for Linux, Windows, macOS and Android. Once it runs, the device gets an IPv6 address in the Yggdrasil network and can reach other nodes.
 
-For an IPv6 address, the proxy settings take the address in square brackets together with the port, for example:
+2. **Find the client's Yggdrasil address.** On Linux:
 
-```text
-[200:1234:5678:9abc:def0:1234:5678:9abc]:1080
-```
+   ```bash
+   sudo yggdrasil -useconffile /etc/yggdrasil/yggdrasil.conf -address
+   ```
 
-To test the connection from Linux:
+   Or, when the service is running and the admin socket is available:
 
-```bash
-curl --socks5-hostname "[200:1234:5678:9abc:def0:1234:5678:9abc]:1080" https://ifconfig.me
-```
+   ```bash
+   sudo yggdrasilctl getSelf
+   ```
 
-For applications that support proxy environment variables:
+   The address looks like `200:1234:5678:9abc:def0:1234:5678:9abc`. The Windows and macOS GUI clients show it on the main screen.
 
-```bash
-export ALL_PROXY="socks5h://[200:1234:5678:9abc:def0:1234:5678:9abc]:1080"
-```
+3. **Allow that address on the X-Node server:**
 
-Use `socks5h` mode or an equivalent remote DNS setting so that domain names are resolved on the exit node side.
+   ```bash
+   sudo x-node allow add 200:1234:5678:9abc:def0:1234:5678:9abc -label "home-pc"
+   sudo x-node allow list
+   ```
+
+   Without an allowlist entry X-Node refuses the connection even when the proxy is configured correctly.
+
+4. **Find the server's Yggdrasil address and SOCKS5 port:**
+
+   ```bash
+   sudo x-node status
+   ```
+
+   The `Node` section has the two lines you need:
+
+   ```text
+   Yggdrasil address:  200:1234:5678:9abc:def0:1234:5678:9abc
+   SOCKS5 port:        1080
+   ```
+
+   In proxy settings the address is written in square brackets together with the port:
+
+   ```text
+   [200:1234:5678:9abc:def0:1234:5678:9abc]:1080
+   ```
+
+   The installer prints the same values at the end of the installation.
+
+5. **Set the proxy in the client.** Type SOCKS5, host — the server's Yggdrasil address, port — from `x-node status`, leave the username and password empty. Turn on remote DNS resolution (called "SOCKS5h", "remote DNS" or "proxy DNS" depending on the program), otherwise domain names are resolved on the client and some sites will not open.
+
+6. **Check the connection.** From the command line:
+
+   ```bash
+   curl --socks5-hostname "[200:1234:5678:9abc:def0:1234:5678:9abc]:1080" https://ifconfig.me
+   ```
+
+   The command must return the public IPv4 or IPv6 address of the X-Node server, not your provider's address. In a browser, set the SOCKS5 proxy to `[200:1234:5678:9abc:def0:1234:5678:9abc]:1080` with no credentials and open `https://ifconfig.me` — the address must match the server's public address.
+
+   For programs that read environment variables:
+
+   ```bash
+   export ALL_PROXY="socks5h://[200:1234:5678:9abc:def0:1234:5678:9abc]:1080"
+   ```
+
+If the connection does not come up, check in order: whether Yggdrasil runs on the client and the server address answers (`ping6 200:1234:5678:9abc:def0:1234:5678:9abc`, on Windows `ping -6`), whether the client address is in `sudo x-node allow list`, and whether the address and port in the proxy settings match. `sudo x-node doctor` shows the overall server health.
 
 ## Quotas and statistics
 
@@ -216,22 +298,39 @@ x-node update check
 sudo x-node update upgrade
 ```
 
-Removing X-Node while keeping the data:
+Removal runs as a single command, just like the installation:
 
 ```bash
-sudo ./uninstall.sh
+sudo bash <(curl -fsSL https://raw.githubusercontent.com/MrKsey/x-node/main/uninstall.sh)
 ```
 
-Full removal, including the data and the installed Yggdrasil package:
+The script stops and removes the X-Node services, configuration and binaries. By default it keeps `/var/lib/x-node` (clients, invites, quotas, traffic counters and the peer list) and the installed Yggdrasil, so a reinstall does not require registering the devices again.
+
+The options are the same as in the local `uninstall.sh`:
+
+| Option | Purpose |
+| --- | --- |
+| `--yes` | no interactive questions |
+| `--purge` | also remove `/var/lib/x-node` and the Yggdrasil package |
+| `--keep-state` | keep `/var/lib/x-node` (the default) |
+| `--keep-yggdrasil` | never touch Yggdrasil, even with `--purge` |
+
+For example, a full removal including the data and Yggdrasil:
 
 ```bash
-sudo ./uninstall.sh --purge
+sudo bash <(curl -fsSL https://raw.githubusercontent.com/MrKsey/x-node/main/uninstall.sh) --purge --yes
 ```
 
 To remove X-Node but keep Yggdrasil:
 
 ```bash
-sudo ./uninstall.sh --purge --keep-yggdrasil --yes
+sudo bash <(curl -fsSL https://raw.githubusercontent.com/MrKsey/x-node/main/uninstall.sh) --purge --keep-yggdrasil --yes
+```
+
+When the release archive is already unpacked, the local script does the same with the same options:
+
+```bash
+sudo ./uninstall.sh --yes
 ```
 
 ## Diagnostics
