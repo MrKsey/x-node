@@ -7,13 +7,8 @@
 X-Node is designed to work with the [Y-Node](https://github.com/MrKsey/y-node) Android client, but is not tied to it: any SOCKS5 client with access to the Yggdrasil network can connect.
 
 <p align="center">
-  <img src="docs/screenshots/dashboard-1.png" height="280" alt="X-Node dashboard">&nbsp;&nbsp;&nbsp;
-  <img src="docs/screenshots/dashboard-2.png" height="280" alt="X-Node traffic statistics">
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/clients.png" height="280" alt="X-Node client list">&nbsp;&nbsp;&nbsp;
-  <img src="docs/screenshots/settings.png" height="280" alt="X-Node settings">
+  <img src="docs/screenshots/dashboard-1.png" width="49%" alt="X-Node dashboard">&nbsp;
+  <img src="docs/screenshots/dashboard-2.png" width="49%" alt="X-Node traffic statistics">
 </p>
 
 ## Purpose and how it works

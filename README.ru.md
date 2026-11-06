@@ -7,13 +7,8 @@
 X-Node разработан для совместной работы с Android-клиентом [Y-Node](https://github.com/MrKsey/y-node), но не привязан к нему: подключиться может любой SOCKS5-клиент, имеющий доступ к сети Yggdrasil.
 
 <p align="center">
-  <img src="docs/screenshots/dashboard-1.png" height="280" alt="X-Node, панель управления">&nbsp;&nbsp;&nbsp;
-  <img src="docs/screenshots/dashboard-2.png" height="280" alt="X-Node, статистика трафика">
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/clients.png" height="280" alt="X-Node, список клиентов">&nbsp;&nbsp;&nbsp;
-  <img src="docs/screenshots/settings.png" height="280" alt="X-Node, настройки">
+  <img src="docs/screenshots/dashboard-1.png" width="49%" alt="X-Node, панель управления">&nbsp;
+  <img src="docs/screenshots/dashboard-2.png" width="49%" alt="X-Node, статистика трафика">
 </p>
 
 ## Назначение и принцип работы
