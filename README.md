@@ -25,19 +25,19 @@ To connect, a client needs a working Yggdrasil node and must be registered in th
 How traffic flows for both types of clients:
 
 ```text
-Y-Node client (Android)                  X-Node (Ubuntu)                    Internet
-┌──────────────────────────┐             ┌───────────────────────┐          ┌──────────┐
-│ apps on the phone        │ ──────────► │ SOCKS5 [200:...]:1080 │ ───────► │ sites    │
-│ VPN → Yggdrasil node     │ ◄────────── │ allowlist, quotas     │ ◄─────── │ services │
-└──────────────────────────┘             └───────────────────────┘          └──────────┘
-      Yggdrasil, IPv6, encryption                outbound IPv4/IPv6
+     Y-Node client (Android)                        X-Node (Ubuntu)                    Internet
+┌───────────────────────────────┐             ┌──────────────────────────┐          ┌────────────┐
+│ apps on the phone             │ ──────────► │ SOCKS5 [200:...]:1080    │ ───────► │ sites and  │
+│ VPN → Yggdrasil node          │ ◄────────── │ allowlist, quotas        │ ◄─────── │ services   │
+└───────────────────────────────┘             └──────────────────────────┘          └────────────┘
+   Yggdrasil, IPv6, encryption                     outbound IPv4/IPv6
 
-Plain SOCKS5 client (PC)                 X-Node (Ubuntu)                    Internet
-┌───────────────────────────┐            ┌───────────────────────┐          ┌──────────┐
-│ browser, application      │ ─────────► │ SOCKS5 [200:...]:1080 │ ───────► │ sites    │
-│ SOCKS5 proxy → Yggdrasil  │ ◄───────── │ allowlist, quotas     │ ◄─────── │ services │
-└───────────────────────────┘            └───────────────────────┘          └──────────┘
-      Yggdrasil, IPv6, encryption                outbound IPv4/IPv6
+    Plain SOCKS5 client (PC)                        X-Node (Ubuntu)                    Internet
+┌───────────────────────────────┐             ┌──────────────────────────┐          ┌────────────┐
+│ browser, application          │ ──────────► │ SOCKS5 [200:...]:1080    │ ───────► │ sites and  │
+│ SOCKS5 proxy → Yggdrasil      │ ◄────────── │ allowlist, quotas        │ ◄─────── │ services   │
+└───────────────────────────────┘             └──────────────────────────┘          └────────────┘
+   Yggdrasil, IPv6, encryption                     outbound IPv4/IPv6
 ```
 
 In both cases traffic travels over the Yggdrasil IPv6 tunnel to X-Node and only then to the regular Internet. The only difference is who runs the Yggdrasil node and the SOCKS5 client: in Y-Node it is a single app, otherwise they are separate programs on the device.
