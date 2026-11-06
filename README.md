@@ -1,513 +1,298 @@
 # X-Node
 
-An exit node for the [Yggdrasil](https://yggdrasil-network.github.io/) network:
-it gives clients a way out to the regular internet, meters their traffic,
-hands out access by invite and shows all of it in a web interface.
+**English** · [Русский](README.ru.md)
 
-X-Node is the server half of the pair with the
-[Y-Node](https://github.com/MrKsey/y-node) Android app. The app brings up
-Yggdrasil on the phone and sends traffic through this node; X-Node also works
-with any other SOCKS5 client.
+**X-Node** is a server-side exit node for the [Yggdrasil](https://yggdrasil-network.github.io/) network. It gives connected nodes access to the regular Internet over SOCKS5, manages client access, meters traffic and lets you set individual quotas.
 
-*[Русская версия](README.ru.md)*
+X-Node is designed to work with the [Y-Node](https://github.com/MrKsey/y-node) Android client, but is not tied to it: any SOCKS5 client with access to the Yggdrasil network can connect.
 
-## What an exit node is
+<p align="center">
+  <img src="docs/screenshots/dashboard-1.png" height="280" alt="X-Node dashboard">&nbsp;&nbsp;&nbsp;
+  <img src="docs/screenshots/dashboard-2.png" height="280" alt="X-Node traffic statistics">
+</p>
 
-Yggdrasil is an encrypted network that runs on top of the regular internet.
-Every participant gets an IPv6 address, but the network itself does not lead
-anywhere outside: it only delivers packets between its own nodes.
+<p align="center">
+  <img src="docs/screenshots/clients.png" height="280" alt="X-Node client list">&nbsp;&nbsp;&nbsp;
+  <img src="docs/screenshots/settings.png" height="280" alt="X-Node settings">
+</p>
 
-An exit node is the server on the border. It accepts traffic from Yggdrasil and
-sends it to the open internet on its own behalf. A client cannot forge its
-address: the Yggdrasil address is its key, and the same address is the basis of
-all access control.
+## Purpose and how it works
 
-X-Node does three things: accepts SOCKS5 connections over Yggdrasil, checks
-what the client is allowed to do and meters its traffic. Everything else —
-invites, quotas, peers, the web interface — serves those three jobs.
+Yggdrasil is a decentralized IPv6 overlay network. It provides connectivity between its own nodes, but does not by itself route traffic to the regular Internet.
 
-## Features
+An **exit node** acts as a gateway between Yggdrasil and external networks: it accepts client requests and sends them to the Internet on behalf of the server. X-Node provides a SOCKS5 interface for this and applies access rules and traffic limits.
 
-- **SOCKS5 for TCP and UDP** — regular sites, DNS and QUIC all work through the
-  node.
-- **IPv6 and domain names** — the node resolves names itself and can reach
-  destinations over IPv4 and IPv6, picking whichever works.
-- **Access by invite** — a one-time link with a QR code, a note for each invite,
-  and a list of the invites that are still usable.
-- **Traffic accounting and quotas** — day, month and total per client, with
-  volume limits in decimal megabytes and speed limits in megabits per second.
-- **Web interface** — a dashboard with live traffic and peers, clients, QR
-  invites, settings, config editing and logs in a browser, phones included.
-- **Peer supervision** — the node keeps several public peers alive and replaces
-  a dead or too slow one without touching connected clients. Peers added by hand
-  are pinned and never replaced.
-- **One-command install** — the installer asks the rest and sets everything up.
+To connect, a client needs a working Yggdrasil node and must be registered in the list of addresses allowed by X-Node. Identification is performed by the node's IPv6 address in the Yggdrasil network.
+
+## Key features
+
+- **SOCKS5 proxy.** Handling of TCP and UDP traffic, including DNS queries and QUIC.
+- **IPv4 and IPv6 egress.** Domain name resolution on the server side and selection of an available protocol for the outgoing connection.
+- **Access management.** Client registration via one-time invites with a QR code, or manual addition of addresses. Each client can be given a label and its access managed.
+- **Quotas and speed limits.** Individual daily and monthly traffic limits, as well as inbound and outbound speed limits.
+- **Traffic accounting.** Separate statistics for each client: per day, per month and for all time. Counters survive service restarts.
+- **Web interface.** Monitoring of the node, clients, peers and traffic; management of invites, quotas and settings; log viewing and configuration editing.
+- **Yggdrasil peer management.** Automatic selection of public peers, availability checks and replacement of unstable nodes. Peers added manually are kept without automatic replacement.
+- **CLI.** Management of the server, clients, invites, quotas and peers from the command line.
+- **Updates and diagnostics.** New version checks, binary updates and a built-in check of the configuration and installation state.
 
 ## Installation
 
-On a server with Ubuntu 24.04 or Debian 12, as root:
+Ubuntu 24.04 and Debian 12 are supported. Installation is performed as `root`:
 
 ```bash
 sudo bash <(curl -fsSL https://raw.githubusercontent.com/MrKsey/x-node/main/install.sh)
 ```
 
-The installer downloads the latest release, asks a few questions (every one has
-a default, so pressing Enter is fine), installs Yggdrasil, configures peering
-and the web interface, starts the services and offers to create the first
-invite with a QR code.
+The installer downloads the current release, installs Yggdrasil and the X-Node components, configures network parameters and systemd services. During the process you can specify the node name, public address, peering parameters and web interface settings.
 
-At the end it prints the web address, the login and the password. The same
-details are stored in `/root/x-node-credentials.txt`.
+After installation you are offered to create the first invite for connecting a client. The web interface address and administrator credentials are printed at the end of the installation and saved to:
 
-The installer detects the external address and writes it to `web.publicURL`, so
-`x-node web url` and the dashboard show a link that works from any browser. When
-the web interface is enabled it also installs and starts `x-node-helper.service`:
-a small root service on a unix socket that lets the browser restart the services
-and apply edited configuration files without giving the web process full root
-access. The daemon itself keeps `NoNewPrivileges=yes`.
-
-If you prefer the archive, download `x-node-<version>-linux-amd64.tar.gz` from
-the [releases](https://github.com/MrKsey/x-node/releases), unpack it and run
-`sudo ./install.sh` from the resulting directory.
-
-### Unattended
-
-```bash
-sudo ./install.sh --yes --name "Berlin exit" --public-host 203.0.113.10
+```text
+/root/x-node-credentials.txt
 ```
 
-The main flags (`./install.sh --help` lists them all):
+An alternative is to download the archive of the required release from [GitHub Releases](https://github.com/MrKsey/x-node/releases), unpack it and run `install.sh`:
 
-| Flag | What it does |
+```bash
+sudo ./install.sh
+```
+
+### Non-interactive installation
+
+```bash
+sudo ./install.sh --yes --name "Exit Node" --public-host exit.example.com
+```
+
+Main installer options:
+
+| Option | Purpose |
 | --- | --- |
-| `--name TEXT` | node name in the app, in the QR code and on the dashboard |
-| `--public-host HOST` | external address of the server (IP or domain) for the peer link and the QR code |
-| `--ygg-proto wss\|tls` | how to accept incoming peering: WebSocket behind nginx (default) or direct TLS |
-| `--ygg-port N` | incoming peering port; `0` means outbound connections only |
-| `--socks-port N` | SOCKS5 port on the Yggdrasil address (default 1080; `443` disguises the traffic as HTTPS) |
-| `--api-port N` | registration and status port; `0` shares the SOCKS5 port under `/v1/...` |
-| `--peers LIST\|auto\|keep` | a peer list, automatic choice from the public catalogue, or "leave `yggdrasil.conf` alone" |
-| `--peer-count N` | public peers to keep (default 3, from 1 to 50) |
-| `--no-peer-replace` | keep dead and slow peers instead of replacing them |
-| `--allow-all` | let any Yggdrasil node in without an invite (see the warning below) |
-| `--no-registration` | disable registration |
-| `--no-invite` | do not create the first invite with a QR code |
-| `--ipv6 auto\|prefer\|off` | outbound IPv6 policy |
-| `--web` / `--no-web` | enable or disable the web interface |
-| `--web-port N` | web interface port |
-| `--web-password PASS` | set the password instead of generating one |
-| `--firewall` | install nftables rules |
-| `--upgrade` | replace the binaries, keep settings and clients |
-| `--uninstall` | hand over to `uninstall.sh` |
-| `--yes` | ask no questions |
+| `--name TEXT` | Node name shown in the app and the web interface |
+| `--public-host HOST` | Public IP address or domain name for inbound peering |
+| `--ygg-proto wss\|tls` | Inbound peering protocol: WebSocket via nginx or direct TLS |
+| `--ygg-port N` | Inbound peering port; `0` disables inbound connections |
+| `--socks-port N` | SOCKS5 port on the Yggdrasil interface (default `1080`) |
+| `--api-port N` | Registration and status API port; `0` shares the SOCKS5 port |
+| `--peers LIST\|auto\|keep` | Peer list, automatic selection or keeping the current configuration |
+| `--peer-count N` | Number of public peers maintained automatically |
+| `--allow-all` | Allow all Yggdrasil nodes to connect without invite checks and the access list |
+| `--no-registration` | Disable client registration by invite |
+| `--no-invite` | Do not create the first invite automatically |
+| `--ipv6 auto\|prefer\|off` | Outbound IPv6 policy |
+| `--web` / `--no-web` | Enable or disable the web interface |
+| `--web-port N` | Web interface port |
+| `--web-password PASS` | Set the administrator password |
+| `--firewall` | Install nftables rules |
+| `--upgrade` | Upgrade X-Node keeping settings and state |
+| `--yes` | Disable interactive questions |
 
-`--public-host` is the address **other nodes** will use to connect to this
-server. It goes into the `Peer:` link and into the invite QR code. The installer
-usually detects the external IP itself; behind NAT, on a non-standard port or
-when the server has a domain name, set it by hand:
+The full list of options is available via `./install.sh --help`.
+
+The `--public-host` option sets the address that other nodes will use to establish an inbound peering connection to the server. If the server is behind NAT, uses a domain name or a non-standard port, the public address should be specified explicitly.
+
+If inbound peers are not needed, use `--ygg-port 0`. In this mode the server only establishes outbound connections to public peers, and clients reach X-Node through the Yggdrasil network itself.
+
+> **Warning:** the `--allow-all` mode disables invite checks and the client allowlist. Any Yggdrasil node will be able to use the server as an exit node. Do not enable this mode on a public server without understanding the consequences.
+
+## Network ports and access
+
+By default the inbound peering port is TCP/443. In `wss` mode peering runs over WebSocket and nginx; the web interface can use the same external HTTPS port. In `tls` mode a direct TLS connection is used, and the web interface is usually available on a separate port.
+
+The SOCKS5 and API ports are bound to the server's Yggdrasil address and are not intended for direct access from the regular Internet. External access to the web interface depends on the chosen publication scheme.
+
+The current panel address can be obtained with:
 
 ```bash
-sudo ./install.sh --yes --public-host exit.example.com --ygg-port 443
+sudo x-node web url
 ```
 
-If incoming peering is not needed, run with `--ygg-port 0`: the node only
-connects to public peers itself. No `Peer:` link is created in that case, and
-Y-Node clients reach the exit node through the Yggdrasil network.
+## Management
 
-A few flags that are not needed every day:
+X-Node provides a web interface and a CLI. The web panel includes the following sections:
 
-- `--ygg-version VER` — which Yggdrasil version to install (default 0.5.15).
-- `--ygg-deb PATH` — install Yggdrasil from a local `.deb`, for example on a
-  server without access to GitHub.
-- `--ygg-conf PATH` — use a specific `yggdrasil.conf` instead of auto-detection.
-- `--bin-dir DIR` — directory to take `x-node` and `x-node-peerprobe` from when
-  they are not next to the installer.
+- **Dashboard** — server state, traffic statistics, peers, quotas and the main node parameters.
+- **Clients** — the list of registered clients, device details, statistics, access and limit management.
+- **Invites** — creating and revoking invites, setting the expiry time and the number of registrations, viewing QR codes.
+- **Settings** — node, access, limits, UDP, IPv6, public and manual peers, and web interface parameters.
+- **Configuration** — viewing and editing `config.json` and `yggdrasil.conf` with validation before saving.
+- **Logs** — viewing the latest log entries.
 
-`--allow-all` turns on the open mode: invites and the access list stop working
-and the node lets in any Yggdrasil address. That is handy for a test of a few
-minutes, but on a public server it means anyone can use your uplink. In the web
-interface this mode is enabled only after a confirmation with a warning.
+Administrative operations such as applying configuration and restarting services from the web interface are handled by a separate `x-node-helper` service. It performs privileged actions over a Unix socket without giving the web process full root access.
 
-### Upgrade and removal
+Main CLI commands:
 
 ```bash
-sudo ./install.sh --upgrade --yes
+sudo x-node status                 # server and component state
+sudo x-node clients                # client list and statistics
+sudo x-node invite                 # create an invite and QR code
+sudo x-node invite list            # list active invites
+sudo x-node invite remove <id>     # revoke an invite
+sudo x-node keygen                 # create keys and get the Yggdrasil address
+sudo x-node doctor                 # installation diagnostics
+sudo x-node peers                  # peer state
+sudo x-node usage                  # traffic statistics
+sudo x-node quota show             # current quotas
+sudo x-node web url                # web interface address
+sudo x-node web password           # change the web interface password
 ```
 
-`--upgrade` replaces only the `x-node` and `x-node-peerprobe` binaries (and
-`x-node-helper`), restarts the services and **asks no questions**:
+## Connecting clients
 
-- `yggdrasil.conf` is not touched;
-- `/etc/x-node/config.json` is only extended with new keys, existing values stay;
-- clients, invites, quotas, traffic counters and the peer list are kept;
-- the web interface, the password and the helper service stay as they were.
+### Y-Node for Android
 
-Run it from the unpacked archive of the new version (it holds `install.sh` and
-the binaries). On a machine without X-Node, `--upgrade` stops and says that
-`config.json` was not found.
+1. Install [Y-Node](https://github.com/MrKsey/y-node) and connect to the Yggdrasil network.
+2. Create an invite on the server:
 
-```bash
-sudo ./uninstall.sh                 # remove X-Node, keep the state
-sudo ./uninstall.sh --purge         # remove everything, Yggdrasil included
-sudo ./uninstall.sh --purge --keep-yggdrasil --yes
-```
+   ```bash
+   sudo x-node invite
+   ```
 
-Without `--purge` the services, the binaries, the systemd units, the helper and
-the configuration in `/etc` are removed, while `/var/lib/x-node` (clients,
-invites, quotas, counters) stays: after a reinstall every device keeps working
-without new invites. `--purge` also removes the state and the Yggdrasil package
-with its configuration; `--keep-yggdrasil` leaves Yggdrasil in place when other
-services on the host need it.
+3. In Y-Node open the **Exit node** section, add a profile and scan the QR code.
+4. Activate the exit node in the app.
 
-## Ports and access
+An invite is intended for one-time registration. After registration the device is added to the client allowlist.
 
-Only the peering port has to be open to the internet: **443** by default for
-both `wss` and `tls`. If 443 is already taken, the installer picks 13338 and
-says so.
+### Other SOCKS5 clients
 
-SOCKS5 and the API listen on the Yggdrasil address only — they are not reachable
-from the regular internet. The web interface is reachable from outside:
+X-Node is compatible with SOCKS5 clients on Linux, Windows and other platforms. A Yggdrasil client must be running on the device to provide access to the server's Yggdrasil address.
 
-- with `wss` — at `https://<server>/<path>/` on the same 443;
-- with `tls` — on its own port (usually 8080), because Yggdrasil holds 443.
-
-`sudo x-node web url` always prints the exact address. When `web.publicURL` is
-set — the installer fills it with the detected external address — the command
-prints that URL instead of the local listen address.
-
-## Web interface
-
-The interface has six pages:
-
-- **Dashboard** — X-Node health, a traffic chart in bit/s with an in/out legend,
-  the Yggdrasil peers with a ready-to-copy `Peer: wss://…/ygg?key=…` link,
-  quotas, the web interface address and the service restart buttons. The
-  **Clients** tile opens the page of the same name.
-- **Clients** — everyone in the allowlist: the label next to the address, the
-  device, the app version and the registration time. Live counters (UDP, volume,
-  visited addresses, refusals) are hidden behind the ⓘ icon next to the client.
-  A client can be added by address, renamed, limited, reset or removed here.
-- **Invites** — create an invite with a note, a number of devices and a lifetime,
-  show its QR code again, copy the `yggnode://` link or the token, and remove an
-  invite that is no longer needed. Invite defaults are set only here; the
-  Settings page does not duplicate them.
-- **Settings** — separate cards for Node, Access, Limits, UDP relay, IPv6
-  outbound, Public peers, Manual Yggdrasil peers, Web interface and Admin
-  password. Each card has its own **Save** button, which appears only after
-  something on that card has changed.
-- **Configuration** — an editor for `/etc/x-node/config.json` and
-  `yggdrasil.conf` with validation before saving, a backup in `/var/backups` and
-  the service restart buttons.
-- **Logs** — the latest log lines, with a refresh button.
+The SOCKS5 address can be seen in the output of:
 
 ```bash
-sudo x-node web url          # address to sign in
-sudo x-node web password     # new password
-```
-
-The login and password from the installation are in
-`/root/x-node-credentials.txt`; the password can also be changed on the
-**Settings** page. Restarting a service and saving a configuration file need the
-helper from the installer. Without it the page says so and the rest of the
-interface keeps working.
-
-The open mode (`allowAll`) is enabled on the Settings page only after a
-confirmation: the interface warns that invites and quotas stop applying.
-
-## Command line
-
-The CLI reads the same configuration and state as the service, so most commands
-work while the daemon is stopped.
-
-```bash
-sudo x-node status               # configuration and live counters, grouped
-sudo x-node clients              # allowlist, connections, traffic, refusals
-sudo x-node invite               # new QR code and link
-sudo x-node invite list          # active invites with notes and links
-sudo x-node invite remove <id>   # revoke an invite by the ID prefix
-sudo x-node keygen               # Ed25519 key pair and Yggdrasil address
-sudo x-node doctor               # installation check with hints
-```
-
-`status` prints labelled blocks — Node, Yggdrasil, Access, Outbound, Web
-interface, Quotas, Live and Files — instead of a bare list of numbers. Wherever
-a client is shown, its Yggdrasil address is printed together with the label, so
-the same person is recognisable in `clients`, `usage`, `quota` and the web
-interface. `keygen` explains what the private key, the public key and the
-derived address are for, and `keygen -json` is convenient for scripts.
-
-## State and files
-
-The service keeps its state in `/var/lib/x-node` (the `stateDir` setting in the
-configuration). The files belong to the `x-node` user and are readable only by
-it and root, so use `sudo` to look at them.
-
-| File | What is inside |
-| --- | --- |
-| `allowlist.json` | clients: address, label, device, app version, source, registration and last seen time, API token hash |
-| `invites.json` | active invites: hash, note, expiry, how many devices have registered, token for showing the QR code again |
-| `quotas.json` | per-client limits: monthly and daily volume, speed |
-| `usage.json` | traffic counters: day, month and total per address |
-| `runtime.json` | live counters: open TCP connections and UDP associations, limit and quota refusals |
-| `peers.json` | the current public peer list managed by the supervisor |
-| `settings.json` | settings changed in the web interface; they override `config.json` |
-| `web.json` | the web interface login and PBKDF2 password hash |
-| `install.json` | installation manifest: version, `install.sh` arguments, paths |
-| `tls/web.crt`, `tls/web.key` | the self-signed certificate of the web interface |
-
-Looking at them without editing anything by hand:
-
-```bash
-sudo ls -l /var/lib/x-node
-sudo jq '.clients[] | {address, label, deviceName, appVersion, registeredAt}' \
-  /var/lib/x-node/allowlist.json
-sudo jq '.clients | length' /var/lib/x-node/allowlist.json
-sudo jq . /var/lib/x-node/usage.json
-sudo jq . /var/lib/x-node/quotas.json
 sudo x-node status
 ```
 
-`jq` is convenient but not required: this is plain JSON and can be read by eye.
-Editing the files by hand is possible, but the service keeps a copy in memory
-and rereads the file on the next change; using `x-node` and the web interface is
-safer. `settings.json` can be deleted, and `config.json` starts applying again —
-the save button for the main config on the **Configuration** page does the same.
+For an IPv6 address, the proxy settings take the address in square brackets together with the port, for example:
 
-## Clients
-
-### Y-Node
-
-1. Install the app and connect the tunnel — it shows the Yggdrasil address and
-   the number of peers.
-2. In the app open **Exit node → +** and scan the QR code printed by
-   `sudo x-node invite`.
-3. Enable the exit. Traffic now goes through X-Node.
-
-The invite is one-time. If a phone is lost, remove its address:
-`sudo x-node allow remove <address>`. If the QR code is lost before it is used,
-`sudo x-node invite list` shows the link and the note again.
-
-### Linux
-
-First take two values: the node's Yggdrasil address and the SOCKS5 port.
-`sudo x-node status` prints them (the **Yggdrasil** and **SOCKS5** blocks) and
-the web dashboard shows them too. The address looks like
-`200:1234:5678:9abc:def0:1234:5678:9abc` and exists only inside Yggdrasil, so a
-Yggdrasil client must be running on the machine (the `yggdrasil` package or a
-service of the same name). Check it with:
-
-```bash
-ip -6 addr show | grep '200:'
+```text
+[200:1234:5678:9abc:def0:1234:5678:9abc]:1080
 ```
 
-The node address then goes in square brackets, because it is IPv6:
-`[200:1234:5678:9abc:def0:1234:5678:9abc]:1080`.
-
-**Checking access.** `curl` here only verifies that the node answers and lets
-this address in; it is not how you use the internet through it:
+To test the connection from Linux:
 
 ```bash
 curl --socks5-hostname "[200:1234:5678:9abc:def0:1234:5678:9abc]:1080" https://ifconfig.me
 ```
 
-The command should return the server's external IP. `--socks5-hostname` means
-the exit node resolves the site name, not your machine; other programs call the
-same scheme `socks5h`. Without it the DNS query bypasses the tunnel.
-
-**A proxy for the terminal and most programs.** Environment variables are
-enough:
+For applications that support proxy environment variables:
 
 ```bash
 export ALL_PROXY="socks5h://[200:1234:5678:9abc:def0:1234:5678:9abc]:1080"
-curl https://ifconfig.me
 ```
 
-This lasts until the terminal is closed. To make it permanent, add the line to
-`~/.profile` (for your user) or `/etc/environment` (for everyone). systemd
-services read neither: they need a drop-in:
+Use `socks5h` mode or an equivalent remote DNS setting so that domain names are resolved on the exit node side.
+
+## Quotas and statistics
+
+For each client you can set a daily and a monthly traffic limit, as well as download and upload speed limits.
+
+Example commands:
 
 ```bash
-sudo systemctl edit my-service
-# in the file that opens:
-[Service]
-Environment="ALL_PROXY=socks5h://[200:...]:1080"
-```
-
-**A proxy for the graphical desktop.**
-
-- **GNOME**: Settings → Network → Network Proxy → Manual → Socks Host: the
-  address without brackets, port `1080`, leave the HTTP and HTTPS fields empty.
-  GNOME applies this to applications that ask for system settings.
-- **KDE**: System Settings → Network → Proxy → SOCKS5, same address and port.
-- **Firefox** does not use the system proxy: Settings → Network Settings →
-  Manual proxy configuration → SOCKS Host, SOCKS v5, enable "Proxy DNS when
-  using SOCKS v5".
-- **Chromium and Chrome** use the system proxy by default. A separate launch:
-  `chromium --proxy-server="socks5://[200:...]:1080"` (names are resolved by the
-  node when `domainResolution` is enabled in the settings).
-
-The easiest way to confirm the traffic really goes through the node is the
-external IP: it must match the server's address, not your provider's.
-
-If the machine is the exit node itself, it needs no proxy: it goes to the
-internet directly.
-
-### Windows
-
-Install the Yggdrasil client for Windows, start the service and take the node
-address from `x-node status` or the dashboard. Then point any SOCKS5 client
-(Nekoray, v2rayN, Proxifier) at `[address]:1080` without authentication.
-`curl.exe` can do it itself — that is a check, not regular use:
-
-```powershell
-curl.exe --socks5-hostname "[200:1234:5678:9abc:def0:1234:5678:9abc]:1080" https://ifconfig.me
-```
-
-For a system proxy in Windows 11: Settings → Network & Internet → Proxy →
-Manual proxy setup → Use a proxy server → Address: the address without
-brackets, Port: `1080`. Applications that do not read system settings are
-configured separately, the same way as on Linux.
-
-A machine is added the same way as a phone: with an invite or
-`sudo x-node allow add <address>`.
-
-## Quotas and traffic accounting
-
-The node counts upload and download per client for the day, the month and the
-total. Counters survive a restart; the day and month change in the
-`usage.timezone` time zone.
-
-```bash
-sudo x-node usage                                    # usage per client
+sudo x-node usage
 sudo x-node quota set <address> -monthly 100GB -down 20Mbps
 sudo x-node quota set <address> -daily 5GB -up 5Mbps
-sudo x-node quota reset <address>                    # drop the limits
-sudo x-node quota show                               # limits and usage
+sudo x-node quota show
+sudo x-node quota reset <address>
 ```
 
-Sizes use decimal units: `MB` is 10^6 bytes and `GB` is 10^9 bytes, the same
-units the web interface shows. The explicit `MiB`, `GiB` and `TiB` spellings keep
-their binary meaning for compatibility. Speeds are written in `Kbps`, `Mbps` or
-`Gbps` and shown in Mbit/s, the unit a speed test reports.
+Volume values support decimal units (`MB`, `GB`) and binary ones (`MiB`, `GiB`, `TiB`). Speed is set in `Kbps`, `Mbps` or `Gbps`. A zero value means no limit.
 
-Zero means "no limit". A traffic cap is checked when a new TCP connection or UDP
-association starts: a client over the limit is refused, while already open
-connections keep working. A speed limit is a single shared bucket per client, so
-ten parallel downloads cannot multiply it; both TCP and UDP go through the same
-limiter. The same settings live in the web interface on the **Clients** page.
+The volume limit is checked when a new TCP connection or UDP association is created. Already established connections are not dropped when the quota is reached. The speed limit applies to the client's traffic as a whole, not to each connection separately.
 
-The exit reports the effective quota and the number of quota refusals in
-`/v1/status`. The Y-Node app shows the remaining volume and speed limits and
-says "traffic quota exhausted" instead of blaming the connection limit. In the
-CLI, `x-node clients` and `x-node quota show` show the same split.
+## Updating and removal
 
-## Peers
+Updating from a directory with the archive of a new version:
 
 ```bash
-sudo x-node peers                 # the list and live links
-sudo x-node peers count 5         # keep five public peers
-sudo x-node peers auto off        # do not replace dead or slow peers
-sudo x-node peers refresh         # refresh the public list
+sudo ./install.sh --upgrade --yes
 ```
 
-Clients of the exit node are not counted here and are never replaced.
+The update replaces the X-Node binaries and keeps the configuration, clients, invites, quotas, traffic counters and the peer list.
 
-Peers added by hand go into `manualPeers` in the configuration or through
-**Settings → Manual Yggdrasil peers** in the web interface. They are pinned: the
-supervisor always keeps them and never swaps them for a public candidate. The
-dashboard marks them with a `manual` badge.
-
-The same page shows the node's own peering link, `wss://…/ygg?key=…` (or
-`tls://…?key=…`). Copy it into the peers of another Yggdrasil node to connect
-the two directly.
-
-## Updates
+You can also check for a new version and upgrade via the CLI:
 
 ```bash
-x-node update check          # compare the running build with the latest release
-sudo x-node update upgrade   # download, verify and install it
+x-node update check
+sudo x-node update upgrade
 ```
 
-`update check` reads the latest release from GitHub and reports whether a newer
-version exists; `-json` prints the answer for scripts. `update upgrade`
-downloads the archive for this machine, compares its SHA-256 with
-`SHA256SUMS.txt`, checks that the new binary reports the expected version and
-replaces `x-node` and `x-node-peerprobe` next to the running executable. The
-previous binary is kept in `/var/backups`. The service restarts unless
-`-no-restart` is given.
-
-The dashboard shows the same check and a one-click upgrade. It goes through the
-root helper, so it needs the helper installed by `install.sh`. In-place upgrades
-are built for Linux/amd64, Linux/arm64 and Linux/arm; other platforms are
-pointed to the release page.
-
-## Certificate
-
-The installer creates a self-signed certificate, so the browser warns once. For
-permanent use, issue a real one:
-
-1. Point the domain's DNS record at the server.
-2. Open TCP/80 and TCP/443.
-3. Issue the certificate:
-
-   ```bash
-   sudo apt-get install -y certbot
-   sudo certbot certonly --standalone -d exit.example.com
-   ```
-
-4. Put the paths into `/etc/nginx/sites-available/x-node.conf`:
-
-   ```nginx
-   ssl_certificate     /etc/letsencrypt/live/exit.example.com/fullchain.pem;
-   ssl_certificate_key /etc/letsencrypt/live/exit.example.com/privkey.pem;
-   ```
-
-5. Reload nginx: `sudo nginx -t && sudo systemctl reload nginx`.
-
-If the web interface runs without nginx (`tls` mode), set the same files in
-`/etc/x-node/config.json` as `web.certFile` and `web.keyFile` and restart the
-service. Renewal requires reloading nginx or restarting X-Node again.
-
-## Troubleshooting
+Removing X-Node while keeping the data:
 
 ```bash
-sudo x-node doctor              # installation check with hints
-sudo x-node status              # what is active right now
-sudo x-node clients             # who is connected
-sudo journalctl -u x-node -f    # the log
+sudo ./uninstall.sh
 ```
 
-**The app cannot see the exit.** Check that Yggdrasil runs on both sides, the
-phone's address is in `x-node allow list` and the SOCKS5 port matches. If the QR
-code is lost, `x-node invite list` prints the link again; the dashboard shows the
-node's own `Peer:` link for a direct connection.
-
-**No IPv6.** The node keeps working over IPv4 — that is not an error.
-`x-node doctor` prints the reason.
-
-**A client gets "not allowed".** It is not in the allowlist, its traffic quota
-is exhausted, or it hit the connection limit: `x-node clients` shows the split
-between quota and connection refusals, and `x-node quota show` shows the limits.
-
-**The browser complains about the certificate.** That is expected with a
-self-signed certificate; the section above explains how to install a real one.
-
-**Restart or save is disabled in the web interface.** Those buttons need
-`x-node-helper.service`, which the installer starts only when the web interface
-is enabled. Rerun the installer with `--web`, or start it by hand:
-`sudo systemctl enable --now x-node-helper`. Until then use
-`sudo systemctl restart x-node` and edit the files from the shell.
-
-## Development
+Full removal, including the data and the installed Yggdrasil package:
 
 ```bash
-go build ./...          # daemon and CLI
-go test ./...           # tests
+sudo ./uninstall.sh --purge
+```
+
+To remove X-Node but keep Yggdrasil:
+
+```bash
+sudo ./uninstall.sh --purge --keep-yggdrasil --yes
+```
+
+## Diagnostics
+
+For a first check use:
+
+```bash
+sudo x-node doctor
+sudo x-node status
+sudo x-node clients
+sudo journalctl -u x-node -f
+```
+
+If a client cannot connect, check the availability of the Yggdrasil network, whether its address is in the client allowlist and whether the SOCKS5 port is correct. The reasons for quota and limit refusals are shown in the client statistics.
+
+## Building from source
+
+Go tools are used to build and check the project:
+
+```bash
+go build ./...
+go test ./...
 go vet ./...
-./build.sh              # linux/amd64 into bin/
-GOARCH=arm64 ./build.sh # linux/arm64
+
+./build.sh          # Linux/amd64
+GOARCH=arm64 ./build.sh
 ```
+
+## Donations
+
+You can support the project with a donation to any of the wallets below.
+
+<table>
+  <tr>
+    <td align="center">
+      <img src="docs/screenshots/donate/bitcoin.jpg" width="220" alt="Bitcoin QR code"><br>
+      <b>Bitcoin</b><br>
+      <code>bc1qdf9wryj6tnyyr7ed4dkfv03nn0dxjf27xshfcr</code>
+    </td>
+    <td align="center">
+      <img src="docs/screenshots/donate/ethereum.jpg" width="220" alt="Ethereum QR code"><br>
+      <b>Ethereum</b><br>
+      <code>0xE22FAB5337A5506D9e7Ef9D4914De4d963Fbbf88</code>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <img src="docs/screenshots/donate/solana.jpg" width="220" alt="Solana QR code"><br>
+      <b>Solana</b><br>
+      <code>7XcNM2M9rndFbJdjRtyycxkQXq8dPXEP87toiQX4EZfx</code>
+    </td>
+    <td align="center">
+      <img src="docs/screenshots/donate/tron.jpg" width="220" alt="Tron QR code"><br>
+      <b>Tron</b><br>
+      <code>TCYpTxSmdPN8p4fmRwtPGk3HHBf77FypeA</code>
+    </td>
+  </tr>
+</table>
 
 ## License
 
-MIT, see [LICENSE](LICENSE).
+The project is distributed under the [MIT](LICENSE) license.
