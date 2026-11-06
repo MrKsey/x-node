@@ -4,6 +4,16 @@ All notable changes to X-Node are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.6.14] — 2026-11-06
+
+### Changed
+
+- The **Yggdrasil peers** table on the dashboard shows the allowlist label next
+  to the address of a connected client, so a phone is recognised by its name and
+  not only by an IPv6 address.
+- An inbound link carries a **client** badge in the Managed column, in the accent
+  colour, instead of an empty cell.
+
 ## [1.6.13] — 2026-11-06
 
 ### Changed

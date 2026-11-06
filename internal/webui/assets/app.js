@@ -665,16 +665,20 @@ function peerTableHtml(peers) {
     // alone would put both badges on it. The operator's peer is manual first.
     const managed = peer.managed && !peer.manual ? '<span class="pill ok">auto</span>' : "";
     const manual = peer.manual ? '<span class="pill">manual</span>' : "";
+    // An inbound link is a client of the exit, not a peer the supervisor
+    // manages, so it gets its own badge instead of an empty Managed cell.
+    const client = peer.inbound ? '<span class="pill client">client</span>' : "";
+    const label = peer.label ? ` <span class="peer-label">${escapeHtml(peer.label)}</span>` : "";
     return `
       <tr>
         <td data-label="Link"><div class="mono break">${escapeHtml(peer.uri)}</div></td>
         <td data-label="Direction">${direction}</td>
         <td data-label="State">${statePill}</td>
-        <td data-label="Address"><div class="mono break">${escapeHtml(peer.address || "—")}</div></td>
+        <td data-label="Address"><span class="mono break">${escapeHtml(peer.address || "—")}</span>${label}</td>
         <td class="right" data-label="RTT">${peer.latencyMs > 0 ? peer.latencyMs.toFixed(1) + " ms" : "—"}</td>
         <td class="right hide-sm" data-label="Uptime">${peer.uptimeSeconds > 0 ? duration(peer.uptimeSeconds) : "—"}</td>
         <td class="right hide-sm" data-label="Traffic">↑ ${bytes(peer.bytesRecv)} · ↓ ${bytes(peer.bytesSent)}</td>
-        <td class="right" data-label="Managed">${managed}${manual}</td>
+        <td class="right" data-label="Managed">${managed}${manual}${client}</td>
       </tr>`;
   }).join("");
   return `<div class="table-wrap"><table class="cards">

@@ -104,6 +104,25 @@ jobs:
             echo "$listing" | grep -qx '.*/deploy/systemd/x-node-helper.service'
           done
 
+      - name: release notes
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          # The CHANGELOG section of this version is what users read on the
+          # release page: every release must say in a few lines what changed,
+          # so a missing section stops the publish instead of shipping an
+          # auto-generated commit list.
+          awk -v ver="$version" '
+            index($0, "## [" ver "]") == 1 { inside = 1; next }
+            inside && index($0, "## [") == 1 { exit }
+            inside { print }
+          ' CHANGELOG.md > release-notes.md
+          if ! grep -q '[^[:space:]]' release-notes.md; then
+            echo "CHANGELOG.md has no section for ${version}" >&2
+            exit 1
+          fi
+          cat release-notes.md
+
       - name: publish
         env:
           GH_TOKEN: ${{ github.token }}
@@ -112,8 +131,11 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" dist/*.tar.gz dist/SHA256SUMS.txt --clobber
+            gh release edit "$GITHUB_REF_NAME" \
+              --title "X-Node ${version}" \
+              --notes-file release-notes.md
           else
             gh release create "$GITHUB_REF_NAME" dist/*.tar.gz dist/SHA256SUMS.txt \
               --title "X-Node ${version}" \
-              --generate-notes
+              --notes-file release-notes.md
           fi

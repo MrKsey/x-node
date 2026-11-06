@@ -1263,12 +1263,15 @@ func (w *webServer) handleSettingsPut(rw http.ResponseWriter, r *http.Request) {
 /* ---------- peers and logs ---------- */
 
 type webPeer struct {
-	URI           string  `json:"uri"`
-	Up            bool    `json:"up"`
-	Inbound       bool    `json:"inbound"`
-	Managed       bool    `json:"managed"`
-	Manual        bool    `json:"manual"`
-	Address       string  `json:"address"`
+	URI     string `json:"uri"`
+	Up      bool   `json:"up"`
+	Inbound bool   `json:"inbound"`
+	Managed bool   `json:"managed"`
+	Manual  bool   `json:"manual"`
+	Address string `json:"address"`
+	// Label is the allowlist label of an inbound client, so the dashboard shows
+	// "phone" instead of only an IPv6 address the operator has to look up.
+	Label         string  `json:"label,omitempty"`
 	Key           string  `json:"key"`
 	Port          int     `json:"port"`
 	Priority      int     `json:"priority"`
@@ -1308,6 +1311,16 @@ func (w *webServer) handlePeers(rw http.ResponseWriter, r *http.Request) {
 	socket := newAdminSocket(cfg.AdminSocket, 3*time.Second)
 	live, err := socket.Peers()
 	self, selfErr := socket.Self()
+	// An inbound link is a client of the exit, so its label lives in the
+	// allowlist and is looked up by the Yggdrasil address the peer reports.
+	labels := make(map[string]string)
+	if w.store != nil {
+		for _, client := range w.store.List() {
+			if client.Label != "" {
+				labels[client.Address] = client.Label
+			}
+		}
+	}
 	rows := make([]webPeer, 0, len(live))
 	up, inbound := 0, 0
 	for _, peer := range live {
@@ -1325,6 +1338,9 @@ func (w *webServer) handlePeers(rw http.ResponseWriter, r *http.Request) {
 			BytesRecv:     peer.BytesRecv,
 			BytesSent:     peer.BytesSent,
 			UptimeSeconds: peer.Uptime,
+		}
+		if peer.Inbound {
+			row.Label = labels[peer.Address]
 		}
 		if peer.Latency > 0 {
 			row.LatencyMs = float64(peer.Latency) / float64(time.Millisecond)
