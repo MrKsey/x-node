@@ -4,6 +4,9 @@ All notable changes to X-Node are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+The release workflow publishes the section of the tag as the GitHub release
+body, so every release has a short human-readable summary of what changed.
+
 ## [1.6.14] — 2026-11-06
 
 ### Changed
