@@ -188,6 +188,10 @@ input[type="checkbox"] { width: auto; accent-color: var(--accent); }
 .range-switch button.active { background: var(--bg-elev); color: var(--text); box-shadow: var(--shadow); }
 .small-value { font-size: 15px !important; word-break: break-all; }
 .break { word-break: break-all; }
+/* A long name that still has natural break points, such as a repository path:
+   the browser breaks it after a slash or a hyphen and only splits a word when
+   the line is narrower than that word. */
+.link-wrap { overflow-wrap: anywhere; word-break: normal; }
 .ellipsis { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .facts th { width: 46%; font-weight: 500; text-transform: none; letter-spacing: 0; font-size: 13.5px; }
 /* The last row of a facts table has no line of its own: a block that follows

@@ -512,7 +512,7 @@ function dashboardHtml() {
         <header><h3>Yggdrasil</h3><span class="muted small">${peers.adminReachable ? "admin socket connected" : "admin socket unavailable"}</span></header>
         <table class="facts">
           <tr><th>Version</th><td class="right">${escapeHtml(self.build_version || "—")}</td></tr>
-          <tr><th>Project</th><td class="right"><a class="break" href="https://github.com/yggdrasil-network/yggdrasil-go" target="_blank" rel="noopener noreferrer">yggdrasil-network/yggdrasil-go</a></td></tr>
+          <tr><th>Project</th><td class="right"><a class="link-wrap" href="https://github.com/yggdrasil-network/yggdrasil-go" title="yggdrasil-network/yggdrasil-go" target="_blank" rel="noopener noreferrer">yggdrasil-go</a></td></tr>
           <tr><th>Address</th><td class="right mono">${escapeHtml(self.address || status.address || "—")}</td></tr>
           <tr><th>Public key</th><td class="right mono ellipsis" title="${escapeHtml(self.key || "")}">${escapeHtml(self.key || "—")}</td></tr>
           <tr><th>Routing entries</th><td class="right">${self.routing_entries == null ? "—" : self.routing_entries}</td></tr>
