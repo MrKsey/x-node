@@ -4,6 +4,16 @@ All notable changes to X-Node are documented here. The format is based on [Keep 
 
 The release workflow publishes the section of the tag as the GitHub release body, so every release has a short human-readable summary of what changed. Keep each bullet on a single line: GitHub turns every newline in a release body into a hard break, so a wrapped bullet would render as a narrow column instead of using the full width.
 
+## [1.6.18] — 2026-11-07
+
+### Changed
+
+- On the **Node** settings card the **Usage timezone** is a normal-width field beside **Node name** and **Log level**, and the traffic accounting switch has its own line.
+- On the **UDP relay** card both switches span the full card and their toggles line up vertically; the **Resolve domain names (ATYP=domain)** label stays on one line.
+- On the **IPv6 outbound** card the **Mode** select and the read-only **Source address** field sit side by side and have the same width as **Max UDP associations**; the separate **Interface** row is gone.
+- On the **Configuration** tab the file picker is as wide as a settings field and the action buttons sit to its right.
+- The **Configuration files** and **Recent log lines** cards are as tall as the browser window, so the editor and the log box use the free space on any screen.
+
 ## [1.6.17] — 2026-11-07
 
 ### Fixed

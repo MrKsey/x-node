@@ -17,6 +17,11 @@
   --shadow: 0 1px 2px rgba(16, 24, 40, .06), 0 8px 24px rgba(16, 24, 40, .06);
   --radius: 14px;
   --sidebar: 248px;
+  /* Height of the sticky top bar and the padding of .view. The full-height
+     cards (Configuration, Logs) subtract them from the window height, so their
+     text area ends exactly at the bottom of the browser window. */
+  --topbar-height: 56px;
+  --view-padding: 24px;
 }
 
 html[data-theme="dark"] {
@@ -314,6 +319,26 @@ canvas.chart.mini { height: 108px; }
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12.5px; line-height: 1.55;
 }
+
+/* Configuration and Logs own the whole window: the card is as tall as the
+   space between the top bar and the bottom edge, and the editor or the log box
+   takes what the header, the hint and the toolbar leave. A fixed calc() left
+   the card taller than the window on a short screen and short on a tall one. */
+.config-card, .logs-card {
+  display: flex; flex-direction: column;
+  height: calc(100vh - var(--topbar-height) - 2 * var(--view-padding) - 2px);
+  height: calc(100dvh - var(--topbar-height) - 2 * var(--view-padding) - 2px);
+}
+.config-card .config-editor,
+.logs-card pre.logs {
+  flex: 1 1 auto; height: auto; min-height: 120px;
+}
+
+/* The file picker keeps the width of one two-column settings field, and the
+   actions sit to its right instead of under it. */
+.config-toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.config-toolbar select { flex: 1 1 240px; max-width: 365px; }
+.config-toolbar .actions { margin-left: auto; }
 .manual-peer {
   display: flex; gap: 12px; align-items: center; justify-content: space-between;
   padding: 10px 0; border-bottom: 1px solid var(--border); flex-wrap: wrap;
@@ -474,6 +499,7 @@ canvas.chart.mini { height: 108px; }
 
 /* mobile */
 @media (max-width: 900px) {
+  :root { --topbar-height: 66px; --view-padding: 16px; }
   .app { grid-template-columns: 1fr; }
   .sidebar {
     position: fixed; inset: 0 auto 0 0; width: min(300px, 86vw); z-index: 40;
@@ -494,6 +520,7 @@ canvas.chart.mini { height: 108px; }
 }
 
 @media (max-width: 700px) {
+  :root { --view-padding: 12px; }
   .view { padding: 12px; gap: 14px; }
   .section { padding: 14px; }
   .section > header { gap: 8px; }
@@ -512,9 +539,10 @@ canvas.chart.mini { height: 108px; }
   .login-card { padding: 22px; }
   .row { gap: 8px; }
   .row > input, .row > select, .row > .btn { width: 100%; }
+  .config-toolbar select { flex: 1 1 100%; max-width: none; }
+  .config-toolbar .actions { margin-left: 0; width: 100%; }
   .manual-peer-form { grid-template-columns: 1fr; }
   .manual-peer-form .btn { width: 100%; }
-  .config-editor, pre.logs { height: calc(100vh - 210px); min-height: 260px; }
   .settings-card > header { align-items: flex-start; }
   .settings-card > header .save-btn { width: 100%; }
   .client-line { gap: 6px; }
@@ -527,5 +555,11 @@ canvas.chart.mini { height: 108px; }
    leaving a single stretched button alone. */
 @media (max-width: 480px) {
   .table-wrap table.cards td.row-actions .btn { flex: 1 1 28%; }
+}
+
+/* A switch label marked .nowrap keeps one line. On a very narrow phone the
+   longest of them would overflow the card, so there it may wrap again. */
+@media (max-width: 400px) {
+  .switch > span.nowrap { white-space: normal; }
 }
 

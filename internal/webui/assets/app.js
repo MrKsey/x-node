@@ -1663,26 +1663,29 @@ function wireInviteActions(root) {
 
 /* settings */
 
-// ipv6SourceHtml names the address and the interface the exit uses for
-// outbound IPv6 connections. "auto" and "prefer" only mean something when the
-// host has a global address, so the card shows what the daemon detected
-// instead of leaving the operator to guess.
-function ipv6SourceHtml(status, mode) {
+// ipv6SourceField is the read-only "Source address" input next to the mode.
+// It shows the address the kernel picks for a global IPv6 destination, which is
+// what outbound connections really use. A host without IPv6 leaves it empty:
+// the placeholder and the hint below say why.
+function ipv6SourceField(status) {
+  const available = Boolean(status && status.ipv6Available);
+  const value = available ? status.ipv6Detail || "" : "";
+  return `<label class="field"><span>Source address</span><input class="mono" value="${escapeHtml(value)}" placeholder="no global IPv6 address" readonly></label>`;
+}
+
+// ipv6SourceHint explains the source address and the selected mode in one line.
+function ipv6SourceHint(status, mode) {
   if (!status || status.ipv6Available === undefined) {
-    return '<p class="hint">IPv6 detection has not finished yet.</p>';
+    return "IPv6 detection has not finished yet.";
   }
   if (!status.ipv6Available) {
     const reason = status.ipv6Detail ? " (" + escapeHtml(status.ipv6Detail) + ")" : "";
-    return `<p class="hint">No global IPv6 address is detected on this host${reason}, so outbound connections use IPv4 only.</p>`;
+    return "No global IPv6 address is detected on this host" + reason + ", so outbound connections use IPv4 only.";
   }
-  const iface = status.ipv6Interface || "—";
-  return `<table class="facts">
-    <tr><th>Source address</th><td class="right mono break">${escapeHtml(status.ipv6Detail || "—")}</td></tr>
-    <tr><th>Interface</th><td class="right mono">${escapeHtml(iface)}</td></tr>
-  </table>
-  <p class="hint">${mode === "off"
-    ? "The mode is off, so outbound connections use IPv4 even though this host has a global IPv6 address."
-    : "This address and interface are used for outbound IPv6 connections. They are detected automatically."}</p>`;
+  if (mode === "off") {
+    return "The mode is off, so outbound connections use IPv4 even though this host has a global IPv6 address.";
+  }
+  return "This address is used for outbound IPv6 connections. It is detected automatically and needs no setting.";
 }
 
 function settingsHtml() {
@@ -1732,15 +1735,13 @@ function settingsHtml() {
             ${["debug", "info", "warn", "error"].map((level) => `<option value="${level}" ${settings.logLevel === level ? "selected" : ""}>${level}</option>`).join("")}
           </select>
         </label>
-        <div class="field-pair full">
-          <label class="field"><span>Usage timezone</span>
-            <select id="s-timezone">
-              ${zones.map((zone) => `<option value="${escapeHtml(zone)}" ${zone === timezone ? "selected" : ""}>${escapeHtml(zone)}</option>`).join("")}
-            </select>
-          </label>
-          <label class="switch"><input type="checkbox" id="s-usage" ${usage.enabled ? "checked" : ""}><span>Traffic accounting (needed for quotas)</span></label>
-        </div>
+        <label class="field"><span>Usage timezone</span>
+          <select id="s-timezone">
+            ${zones.map((zone) => `<option value="${escapeHtml(zone)}" ${zone === timezone ? "selected" : ""}>${escapeHtml(zone)}</option>`).join("")}
+          </select>
+        </label>
       </div>
+      <label class="switch"><input type="checkbox" id="s-usage" ${usage.enabled ? "checked" : ""}><span>Traffic accounting (needed for quotas)</span></label>
       <p class="hint">The name is shown in the app, in the invite QR code and in the dashboard. The timezone decides when the daily and monthly quota counters roll over.</p>
     </form>
 
@@ -1779,8 +1780,8 @@ function settingsHtml() {
         <button class="btn primary small save-btn hidden" type="submit">Save</button>
       </header>
       <div class="form-grid">
-        <label class="switch"><input type="checkbox" id="s-udp" ${settings.udpEnabled ? "checked" : ""}><span>Relay UDP through the exit</span></label>
-        <label class="switch"><input type="checkbox" id="s-domain" ${settings.domainResolution ? "checked" : ""}><span>Resolve domain names (ATYP=domain)</span></label>
+        <label class="switch full"><input type="checkbox" id="s-udp" ${settings.udpEnabled ? "checked" : ""}><span>Relay UDP through the exit</span></label>
+        <label class="switch full"><input type="checkbox" id="s-domain" ${settings.domainResolution ? "checked" : ""}><span class="nowrap">Resolve domain names (ATYP=domain)</span></label>
         <div class="field-pair full">
           <label class="field"><span>Max UDP associations</span><input id="s-maxudp" type="number" min="1" value="${settings.maxUDPAssociations || 64}"></label>
           <label class="field"><span>UDP idle timeout</span><input id="s-udpidle" value="${escapeHtml(settings.udpIdleTimeout || "2m")}"></label>
@@ -1802,9 +1803,10 @@ function settingsHtml() {
             <option value="off" ${settings.ipv6 === "off" ? "selected" : ""}>off — IPv4 only</option>
           </select>
         </label>
+        ${ipv6SourceField(state.status)}
       </div>
       <p class="hint">This only controls how the exit dials destinations. The Yggdrasil mesh itself is always IPv6.</p>
-      ${ipv6SourceHtml(state.status, settings.ipv6)}
+      <p class="hint">${ipv6SourceHint(state.status, settings.ipv6)}</p>
     </form>
 
     <form class="card section settings-card" data-settings="peers">
@@ -2166,17 +2168,19 @@ function wireSettings() {
 
 function configHtml() {
   return `
-    <div class="card section">
+    <div class="card section config-card">
       <header><h3>Configuration files</h3><span class="muted small" id="config-status"></span></header>
       <p class="hint">The file is validated before it replaces the current one; a backup is written to /var/backups. Applying the main configuration removes the dashboard overlay, so the file becomes the only source of truth.</p>
-      <div class="row">
-        <select id="config-file" style="max-width:280px">
+      <div class="config-toolbar">
+        <select id="config-file">
           <option value="main">/etc/x-node/config.json</option>
           <option value="yggdrasil">yggdrasil.conf</option>
         </select>
-        <button class="btn primary small" id="config-save" type="button">Validate and save</button>
-        <button class="btn small" data-restart="x-node" type="button">Restart x-node</button>
-        <button class="btn small" data-restart="yggdrasil" type="button">Restart yggdrasil</button>
+        <div class="actions">
+          <button class="btn primary small" id="config-save" type="button">Validate and save</button>
+          <button class="btn small" data-restart="x-node" type="button">Restart x-node</button>
+          <button class="btn small" data-restart="yggdrasil" type="button">Restart yggdrasil</button>
+        </div>
       </div>
       <div class="muted small mono" id="config-path"></div>
       <textarea id="config-content" class="config-editor" spellcheck="false" placeholder="Load a file to edit it"></textarea>
@@ -2231,7 +2235,7 @@ function wireConfig() {
 
 function logsHtml() {
   return `
-    <div class="card section">
+    <div class="card section logs-card">
       <header>
         <h3>Recent log lines</h3>
         <label class="switch"><input type="checkbox" id="log-auto" checked><span>Auto refresh</span></label>
