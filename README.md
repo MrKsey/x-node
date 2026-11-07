@@ -45,8 +45,8 @@ In both cases traffic travels over the Yggdrasil IPv6 tunnel to X-Node and only 
 ## Key features
 
 - **SOCKS5 proxy.** Handling of TCP and UDP traffic, including DNS queries and QUIC.
-- **IPv4 and IPv6 egress.** Domain name resolution on the server side and selection of an available protocol for the outgoing connection.
-- **Access management.** Client registration via one-time invites with a QR code, or manual addition of addresses. Each client can be given a label and its access managed.
+- **IPv4 and IPv6 egress.** Domain name resolution on the server side and selection of an available protocol for the outgoing connection. The IPv6 route is checked with a real connection, so a host that has an address the provider does not route is reported as such instead of being treated as working.
+- **Access management.** Client registration via one-time invites with a QR code, or manual addition of addresses. Each client can be given a label and its access managed. The QR code and link of an already allowed client can be shown again from the CLI and the web interface.
 - **Quotas and speed limits.** Individual daily and monthly traffic limits, as well as inbound and outbound speed limits.
 - **Traffic accounting.** Separate statistics for each client: per day, per month and for all time. Counters survive service restarts.
 - **Web interface.** Monitoring of the node, clients, peers and traffic; management of invites, quotas and settings; log viewing and configuration editing.
@@ -145,6 +145,7 @@ sudo x-node status                 # server and component state
 sudo x-node clients                # client list and statistics
 sudo x-node allow list             # allowed addresses
 sudo x-node allow add <address>    # allow a client without an invite
+sudo x-node allow link <address>   # QR code and link for an allowed client
 sudo x-node allow remove <address> # revoke access
 sudo x-node invite                 # create an invite and QR code
 sudo x-node invite list            # list active invites
@@ -192,6 +193,16 @@ sudo x-node allow remove 201:1ba8:15c:b1be:7555:b3d7:7651:8e2e
 ```
 
 Only Yggdrasil node addresses from the `200::/7` range are accepted — the same address the client shows on its side. No SOCKS5 login or password is involved: access is decided by the source address the connection comes from. A separate token (`sudo x-node allow token <address>`) is only needed for the HTTP API, for example for status requests from Y-Node.
+
+### Restoring a deleted exit profile
+
+If the exit profile was deleted in Y-Node, there is no need to create a new invite. The link for an already allowed client is printed again:
+
+```bash
+sudo x-node allow link 201:1ba8:15c:b1be:7555:b3d7:7651:8e2e
+```
+
+The command prints the same QR code and `yggnode://` link, but without an invite: the exit recognises the device by its Yggdrasil address. The same QR code and link are available in the web interface on the **Clients** tab with the **QR / link** button. In Y-Node, import the link with **Exit nodes → Import from link** or scan the QR code; the app fetches an API token from the exit on its own. Without a token the profile still works as a plain SOCKS5 proxy.
 
 ### Other SOCKS5 clients
 

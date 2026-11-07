@@ -31,45 +31,116 @@ const (
 	// ipv6RefreshInterval is how often the availability is re-checked: a VPS
 	// can gain or lose IPv6 without the daemon restarting.
 	ipv6RefreshInterval = 5 * time.Minute
+	// ipv6ProbeTimeout bounds one reachability attempt. A provider that
+	// blackholes IPv6 would otherwise cost the whole dial timeout.
+	ipv6ProbeTimeout = 2 * time.Second
 )
+
+// The states the web interface and the API report for outbound IPv6.
+const (
+	// ipv6StateChecking is the first state of the daemon: the address check
+	// has finished, the reachability probe is still running.
+	ipv6StateChecking = "checking"
+	// ipv6StateOK means a global address exists and a real IPv6 destination
+	// answered, so outbound IPv6 connections work.
+	ipv6StateOK = "ok"
+	// ipv6StateNone means the host has no global IPv6 address at all.
+	ipv6StateNone = "none"
+	// ipv6StateBroken means the host has an address, but the provider does not
+	// route it to the internet. This is the case a plain "is an address
+	// assigned?" check misses, and the reason the reachability probe exists.
+	ipv6StateBroken = "broken"
+)
+
+// ipv6ProbeTargets are real global IPv6 destinations. Two are used so a single
+// blocked anycast address does not look like a broken provider.
+var ipv6ProbeTargets = []string{
+	"[2606:4700:4700::1111]:443", // Cloudflare
+	"[2001:4860:4860::8888]:443", // Google
+}
 
 // errNoRoute means that the name resolved but no address passed the policy or
 // the address family filter.
 var errNoRoute = errors.New("no usable address")
 
+// ipv6Detection is the result of one check.
+type ipv6Detection struct {
+	// Available is true only when an address exists and the route works.
+	Available bool
+	State     string
+	// Source is the global address the kernel picked, empty without one.
+	Source string
+	// Detail explains a state that is not ok: why there is no address or why
+	// the assigned one cannot reach the internet.
+	Detail string
+}
+
 // ipv6Monitor caches whether this host can open a global IPv6 connection.
 type ipv6Monitor struct {
 	mu        sync.RWMutex
 	available bool
+	state     string
+	source    string
 	detail    string
 	iface     string
 	checked   time.Time
 }
 
 func newIPv6Monitor() *ipv6Monitor {
-	monitor := &ipv6Monitor{}
-	monitor.refresh()
+	monitor := &ipv6Monitor{state: ipv6StateChecking, detail: "checking the IPv6 route"}
+	// The address check is instant: a UDP connect sends no packet. The
+	// reachability probe follows in run(), so a provider that blackholes IPv6
+	// does not delay the daemon start.
+	monitor.refreshLocal()
 	return monitor
 }
 
-// refresh asks the kernel for the source address it would use for a global
-// IPv6 destination. A UDP connect does not send anything, so this works even
-// when the host is offline.
-func (m *ipv6Monitor) refresh() {
-	available, detail := detectIPv6()
+// refreshLocal fills the state from the address check alone. Until the
+// reachability probe finishes, an address is not treated as usable.
+func (m *ipv6Monitor) refreshLocal() {
+	detection := detectIPv6Address()
+	state := detection.State
+	detail := detection.Detail
+	if state == ipv6StateOK {
+		state = ipv6StateChecking
+		detail = "checking the route"
+	}
 	iface := ""
-	if available {
-		iface = interfaceForIP(net.ParseIP(detail))
+	if detection.Source != "" {
+		iface = interfaceForIP(net.ParseIP(detection.Source))
 	}
 	m.mu.Lock()
-	m.available = available
+	m.available = false
+	m.state = state
+	m.source = detection.Source
 	m.detail = detail
 	m.iface = iface
 	m.checked = time.Now()
 	m.mu.Unlock()
 }
 
+// refresh runs the full check: the address and a real connection to a global
+// IPv6 destination.
+func (m *ipv6Monitor) refresh() {
+	detection := detectIPv6()
+	iface := ""
+	if detection.Source != "" {
+		iface = interfaceForIP(net.ParseIP(detection.Source))
+	}
+	m.mu.Lock()
+	m.available = detection.Available
+	m.state = detection.State
+	m.source = detection.Source
+	m.detail = detection.Detail
+	m.iface = iface
+	m.checked = time.Now()
+	m.mu.Unlock()
+}
+
 func (m *ipv6Monitor) run(ctx context.Context) {
+	// The first probe runs right away: the constructor only checked that an
+	// address exists.
+	m.refresh()
 	ticker := time.NewTicker(ipv6RefreshInterval)
 	defer ticker.Stop()
 	for {
@@ -82,30 +153,96 @@ func (m *ipv6Monitor) run(ctx context.Context) {
 	}
 }
 
-func (m *ipv6Monitor) status() (bool, string, string) {
+func (m *ipv6Monitor) status() (available bool, state, source, detail, iface string) {
 	if m == nil {
-		return false, "not checked", ""
+		return false, ipv6StateNone, "", "not checked", ""
 	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.available, m.detail, m.iface
+	return m.available, m.state, m.source, m.detail, m.iface
 }
 
-func detectIPv6() (bool, string) {
+// detectIPv6Address asks the kernel which source address it would use for a
+// global IPv6 destination. A UDP connect does not send anything, so this works
+// even when the host is offline, and it tells "no address" apart from "an
+// address that cannot reach anything".
+func detectIPv6Address() ipv6Detection {
 	conn, err := net.Dial("udp6", ipv6ProbeAddress)
 	if err != nil {
-		return false, err.Error()
+		return ipv6Detection{State: ipv6StateNone, Detail: err.Error()}
 	}
-	defer conn.Close()
 	local, ok := conn.LocalAddr().(*net.UDPAddr)
+	_ = conn.Close()
 	if !ok || local.IP == nil {
-		return false, "no local IPv6 address"
+		return ipv6Detection{State: ipv6StateNone, Detail: "no local IPv6 address"}
 	}
 	ip := local.IP
 	if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() {
-		return false, "only " + ip.String()
+		return ipv6Detection{State: ipv6StateNone, Detail: "only " + ip.String()}
 	}
-	return true, ip.String()
+	return ipv6Detection{State: ipv6StateOK, Source: ip.String()}
+}
+
+// detectIPv6 reports whether outbound IPv6 connections really work. An address
+// is not enough: a provider can leave the interface up and drop every IPv6
+// packet, which used to be reported as "available" and made the exit try IPv6
+// destinations that could only time out.
+func detectIPv6() ipv6Detection {
+	address := detectIPv6Address()
+	if address.State != ipv6StateOK {
+		return address
+	}
+	if err := probeIPv6Route(); err != nil {
+		return ipv6Detection{
+			State:  ipv6StateBroken,
+			Source: address.Source,
+			Detail: "no IPv6 destination answered: " + err.Error(),
+		}
+	}
+	return ipv6Detection{Available: true, State: ipv6StateOK, Source: address.Source}
+}
+
+// probeIPv6Route opens a TCP connection to a well-known global IPv6 address.
+// The exit carries ordinary internet traffic, so a successful handshake is the
+// proof that the provider routes the address.
+func probeIPv6Route() error {
+	var lastErr error
+	for _, target := range ipv6ProbeTargets {
+		dialer := net.Dialer{Timeout: ipv6ProbeTimeout}
+		conn, err := dialer.Dial("tcp6", target)
+		if err == nil {
+			_ = conn.Close()
+			return nil
+		}
+		lastErr = err
+	}
+	if lastErr == nil {
+		lastErr = errors.New("no probe target")
+	}
+	return lastErr
+}
+
+// ipv6StateText is the one-line description the daemon log, "x-node status"
+// and "x-node doctor" use. It keeps "no address" apart from "an address the
+// provider does not route", because the second case needs a different fix.
+func ipv6StateText(state, source, detail, iface string) string {
+	switch state {
+	case ipv6StateChecking:
+		if source != "" {
+			return "checking the route from " + source
+		}
+		return "checking the route"
+	case ipv6StateNone:
+		return "no global IPv6 address (" + detail + ")"
+	case ipv6StateBroken:
+		return source + " is assigned, but the provider does not route IPv6 (" + detail + ")"
+	default:
+		text := "available via " + source
+		if iface != "" {
+			text += " on " + iface
+		}
+		return text
+	}
 }
 
 // interfaceForIP names the interface that carries the address. The settings
@@ -297,9 +434,17 @@ func (d *outboundDialer) familyAllowed(ip net.IP) bool {
 	case ipv6Off:
 		return false
 	case ipv6Prefer:
-		return true
+		// "prefer" asks for IPv6 first, not for IPv6 even when the host cannot
+		// reach anything: a provider that drops IPv6 must not turn every dial
+		// into a timeout. A nil monitor means "not wired" (a unit test), which
+		// keeps the old answer.
+		if d.family == nil {
+			return true
+		}
+		available, _, _, _, _ := d.family.status()
+		return available
 	default:
-		available, _, _ := d.family.status()
+		available, _, _, _, _ := d.family.status()
 		return available
 	}
 }
@@ -309,7 +454,7 @@ func (d *outboundDialer) familyAllowed(ip net.IP) bool {
 func (d *outboundDialer) order(ips []net.IP) []net.IP {
 	preferV6 := d.mode() == ipv6Prefer
 	if d.mode() == ipv6Auto && d.family != nil {
-		preferV6, _, _ = d.family.status()
+		preferV6, _, _, _, _ = d.family.status()
 	}
 	ordered := make([]net.IP, 0, len(ips))
 	add := func(wantV6 bool) {

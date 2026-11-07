@@ -108,6 +108,54 @@ func TestIsGlobalIPv6(t *testing.T) {
 	}
 }
 
+func TestIPv6StateText(t *testing.T) {
+	cases := []struct {
+		state, source, detail, iface, want string
+	}{
+		{ipv6StateChecking, "", "", "", "checking the route"},
+		{ipv6StateChecking, "2a01::1", "", "", "checking the route from 2a01::1"},
+		{ipv6StateNone, "", "network is unreachable", "", "no global IPv6 address (network is unreachable)"},
+		{ipv6StateBroken, "2a01::1", "i/o timeout", "", "2a01::1 is assigned, but the provider does not route IPv6 (i/o timeout)"},
+		{ipv6StateOK, "2a01::1", "", "eth0", "available via 2a01::1 on eth0"},
+		{ipv6StateOK, "2a01::1", "", "", "available via 2a01::1"},
+	}
+	for _, test := range cases {
+		if got := ipv6StateText(test.state, test.source, test.detail, test.iface); got != test.want {
+			t.Errorf("%s: got %q, want %q", test.state, got, test.want)
+		}
+	}
+}
+
+// A missing monitor must not look like a working IPv6 route: the dialer and the
+// status API both call status on a nil pointer.
+func TestIPv6MonitorNilStatus(t *testing.T) {
+	var monitor *ipv6Monitor
+	available, state, source, detail, iface := monitor.status()
+	if available || state != ipv6StateNone || source != "" || detail == "" || iface != "" {
+		t.Fatalf("nil monitor = %v/%q/%q/%q/%q", available, state, source, detail, iface)
+	}
+}
+
+// A fresh monitor checks only the address: until the reachability probe
+// finishes, an address is "checking", never "ok". Otherwise a provider that
+// drops IPv6 would be advertised as working for the first seconds.
+func TestIPv6MonitorStartsCheckingOrNone(t *testing.T) {
+	monitor := newIPv6Monitor()
+	_, state, source, _, _ := monitor.status()
+	switch state {
+	case ipv6StateChecking:
+		if source == "" {
+			t.Fatal("the checking state must carry the detected source address")
+		}
+	case ipv6StateNone:
+		if source != "" {
+			t.Fatalf("no address, but source = %q", source)
+		}
+	default:
+		t.Fatalf("a fresh monitor reported %q", state)
+	}
+}
+
 func TestInterfaceForIP(t *testing.T) {
 	// The loopback address is assigned to a loopback interface on every host,
 	// so this proves that the lookup compares the address and not the name.
@@ -139,6 +187,18 @@ func TestDialerFamilyFilter(t *testing.T) {
 	mode = ipv6Prefer
 	if !dialer.familyAllowed(net.ParseIP("2606:4700:4700::1111")) {
 		t.Fatal("IPv6 was refused with mode prefer")
+	}
+	// With a monitor, "prefer" follows the measured route: a broken provider
+	// must not turn every dial into a timeout.
+	broken := &ipv6Monitor{state: ipv6StateBroken}
+	dialer = newOutboundDialer(cfg, func() string { return mode }, broken)
+	if dialer.familyAllowed(net.ParseIP("2606:4700:4700::1111")) {
+		t.Fatal("IPv6 was allowed in prefer mode with a broken route")
+	}
+	working := &ipv6Monitor{available: true, state: ipv6StateOK}
+	dialer = newOutboundDialer(cfg, func() string { return mode }, working)
+	if !dialer.familyAllowed(net.ParseIP("2606:4700:4700::1111")) {
+		t.Fatal("IPv6 was refused in prefer mode with a working route")
 	}
 }
 

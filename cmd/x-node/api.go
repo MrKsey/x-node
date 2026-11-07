@@ -17,7 +17,7 @@ import (
 
 // daemonVersion is stamped by build.sh (-ldflags -X main.daemonVersion=...).
 // The default is what a plain "go build" reports.
-var daemonVersion = "1.6.20"
+var daemonVersion = "1.6.21"
 
 type apiServer struct {
 	cfg     Config
@@ -26,6 +26,7 @@ type apiServer struct {
 	tracker *runtimeTracker
 	quotas  *quotaStore
 	usage   *usageStore
+	family  *ipv6Monitor
 	log     *logger
 
 	// registerLimit guards /v1/register: an invite is a secret, so one source
@@ -46,6 +47,12 @@ type capabilities struct {
 	IPv6         bool `json:"ipv6"`
 	Registration bool `json:"registration"`
 	Token        bool `json:"token"`
+
+	// IPv6State explains the IPv6 flag: "ok", "none" (no global address),
+	// "broken" (an address the provider does not route) or "off" (disabled in
+	// the settings). An old client ignores it; a new one stops sending IPv6
+	// destinations to an exit that cannot reach them.
+	IPv6State string `json:"ipv6State,omitempty"`
 }
 
 type registerRequest struct {
@@ -214,12 +221,23 @@ func (a *apiServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *apiServer) capabilities() capabilities {
-	return capabilities{
+	caps := capabilities{
 		UDP:          a.config().UDPEnabled,
-		IPv6:         true,
 		Registration: a.config().Registration,
 		Token:        true,
 	}
+	// IPv6 is a property of the host, not of the build: the exit may have an
+	// address the provider does not route, or no address at all. Reporting a
+	// flat true made every client send IPv6 destinations that could only time
+	// out.
+	if a.config().ipv6Mode() == ipv6Off {
+		caps.IPv6State = "off"
+		return caps
+	}
+	available, state, _, _, _ := a.family.status()
+	caps.IPv6 = available
+	caps.IPv6State = state
+	return caps
 }
 
 // handleStatus answers with the live counters of the caller. Without a valid

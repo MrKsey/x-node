@@ -316,6 +316,8 @@ func (w *webServer) serveAPI(rw http.ResponseWriter, r *http.Request, route stri
 		w.handleClients(rw, r)
 	case route == "clients" && r.Method == http.MethodPost:
 		w.handleClientAdd(rw, r)
+	case strings.HasPrefix(route, "clients/") && strings.HasSuffix(route, "/link") && r.Method == http.MethodGet:
+		w.handleClientLink(rw, r, strings.TrimSuffix(strings.TrimPrefix(route, "clients/"), "/link"))
 	case strings.HasPrefix(route, "clients/") && strings.HasSuffix(route, "/token") && r.Method == http.MethodPost:
 		w.handleClientToken(rw, r, strings.TrimSuffix(strings.TrimPrefix(route, "clients/"), "/token"))
 	case strings.HasPrefix(route, "clients/") && strings.HasSuffix(route, "/disconnect") && r.Method == http.MethodPost:
@@ -526,6 +528,8 @@ type webStatus struct {
 	MaxUDPAssoc       int           `json:"maxUdpAssociations"`
 	IPv6Mode          string        `json:"ipv6Mode"`
 	IPv6Available     bool          `json:"ipv6Available"`
+	IPv6State         string        `json:"ipv6State"`
+	IPv6Source        string        `json:"ipv6Source"`
 	IPv6Detail        string        `json:"ipv6Detail"`
 	IPv6Interface     string        `json:"ipv6Interface"`
 	DomainResolution  bool          `json:"domainResolution"`
@@ -593,7 +597,7 @@ func (w *webServer) handleStatus(rw http.ResponseWriter, r *http.Request) {
 		ConfigPath:        w.configPath,
 	}
 	if w.family != nil {
-		status.IPv6Available, status.IPv6Detail, status.IPv6Interface = w.family.status()
+		status.IPv6Available, status.IPv6State, status.IPv6Source, status.IPv6Detail, status.IPv6Interface = w.family.status()
 	}
 	if doc, err := readRuntime(cfg.statePath(runtimeFileName)); err == nil && runtimeFresh(doc, time.Now()) {
 		status.ActiveConnections = doc.TotalConnections
@@ -790,6 +794,36 @@ func (w *webServer) handleClientRemove(rw http.ResponseWriter, r *http.Request, 
 	}
 	w.log.info("web: client %s removed", ip)
 	writeJSON(rw, http.StatusOK, map[string]any{"ok": true})
+}
+
+// handleClientLink returns the link and the QR code that add this exit to a
+// client that is already allowed. The link carries no invite: the exit knows
+// the Yggdrasil address of the device, so the app can fetch an API token from
+// /v1/token on its own. It is the recovery path for a profile deleted in the
+// app, and it does not change the stored token.
+func (w *webServer) handleClientLink(rw http.ResponseWriter, r *http.Request, address string) {
+	ip := net.ParseIP(strings.TrimSpace(address))
+	if ip == nil || !isYggAddress(ip) {
+		writeJSON(rw, http.StatusBadRequest, errorResponse{Error: "bad_address"})
+		return
+	}
+	client, ok := w.store.Get(ip)
+	if !ok {
+		writeJSON(rw, http.StatusNotFound, errorResponse{Error: "not_found"})
+		return
+	}
+	link := exitLink(w.live.get(), "")
+	payload := map[string]any{
+		"ok":      true,
+		"address": client.Address,
+		"label":   client.Label,
+		"link":    link,
+	}
+	if png, err := qrPNG(link, 320); err == nil {
+		payload["qr"] = "data:image/png;base64," + base64.StdEncoding.EncodeToString(png)
+	}
+	w.log.info("web: connect link for %s shown", client.Address)
+	writeJSON(rw, http.StatusOK, payload)
 }
 
 func (w *webServer) handleClientToken(rw http.ResponseWriter, r *http.Request, address string) {

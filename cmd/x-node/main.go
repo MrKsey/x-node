@@ -146,11 +146,8 @@ func cmdServe(args []string) error {
 		return err
 	}
 	family := newIPv6Monitor()
-	available, detail, iface := family.status()
-	if iface != "" {
-		detail += " on " + iface
-	}
-	log.info("IPv6 outbound: %s (%s)", onOff(available), detail)
+	_, state, source, detail, iface := family.status()
+	log.info("IPv6 outbound: mode %s, %s", cfg.ipv6Mode(), ipv6StateText(state, source, detail, iface))
 	log.info("allowlist: %d client(s), %d active invite(s)", len(store.List()), len(store.ListInvites()))
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -161,6 +158,7 @@ func cmdServe(args []string) error {
 	api.live = live
 	api.quotas = quotas
 	api.usage = usage
+	api.family = family
 	socks := newSocksServer(cfg, store, tracker, log, api.handler())
 	socks.live = live
 	socks.usage = usage
@@ -356,6 +354,7 @@ func cmdAllow(args []string) error {
 	fs := flag.NewFlagSet("allow "+action, flag.ContinueOnError)
 	configFlag := addConfigFlag(fs)
 	label := fs.String("label", "", "label for the client")
+	asJSON := fs.Bool("json", false, "print JSON (link)")
 
 	// The address is the only positional argument, but users write it before
 	// or after the flags. The standard flag package stops at the first
@@ -461,6 +460,31 @@ func cmdAllow(args []string) error {
 			return err
 		}
 		fmt.Println(token)
+		return nil
+	case "link":
+		if len(positional) != 1 {
+			return errors.New("usage: x-node allow link <address>")
+		}
+		ip := net.ParseIP(strings.TrimSpace(positional[0]))
+		if !isYggAddress(ip) {
+			return fmt.Errorf("%q is not a Yggdrasil node address", positional[0])
+		}
+		client, ok := store.Get(ip)
+		if !ok {
+			return fmt.Errorf("%s is not in the allowlist (add it first)", ip)
+		}
+		link := exitLink(cfg, "")
+		if *asJSON {
+			raw, _ := json.MarshalIndent(map[string]any{
+				"ok":      true,
+				"address": client.Address,
+				"label":   client.Label,
+				"link":    link,
+			}, "", "  ")
+			fmt.Println(string(raw))
+			return nil
+		}
+		printClientLink(cfg, client)
 		return nil
 	default:
 		return fmt.Errorf("unknown allow action %q", action)
@@ -622,22 +646,15 @@ func cmdStatus(args []string) error {
 
 	section("Outbound")
 	mode := cfg.ipv6Mode()
-	available, detail := detectIPv6()
+	detection := detectIPv6()
+	state := ipv6StateText(detection.State, detection.Source, detection.Detail, interfaceForIP(net.ParseIP(detection.Source)))
 	switch mode {
 	case ipv6Off:
-		line("IPv6", "off (IPv4 only)")
+		line("IPv6", "off (IPv4 only), host state: "+state)
 	case ipv6Prefer:
-		if available {
-			line("IPv6", "prefer, available via "+detail)
-		} else {
-			line("IPv6", "prefer, but no IPv6 route ("+detail+")")
-		}
+		line("IPv6", "prefer, "+state)
 	default:
-		if available {
-			line("IPv6", "auto, available via "+detail)
-		} else {
-			line("IPv6", "auto, not available ("+detail+")")
-		}
+		line("IPv6", "auto, "+state)
 	}
 	if cfg.UDPEnabled {
 		line("UDP relay", fmt.Sprintf("enabled, %d association(s), idle %s",
@@ -883,30 +900,35 @@ func cmdDoctor(args []string) error {
 
 // checkIPv6 reports whether outbound IPv6 connections are possible. A host
 // without IPv6 is not broken: the exit falls back to IPv4, so the message is a
-// note unless the operator asked for "prefer".
+// note unless the operator asked for "prefer". A host that has an address the
+// provider does not route is always a warning: the interface looks configured,
+// yet every IPv6 destination would time out.
 func checkIPv6(cfg Config) {
 	mode := cfg.ipv6Mode()
-	available, detail := detectIPv6()
-	if available {
-		if iface := interfaceForIP(net.ParseIP(detail)); iface != "" {
-			detail += " on " + iface
-		}
-	}
+	detection := detectIPv6()
+	text := ipv6StateText(detection.State, detection.Source, detection.Detail, interfaceForIP(net.ParseIP(detection.Source)))
 	switch mode {
 	case ipv6Off:
 		fmt.Println("  OK   IPv6 is off: outbound connections use IPv4 only")
+		if detection.State == ipv6StateBroken {
+			fmt.Printf("       note: %s\n", text)
+		}
 	case ipv6Prefer:
-		if available {
-			fmt.Printf("  OK   IPv6 is preferred and available (source %s)\n", detail)
+		if detection.Available {
+			fmt.Printf("  OK   IPv6 is preferred and available (%s)\n", text)
 			return
 		}
-		fmt.Printf("  WARN ipv6 is \"prefer\" but this host has no IPv6 route (%s); connections fall back to IPv4\n", detail)
+		fmt.Printf("  WARN ipv6 is \"prefer\" but %s; connections fall back to IPv4\n", text)
 	default:
-		if available {
-			fmt.Printf("  OK   IPv6 is available (source %s)\n", detail)
+		if detection.Available {
+			fmt.Printf("  OK   IPv6 is available (%s)\n", text)
 			return
 		}
-		fmt.Printf("  OK   IPv6 is not available (%s); outbound connections use IPv4\n", detail)
+		if detection.State == ipv6StateBroken {
+			fmt.Printf("  WARN %s; the exit uses IPv4 until the provider fixes the route\n", text)
+			return
+		}
+		fmt.Printf("  OK   %s; outbound connections use IPv4\n", text)
 	}
 }
 

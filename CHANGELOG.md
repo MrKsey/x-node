@@ -4,6 +4,18 @@ All notable changes to X-Node are documented here. The format is based on [Keep 
 
 The release workflow publishes the section of the tag as the GitHub release body, so every release has a short human-readable summary of what changed. Keep each bullet on a single line: GitHub turns every newline in a release body into a hard break, so a wrapped bullet would render as a narrow column instead of using the full width.
 
+## [1.6.21] — 2026-11-08
+
+### Added
+
+- The **Clients** tab has a **QR / link** button for every client: it shows the QR code and the `yggnode://` link that add this exit to a client that is already allowed, without creating an invite. `x-node allow link <address>` does the same in the CLI, with `-json` for scripts, so an exit profile deleted in Y-Node can be restored.
+- The status API reports `capabilities.ipv6State` and a real `capabilities.ipv6` value, so Y-Node stops sending IPv6 traffic to an exit that cannot reach it.
+
+### Fixed
+
+- Outbound IPv6 is checked with a real connection instead of only an assigned address: a host whose interface is up but whose provider does not route IPv6 is reported as **broken** instead of available, and such destinations are no longer dialled.
+- The dashboard, the IPv6 settings card, `x-node status` and `x-node doctor` tell "no address" apart from "address assigned but not routed" instead of showing "IPv4 only" for a misconfigured host.
+
 ## [1.6.20] — 2026-11-07
 
 ### Fixed

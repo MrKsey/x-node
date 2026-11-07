@@ -112,3 +112,20 @@ func TestExitLinkCarriesPeer(t *testing.T) {
 		t.Fatal("an outbound-only node must not advertise a peer URI")
 	}
 }
+
+func TestExitLinkWithoutAnInvite(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.Name = "Berlin exit"
+
+	parsed, err := url.Parse(exitLink(cfg, ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := parsed.Query()
+	if query.Get("i") != "" {
+		t.Fatalf("a client link must not carry an invite: %q", query.Get("i"))
+	}
+	if query.Get("a") != cfg.ListenAddress || query.Get("p") == "" {
+		t.Fatalf("client link = %q", parsed.String())
+	}
+}

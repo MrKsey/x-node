@@ -498,14 +498,14 @@ function dashboardHtml() {
           <tr><th>Client slots</th><td class="right">${status.maxClients || 0} allowed</td></tr>
           <tr><th>Connections</th><td class="right">${status.maxConnsPerClient || 0} per client · ${status.maxConnsTotal || 0} in total</td></tr>
           <tr><th>UDP relay</th><td class="right">${status.udpEnabled ? "enabled · " + (status.maxUdpAssociations || 0) + " association(s)" : "disabled"}</td></tr>
-          <tr><th>IPv6 outbound</th><td class="right">${status.ipv6Available ? '<span class="pill ok">' + escapeHtml(status.ipv6Mode) + "</span>" : '<span class="pill warn">IPv4 only</span>'}</td></tr>
-          ${status.ipv6Available ? `<tr><th>IPv6 source</th><td class="right mono break">${escapeHtml(status.ipv6Detail || "—")}</td></tr>` : ""}
+          <tr><th>IPv6 outbound</th><td class="right">${ipv6StatePill(status)}</td></tr>
+          ${status.ipv6Source ? `<tr><th>IPv6 source</th><td class="right mono break">${escapeHtml(status.ipv6Source)}</td></tr>` : ""}
           <tr><th>Domain names</th><td class="right">${status.domainResolution ? "resolved on the exit" : "client resolves"}</td></tr>
           <tr><th>Log level</th><td class="right">${escapeHtml(status.logLevel || "")}</td></tr>
           <tr><th>Config</th><td class="right mono ellipsis" title="${escapeHtml(status.configPath || "")}">${escapeHtml(status.configPath || "—")}</td></tr>
           <tr><th>State</th><td class="right mono ellipsis" title="${escapeHtml(status.stateDir || "")}">${escapeHtml(status.stateDir || "—")}</td></tr>
         </table>
-        <p class="hint">IPv6 source is the address the exit uses for outbound IPv6 connections. It is detected automatically and does not need any setting.</p>
+        <p class="hint">${ipv6StatusHint(status)}</p>
       </div>
 
       <div class="card section">
@@ -1105,6 +1105,7 @@ function clientsHtml() {
         <tbody id="clients-body">${rows}</tbody>
       </table></div>` : '<div class="empty" id="clients-empty">No clients yet. Create an invite or add an address.</div>'}
       <div id="client-editor"></div>
+      <div id="client-link"></div>
     </div>
 
     <div class="card section">
@@ -1182,7 +1183,8 @@ function clientRowHtml(client) {
       <td class="right hide-sm" data-label="Last seen">${when(client.lastSeenAt)}</td>
       <td class="right nowrap row-actions" data-label="">
         <button class="btn small" data-edit="${escapeHtml(client.address)}">Edit</button>
-        <button class="btn small" data-token="${escapeHtml(client.address)}">Token</button>
+        <button class="btn small" data-link="${escapeHtml(client.address)}" title="Show the QR code and the link that add this exit to the client">QR / link</button>
+        <button class="btn small" data-token="${escapeHtml(client.address)}">New token</button>
         <button class="btn small" data-disconnect="${escapeHtml(client.address)}" title="Close all TCP and UDP connections of this client">Disconnect all</button>
         <button class="btn small ${client.suspended ? "primary" : ""}" data-suspend="${escapeHtml(client.address)}" data-suspended="${client.suspended ? "1" : "0"}">${client.suspended ? "Resume" : "Suspend"}</button>
         <button class="btn small danger" data-remove="${escapeHtml(client.address)}">Remove</button>
@@ -1343,6 +1345,20 @@ function wireClientRows() {
         await api("DELETE", "api/clients/" + encodeURIComponent(button.dataset.remove));
         toast("Client removed");
         render();
+      } catch (err) { toast(err.message, true); }
+    };
+  });
+
+  $$("[data-link]").forEach((button) => {
+    button.onclick = async () => {
+      const address = button.dataset.link;
+      try {
+        const data = await api("GET", "api/clients/" + encodeURIComponent(address) + "/link");
+        const view = $("#client-link");
+        if (!view) return;
+        view.innerHTML = clientLinkPanel(data);
+        wireClientLinkActions(view);
+        view.scrollIntoView({ behavior: "smooth", block: "nearest" });
       } catch (err) { toast(err.message, true); }
     };
   });
@@ -1520,6 +1536,42 @@ function openClientEditor(address) {
   });
 }
 
+// clientLinkPanel is the QR code and the link for a client that is already in
+// the allowlist. It looks like the invite panel, but the link has no invite:
+// the exit recognises the device by its Yggdrasil address.
+function clientLinkPanel(data) {
+  return `
+    <div class="card section editor">
+      <header>
+        <h3>${escapeHtml(data.label || "Client")}</h3>
+        <span class="muted small mono break">${escapeHtml(data.address || "")}</span>
+        <button class="btn small" type="button" data-link-close>Close</button>
+      </header>
+      <div class="invite-flex">
+        ${data.qr ? `<div class="qr"><img src="${escapeHtml(data.qr)}" alt="Exit node QR code"></div>` : ""}
+        <div class="invite-text">
+          <div class="mono break">${escapeHtml(data.link || "")}</div>
+          <div class="actions">
+            <button class="btn primary small" data-link-copy="${escapeHtml(data.link || "")}">Copy link</button>
+          </div>
+          <p class="hint">Scan the QR in Y-Node → Exit node → Add, or open the link on the phone. The address is already allowed, so no invite is used: the app fetches an API token from the exit on its own.</p>
+        </div>
+      </div>
+    </div>`;
+}
+
+function wireClientLinkActions(root) {
+  $$("[data-link-copy]", root).forEach((button) => {
+    button.addEventListener("click", () => copy(button.dataset.linkCopy));
+  });
+  $$("[data-link-close]", root).forEach((button) => {
+    button.addEventListener("click", () => {
+      const panel = button.closest(".editor");
+      if (panel) panel.remove();
+    });
+  });
+}
+
 /* invites */
 
 function invitesHtml() {
@@ -1663,27 +1715,95 @@ function wireInviteActions(root) {
 
 /* settings */
 
+// ipv6StateOf normalizes the IPv6 state the daemon reports. An answer from
+// before 1.6.21 carries only ipv6Available, so a missing state falls back to it.
+function ipv6StateOf(status) {
+  if (!status) return "checking";
+  if (status.ipv6State) return status.ipv6State;
+  if (status.ipv6Available) return "ok";
+  return "none";
+}
+
+// ipv6StatePill is the badge next to "IPv6 outbound". "broken" is the case
+// that used to look healthy: the interface is up and has an address, but the
+// provider drops every IPv6 packet, so the exit must not advertise IPv6.
+function ipv6StatePill(status) {
+  const state = ipv6StateOf(status);
+  const mode = (status && status.ipv6Mode) || "auto";
+  if (mode === "off") {
+    return '<span class="pill warn">off · IPv4 only</span>';
+  }
+  switch (state) {
+    case "ok":
+      return '<span class="pill ok">' + escapeHtml(mode) + "</span>";
+    case "broken":
+      return '<span class="pill bad">address, no route</span>';
+    case "none":
+      return '<span class="pill warn">no address · IPv4 only</span>';
+    default:
+      return '<span class="pill">checking…</span>';
+  }
+}
+
+// ipv6StatusHint explains the state under the dashboard table.
+function ipv6StatusHint(status) {
+  const state = ipv6StateOf(status);
+  const detail = status && status.ipv6Detail ? " (" + escapeHtml(status.ipv6Detail) + ")" : "";
+  const source = status && status.ipv6Source ? status.ipv6Source : "";
+  if ((status && status.ipv6Mode) === "off") {
+    return "The mode is off, so outbound connections use IPv4 even though the host may have IPv6.";
+  }
+  switch (state) {
+    case "broken":
+      return "The host has " + escapeHtml(source || "a global IPv6 address") +
+        ", but no IPv6 destination answered" + detail +
+        ". The provider does not route IPv6, so outbound connections use IPv4 and clients are told not to send IPv6 traffic.";
+    case "none":
+      return "No global IPv6 address is detected on this host" + detail + ", so outbound connections use IPv4.";
+    case "checking":
+      return "The IPv6 route is being checked. Until a destination answers, outbound connections use IPv4.";
+    default:
+      return "IPv6 source is the address the exit uses for outbound IPv6 connections. It is detected automatically and does not need any setting.";
+  }
+}
+
 // ipv6SourceField is the read-only "Source address" input next to the mode.
 // It shows the address the kernel picks for a global IPv6 destination, which is
 // what outbound connections really use. A host without IPv6 leaves it empty:
 // the placeholder and the hint below say why.
 function ipv6SourceField(status) {
-  const available = Boolean(status && status.ipv6Available);
-  const value = available ? status.ipv6Detail || "" : "";
-  return `<label class="field"><span>Source address</span><input class="mono" value="${escapeHtml(value)}" placeholder="no global IPv6 address" readonly></label>`;
+  const value = (status && status.ipv6Source) || "";
+  const placeholder = ipv6StateOf(status) === "broken" ? "assigned, but the provider does not route it" : "no global IPv6 address";
+  return `<label class="field"><span>Source address</span><input class="mono" value="${escapeHtml(value)}" placeholder="${placeholder}" readonly></label>`;
 }
 
 // ipv6SourceHint explains the source address and the selected mode in one line.
 function ipv6SourceHint(status, mode) {
-  if (!status || status.ipv6Available === undefined) {
+  if (!status || (status.ipv6State === undefined && status.ipv6Available === undefined)) {
     return "IPv6 detection has not finished yet.";
   }
-  if (!status.ipv6Available) {
-    const reason = status.ipv6Detail ? " (" + escapeHtml(status.ipv6Detail) + ")" : "";
-    return "No global IPv6 address is detected on this host" + reason + ", so outbound connections use IPv4 only.";
-  }
+  const state = ipv6StateOf(status);
+  const detail = status.ipv6Detail ? " (" + escapeHtml(status.ipv6Detail) + ")" : "";
   if (mode === "off") {
-    return "The mode is off, so outbound connections use IPv4 even though this host has a global IPv6 address.";
+    if (state === "ok") {
+      return "The mode is off, so outbound connections use IPv4 even though this host has a global IPv6 address.";
+    }
+    if (state === "broken") {
+      return "The mode is off. Note that the host has " + escapeHtml(status.ipv6Source || "a global IPv6 address") +
+        " but the provider does not route IPv6" + detail + ".";
+    }
+    return "The mode is off, so outbound connections use IPv4 only.";
+  }
+  if (state === "broken") {
+    return "The host has " + escapeHtml(status.ipv6Source || "a global IPv6 address") +
+      ", but no IPv6 destination answered" + detail +
+      ". The provider does not route IPv6: connections fall back to IPv4 and clients are told not to send IPv6 traffic.";
+  }
+  if (state === "none") {
+    return "No global IPv6 address is detected on this host" + detail + ", so outbound connections use IPv4 only.";
+  }
+  if (state === "checking") {
+    return "The IPv6 route is being checked. Until a destination answers, outbound connections use IPv4.";
   }
   return "This address is used for outbound IPv6 connections. It is detected automatically and needs no setting.";
 }

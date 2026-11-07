@@ -101,6 +101,7 @@ tunnel, not over the clearnet.`,
 			"x-node allow add <address> [-label TEXT] [-config PATH]",
 			"x-node allow remove <address> [-config PATH]",
 			"x-node allow token <address> [-config PATH]",
+			"x-node allow link <address> [-config PATH] [-json]",
 		},
 		Details: `The allowlist is the set of Yggdrasil addresses that may use this exit when
 allowAll is false. An address can get in through an invite (the normal path) or
@@ -108,17 +109,25 @@ be added by hand.
 
 "allow token" issues a new API token for an address that is already allowed and
 invalidates the previous one. The token is what the client sends to /v1/status
-and /v1/token; it is printed once and only its hash is stored.`,
+and /v1/token; it is printed once and only its hash is stored.
+
+"allow link" prints the QR code and the yggnode:// link that adds this exit to
+a client that is already allowed. The link has no invite: the exit recognises
+the device by its Yggdrasil address, and the app fetches an API token from
+/v1/token on its own. Use it when the exit profile was deleted in the app.`,
 		Args: []argHelp{
 			{Name: "address", Text: "Yggdrasil node address, e.g. 201:1ba8:15c:b1be:7555:b3d7:7651:8e2e"},
 		},
 		Flags: []flagHelp{
 			{Flag: "-config PATH", Default: "/etc/x-node/config.json", Env: "X_NODE_CONFIG", Text: "configuration file to read"},
 			{Flag: "-label TEXT", Default: "", Text: "human-readable name for the client (add only)"},
+			{Flag: "-json", Default: "off", Text: "machine-readable output (link only)"},
 		},
 		Examples: []string{
 			"x-node allow list",
 			"x-node allow add 201:1ba8:15c:b1be:7555:b3d7:7651:8e2e -label laptop",
+			"x-node allow link 201:1ba8:15c:b1be:7555:b3d7:7651:8e2e",
+			"x-node allow link 201:1ba8:15c:b1be:7555:b3d7:7651:8e2e -json | jq -r .link",
 			"x-node allow token 201:1ba8:15c:b1be:7555:b3d7:7651:8e2e",
 			"x-node allow remove 201:1ba8:15c:b1be:7555:b3d7:7651:8e2e",
 		},
@@ -132,7 +141,11 @@ and /v1/token; it is printed once and only its hash is stored.`,
 runtime.json: open TCP connections, UDP associations, refusals caused by the
 limits and the traffic of the current period.
 
-When the service is not running only the allowlist is shown.`,
+When the service is not running only the allowlist is shown.
+
+"x-node allow link <address>" prints the QR code and the link that adds this
+exit to a client that is already in the allowlist, so a deleted exit profile
+can be restored without a new invite.`,
 		Flags: []flagHelp{
 			{Flag: "-config PATH", Default: "/etc/x-node/config.json", Env: "X_NODE_CONFIG", Text: "configuration file to read"},
 			{Flag: "-json", Default: "off", Text: "machine-readable output"},

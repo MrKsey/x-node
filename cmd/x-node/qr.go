@@ -77,13 +77,8 @@ func qrPNG(payload string, size int) ([]byte, error) {
 	return qrcode.Encode(payload, qrcode.Medium, size)
 }
 
-// printInvite prints the QR, the link and the metadata of a fresh invite.
-func printInvite(cfg Config, token string, invite Invite) {
-	link := exitLink(cfg, token)
-	if art, err := renderQR(link); err == nil {
-		fmt.Print(art)
-	}
-	fmt.Println()
+// printExitFacts prints the connection facts every link shares.
+func printExitFacts(cfg Config) {
 	fmt.Println("Exit node:", cfg.Name)
 	fmt.Println("Address:  ", cfg.ListenAddress)
 	fmt.Println("SOCKS5:   ", strconv.Itoa(cfg.SocksPort))
@@ -95,16 +90,48 @@ func printInvite(cfg Config, token string, invite Invite) {
 	if strings.TrimSpace(cfg.PeerURI) != "" {
 		fmt.Println("Peer:     ", cfg.PeerURI)
 	}
-	fmt.Println("Invite:   ", token)
-	fmt.Println("Expires:  ", invite.ExpiresAt.Format(time.RFC3339), "("+time.Until(invite.ExpiresAt).Round(time.Minute).String()+")")
-	fmt.Println("Uses:     ", fmt.Sprintf("%d", invite.Uses))
-	if invite.Note != "" {
-		fmt.Println("Note:     ", invite.Note)
+}
+
+// printLinkBlock draws the QR code and prints the link with its closing hint.
+// The caller passes the facts that identify the invite or the client.
+func printLinkBlock(cfg Config, link string, facts func()) {
+	if art, err := renderQR(link); err == nil {
+		fmt.Print(art)
 	}
+	fmt.Println()
+	printExitFacts(cfg)
+	facts()
 	fmt.Println()
 	fmt.Println("Link:")
 	fmt.Println(link)
 	fmt.Println()
 	fmt.Println("Scan the QR in Y-Node → Exit node → Add, or open the link on the device.")
 	fmt.Println("The client must be connected to Yggdrasil: registration goes over the tunnel.")
+}
+
+// printInvite prints the QR, the link and the metadata of a fresh invite.
+func printInvite(cfg Config, token string, invite Invite) {
+	printLinkBlock(cfg, exitLink(cfg, token), func() {
+		fmt.Println("Invite:   ", token)
+		fmt.Println("Expires:  ", invite.ExpiresAt.Format(time.RFC3339), "("+time.Until(invite.ExpiresAt).Round(time.Minute).String()+")")
+		fmt.Println("Uses:     ", fmt.Sprintf("%d", invite.Uses))
+		if invite.Note != "" {
+			fmt.Println("Note:     ", invite.Note)
+		}
+	})
+}
+
+// printClientLink prints the QR and the link for a client that is already in
+// the allowlist. The link carries no invite: the exit knows the Yggdrasil
+// address of the device, so the app can fetch an API token from /v1/token.
+// This is the recovery path for a profile deleted in the app.
+func printClientLink(cfg Config, client Client) {
+	printLinkBlock(cfg, exitLink(cfg, ""), func() {
+		name := client.Label
+		if name == "" {
+			name = client.Address
+		}
+		fmt.Println("Client:   ", name, "("+client.Address+")")
+		fmt.Println("Access:    already allowed, no invite is used")
+	})
 }

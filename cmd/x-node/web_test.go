@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -238,6 +239,51 @@ func TestWebClientAndQuota(t *testing.T) {
 	code, _ = doJSON(t, client, http.MethodDelete, ts.URL+"/test/web/api/quotas/"+address, nil, true)
 	if code != http.StatusOK {
 		t.Fatalf("reset quota = %d", code)
+	}
+}
+
+func TestWebClientLink(t *testing.T) {
+	server, cfg := newTestWebServer(t)
+	ts := httptest.NewServer(server)
+	defer ts.Close()
+	client := testClient(t)
+
+	if code, _ := doJSON(t, client, http.MethodPost, ts.URL+"/test/web/api/login",
+		map[string]string{"username": "admin", "password": "correct horse battery staple"}, true); code != http.StatusOK {
+		t.Fatalf("login failed")
+	}
+	address := testAddr(t, 9).String()
+	if code, payload := doJSON(t, client, http.MethodPost, ts.URL+"/test/web/api/clients",
+		map[string]string{"address": address, "label": "tablet"}, true); code != http.StatusOK {
+		t.Fatalf("add client = %d %v", code, payload)
+	}
+
+	code, payload := doJSON(t, client, http.MethodGet,
+		ts.URL+"/test/web/api/clients/"+address+"/link", nil, false)
+	if code != http.StatusOK {
+		t.Fatalf("client link = %d %v", code, payload)
+	}
+	link, _ := payload["link"].(string)
+	parsed, err := url.Parse(link)
+	if err != nil {
+		t.Fatalf("link %q: %v", link, err)
+	}
+	query := parsed.Query()
+	if query.Get("a") != cfg.ListenAddress || query.Get("i") != "" {
+		t.Fatalf("link = %q", link)
+	}
+	qr, _ := payload["qr"].(string)
+	if !strings.HasPrefix(qr, "data:image/png;base64,") {
+		t.Fatalf("qr = %q", qr)
+	}
+	if payload["label"] != "tablet" {
+		t.Fatalf("label = %v", payload["label"])
+	}
+
+	code, _ = doJSON(t, client, http.MethodGet,
+		ts.URL+"/test/web/api/clients/"+testAddr(t, 10).String()+"/link", nil, false)
+	if code != http.StatusNotFound {
+		t.Fatalf("link of an unknown client = %d", code)
 	}
 }
 

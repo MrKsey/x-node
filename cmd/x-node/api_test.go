@@ -513,3 +513,33 @@ func TestAPIRateLimitPerSource(t *testing.T) {
 		t.Fatalf("another source was limited too: %d", code)
 	}
 }
+
+// The IPv6 capability is a property of the host: an exit with IPv6 turned off
+// must tell the client so instead of advertising a path it will not carry.
+func TestAPICapabilitiesReportsIPv6Off(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.IPv6 = ipv6Off
+	api := newAPIServer(cfg, nil, nil, newLogger("error"))
+	caps := api.capabilities()
+	if caps.IPv6 {
+		t.Fatal("IPv6 was advertised with the mode off")
+	}
+	if caps.IPv6State != "off" {
+		t.Fatalf("ipv6State = %q, want off", caps.IPv6State)
+	}
+}
+
+// Without a monitor (a unit test, an old wiring) the state is "none", not a
+// silent true: a missing probe must not promise an IPv6 path.
+func TestAPICapabilitiesWithoutMonitor(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.IPv6 = ipv6Auto
+	api := newAPIServer(cfg, nil, nil, newLogger("error"))
+	caps := api.capabilities()
+	if caps.IPv6 {
+		t.Fatal("IPv6 was advertised without a monitor")
+	}
+	if caps.IPv6State != ipv6StateNone {
+		t.Fatalf("ipv6State = %q, want %q", caps.IPv6State, ipv6StateNone)
+	}
+}
