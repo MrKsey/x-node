@@ -4,6 +4,14 @@ All notable changes to X-Node are documented here. The format is based on [Keep 
 
 The release workflow publishes the section of the tag as the GitHub release body, so every release has a short human-readable summary of what changed. Keep each bullet on a single line: GitHub turns every newline in a release body into a hard break, so a wrapped bullet would render as a narrow column instead of using the full width.
 
+## [1.6.19] — 2026-11-07
+
+### Changed
+
+- On the **UDP relay** card the two switches share one row, so the **Resolve domain names (ATYP=domain)** toggle lines up with **Registration API** on the Access card.
+- On the **Configuration** tab the action buttons sit right next to the file picker instead of being pushed to the far edge.
+- On the **Recent log lines** card the **Auto refresh** switch and the **Refresh** button are centred on the same line.
+
 ## [1.6.18] — 2026-11-07
 
 ### Changed

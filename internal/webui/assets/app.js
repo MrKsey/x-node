@@ -1780,8 +1780,10 @@ function settingsHtml() {
         <button class="btn primary small save-btn hidden" type="submit">Save</button>
       </header>
       <div class="form-grid">
-        <label class="switch full"><input type="checkbox" id="s-udp" ${settings.udpEnabled ? "checked" : ""}><span>Relay UDP through the exit</span></label>
-        <label class="switch full"><input type="checkbox" id="s-domain" ${settings.domainResolution ? "checked" : ""}><span class="nowrap">Resolve domain names (ATYP=domain)</span></label>
+        <div class="field-pair full">
+          <label class="switch"><input type="checkbox" id="s-udp" ${settings.udpEnabled ? "checked" : ""}><span>Relay UDP through the exit</span></label>
+          <label class="switch"><input type="checkbox" id="s-domain" ${settings.domainResolution ? "checked" : ""}><span>Resolve domain names (ATYP=domain)</span></label>
+        </div>
         <div class="field-pair full">
           <label class="field"><span>Max UDP associations</span><input id="s-maxudp" type="number" min="1" value="${settings.maxUDPAssociations || 64}"></label>
           <label class="field"><span>UDP idle timeout</span><input id="s-udpidle" value="${escapeHtml(settings.udpIdleTimeout || "2m")}"></label>

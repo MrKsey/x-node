@@ -333,12 +333,14 @@ canvas.chart.mini { height: 108px; }
 .logs-card pre.logs {
   flex: 1 1 auto; height: auto; min-height: 120px;
 }
+/* The auto refresh switch and the refresh button sit on the same line as the
+   title, so they are centred instead of sharing the baseline of the heading. */
+.logs-card > header { align-items: center; }
 
 /* The file picker keeps the width of one two-column settings field, and the
-   actions sit to its right instead of under it. */
+   actions sit right next to it instead of under it or at the far edge. */
 .config-toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-.config-toolbar select { flex: 1 1 240px; max-width: 365px; }
-.config-toolbar .actions { margin-left: auto; }
+.config-toolbar select { flex: 0 1 365px; }
 .manual-peer {
   display: flex; gap: 12px; align-items: center; justify-content: space-between;
   padding: 10px 0; border-bottom: 1px solid var(--border); flex-wrap: wrap;
@@ -540,7 +542,7 @@ canvas.chart.mini { height: 108px; }
   .row { gap: 8px; }
   .row > input, .row > select, .row > .btn { width: 100%; }
   .config-toolbar select { flex: 1 1 100%; max-width: none; }
-  .config-toolbar .actions { margin-left: 0; width: 100%; }
+  .config-toolbar .actions { width: 100%; }
   .manual-peer-form { grid-template-columns: 1fr; }
   .manual-peer-form .btn { width: 100%; }
   .settings-card > header { align-items: flex-start; }
@@ -555,11 +557,5 @@ canvas.chart.mini { height: 108px; }
    leaving a single stretched button alone. */
 @media (max-width: 480px) {
   .table-wrap table.cards td.row-actions .btn { flex: 1 1 28%; }
-}
-
-/* A switch label marked .nowrap keeps one line. On a very narrow phone the
-   longest of them would overflow the card, so there it may wrap again. */
-@media (max-width: 400px) {
-  .switch > span.nowrap { white-space: normal; }
 }
 
