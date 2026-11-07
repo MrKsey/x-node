@@ -1,10 +1,46 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"net"
 	"testing"
 	"time"
 )
+
+func TestListenOnAssignedAddressBindsAnExistingAddress(t *testing.T) {
+	log := newLogger("error")
+	listener, err := listenOnAssignedAddress(context.Background(), "127.0.0.1:0", log, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+}
+
+func TestListenOnAssignedAddressBindsAWildcard(t *testing.T) {
+	log := newLogger("error")
+	listener, err := listenOnAssignedAddress(context.Background(), "0.0.0.0:0", log, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+}
+
+func TestListenOnAssignedAddressWaitsAndStops(t *testing.T) {
+	// 192.0.2.1 is TEST-NET-1: it is never assigned to a local interface, so
+	// the helper waits instead of binding and must return when the daemon is
+	// asked to stop.
+	log := newLogger("error")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	started := time.Now()
+	if _, err := listenOnAssignedAddress(ctx, "192.0.2.1:9", log, "test"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context.Canceled", err)
+	}
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("the helper took %s to notice the cancelled context", elapsed)
+	}
+}
 
 func TestParseByteSize(t *testing.T) {
 	cases := map[string]int64{

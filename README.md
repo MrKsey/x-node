@@ -289,7 +289,7 @@ Updating from a directory with the archive of a new version:
 sudo ./install.sh --upgrade --yes
 ```
 
-The update replaces the X-Node binaries and keeps the configuration, clients, invites, quotas, traffic counters and the peer list.
+The update replaces the X-Node binaries and keeps the configuration, clients, invites, quotas, traffic counters and the peer list. The root helper repairs `x-node.service` when it starts: the old `Requires=yggdrasil.service` becomes `Wants=yggdrasil.service`, `PartOf=yggdrasil.service` is dropped, and every other line stays as it is, so stopping yggdrasil no longer stops x-node. Run `sudo systemctl restart x-node-helper` to apply the repair right away.
 
 You can also check for a new version and upgrade via the CLI:
 

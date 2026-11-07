@@ -140,6 +140,61 @@ func interfaceForIP(ip net.IP) string {
 	return ""
 }
 
+// listenOnAssignedAddress binds a TCP listener on an address that may not be
+// assigned to an interface yet.
+//
+// The daemon listens on the Yggdrasil address, and yggdrasil assigns that
+// address only after its own start: on a boot, or right after "systemctl
+// restart yggdrasil", net.Listen fails with EADDRNOTAVAIL. The daemon used to
+// exit on that error, so systemd had to start it again and the web interface
+// was down in between. Waiting keeps the rest of the daemon alive: the listener
+// is created as soon as the address appears, and a listener that is already
+// bound keeps working when the address disappears and comes back.
+func listenOnAssignedAddress(ctx context.Context, addr string, log *logger, what string) (net.Listener, error) {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, err
+	}
+	ip := net.ParseIP(host)
+	// A wildcard address or a host name is not tied to an interface: bind it
+	// right away and report a real error.
+	if ip == nil || ip.IsUnspecified() {
+		return net.Listen("tcp", addr)
+	}
+	delay := time.Second
+	warned := false
+	for {
+		if interfaceForIP(ip) == "" {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			if !warned {
+				log.warn("%s: %s is not assigned to any interface yet, waiting for yggdrasil", what, host)
+				warned = true
+			}
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(delay):
+			}
+			if delay < 5*time.Second {
+				delay += time.Second
+			}
+			continue
+		}
+		listener, err := net.Listen("tcp", addr)
+		if err == nil {
+			return listener, nil
+		}
+		// The address can vanish between the check and the bind. Wait for it
+		// again; a failure while the address is present (a busy port, a
+		// permission) is a real error and is returned.
+		if interfaceForIP(ip) != "" {
+			return nil, err
+		}
+	}
+}
+
 // isGlobalIPv6 reports whether the address is a routable IPv6 destination, as
 // opposed to loopback, link-local, unique-local or the Yggdrasil mesh.
 func isGlobalIPv6(ip net.IP) bool {

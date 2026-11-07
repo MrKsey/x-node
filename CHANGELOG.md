@@ -4,6 +4,14 @@ All notable changes to X-Node are documented here. The format is based on [Keep 
 
 The release workflow publishes the section of the tag as the GitHub release body, so every release has a short human-readable summary of what changed. Keep each bullet on a single line: GitHub turns every newline in a release body into a hard break, so a wrapped bullet would render as a narrow column instead of using the full width.
 
+## [1.6.20] — 2026-11-07
+
+### Fixed
+
+- Stopping or restarting yggdrasil no longer stops x-node: `x-node.service` carried `Requires=yggdrasil.service` and `PartOf=yggdrasil.service`, and nothing started x-node again when yggdrasil came back, so the exit stayed down until it was started by hand.
+- The daemon waits for the Yggdrasil address instead of exiting when it is missing, so a boot or a yggdrasil restart no longer leaves the web interface down and the exit keeps running while the address is gone.
+- The root helper repairs an installed `x-node.service` when it starts: `Requires=yggdrasil.service` becomes `Wants=yggdrasil.service`, `PartOf=yggdrasil.service` is dropped, and every other line is kept, so an installation updated from the dashboard gets the fix on the next `x-node-helper` start.
+
 ## [1.6.19] — 2026-11-07
 
 ### Changed

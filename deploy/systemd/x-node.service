@@ -2,9 +2,14 @@
 Description=X-Node — Yggdrasil exit node
 Documentation=file:/usr/local/share/doc/x-node/README.md
 After=network-online.target yggdrasil.service
-Wants=network-online.target
-Requires=yggdrasil.service
-PartOf=yggdrasil.service
+Wants=network-online.target yggdrasil.service
+# x-node listens on the Yggdrasil address, so it starts after yggdrasil. It
+# deliberately does not use Requires= or PartOf=: those made systemd stop
+# x-node whenever yggdrasil stopped or restarted (the dashboard's "Restart
+# yggdrasil" button included), and nothing started it again when yggdrasil came
+# back. The daemon waits for the address instead, keeps the web interface
+# reachable while yggdrasil is down, and its listening socket works again as
+# soon as the address returns.
 
 [Service]
 Type=simple

@@ -101,8 +101,12 @@ func (s *socksServer) config() Config {
 func (s *socksServer) listenAndServe(ctx context.Context) error {
 	cfg := s.config()
 	addr := net.JoinHostPort(cfg.ListenAddress, strconv.Itoa(cfg.SocksPort))
-	listener, err := net.Listen("tcp", addr)
+	listener, err := listenOnAssignedAddress(ctx, addr, s.log, "SOCKS5")
 	if err != nil {
+		if ctx.Err() != nil {
+			// The daemon is stopping while the address is still missing.
+			return nil
+		}
 		return fmt.Errorf("listen SOCKS5 on %s: %w", addr, err)
 	}
 	s.log.info("SOCKS5 listening on %s", addr)

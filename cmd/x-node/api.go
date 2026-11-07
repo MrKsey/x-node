@@ -17,7 +17,7 @@ import (
 
 // daemonVersion is stamped by build.sh (-ldflags -X main.daemonVersion=...).
 // The default is what a plain "go build" reports.
-var daemonVersion = "1.6.19"
+var daemonVersion = "1.6.20"
 
 type apiServer struct {
 	cfg     Config
@@ -173,8 +173,12 @@ func (a *apiServer) listenAndServe(ctx context.Context) error {
 		return nil
 	}
 	addr := net.JoinHostPort(a.config().ListenAddress, strconv.Itoa(a.config().APIPort))
-	listener, err := net.Listen("tcp", addr)
+	listener, err := listenOnAssignedAddress(ctx, addr, a.log, "registration API")
 	if err != nil {
+		if ctx.Err() != nil {
+			// The daemon is stopping while the address is still missing.
+			return nil
+		}
 		return fmt.Errorf("listen API on %s: %w", addr, err)
 	}
 	server := &http.Server{

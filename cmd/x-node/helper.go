@@ -37,6 +37,9 @@ const (
 	helperManifest   = "/var/lib/x-node/install.json"
 	helperBackupDir  = "/var/backups"
 	helperMaxConfig  = 512 << 10
+	// helperUnitPath is the service the installer writes. The helper repairs it
+	// at start, because an in-place upgrade only replaces binaries.
+	helperUnitPath = "/etc/systemd/system/x-node.service"
 )
 
 // helperRequest is the document the web interface sends.
@@ -99,6 +102,13 @@ func helperServe() error {
 	if err := os.MkdirAll(helperRuntimeDir, 0o750); err != nil {
 		return fmt.Errorf("create %s: %w", helperRuntimeDir, err)
 	}
+	// An installation updated from the dashboard keeps the unit file it was
+	// installed with. The old one stopped x-node together with yggdrasil, and
+	// systemd cannot drop a dependency with a drop-in, so the helper repairs
+	// the file once at start.
+	if err := repairUnitDependency(helperUnitPath); err != nil {
+		fmt.Fprintf(os.Stderr, "x-node helper: could not repair %s: %v\n", helperUnitPath, err)
+	}
 	if err := os.Remove(helperSocketPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("remove the old socket: %w", err)
 	}
@@ -128,6 +138,77 @@ func helperServe() error {
 		}
 		go helperConnection(conn)
 	}
+}
+
+// repairUnitDependency drops the yggdrasil dependency that made systemd stop
+// x-node together with yggdrasil. Requires= and PartOf= cannot be removed with
+// a drop-in, so the unit file itself is rewritten; every other line, including
+// an operator's own settings, is kept as it is. A missing unit is not an error:
+// the helper also runs in a test or on a machine where the service is not
+// installed.
+func repairUnitDependency(path string) error {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	fixed, changed := stripYggdrasilDependency(string(raw))
+	if !changed {
+		return nil
+	}
+	if err := writeFileAs(path, []byte(fixed), 0o644, ""); err != nil {
+		return err
+	}
+	if out, err := exec.Command("systemctl", "daemon-reload").CombinedOutput(); err != nil {
+		return fmt.Errorf("systemctl daemon-reload: %s", strings.TrimSpace(string(out)))
+	}
+	fmt.Fprintf(os.Stderr, "x-node helper: %s no longer stops x-node with yggdrasil\n", path)
+	return nil
+}
+
+// stripYggdrasilDependency rewrites the two dependency lines of a unit:
+// Requires=yggdrasil.service becomes Wants=yggdrasil.service, and
+// PartOf=yggdrasil.service is dropped. The rest of the file is returned
+// unchanged, so the operator's own settings survive.
+func stripYggdrasilDependency(text string) (string, bool) {
+	lines := strings.Split(text, "\n")
+	hasWants := false
+	for _, line := range lines {
+		compact := compactUnitLine(line)
+		if strings.HasPrefix(compact, "Wants=") && strings.Contains(compact, "yggdrasil.service") {
+			hasWants = true
+			break
+		}
+	}
+	out := make([]string, 0, len(lines)+1)
+	changed := false
+	for _, line := range lines {
+		switch compactUnitLine(line) {
+		case "PartOf=yggdrasil.service":
+			changed = true
+		case "Requires=yggdrasil.service":
+			changed = true
+			if !hasWants {
+				out = append(out, "Wants=yggdrasil.service")
+				hasWants = true
+			}
+		default:
+			out = append(out, line)
+		}
+	}
+	if !changed {
+		return text, false
+	}
+	return strings.Join(out, "\n"), true
+}
+
+// compactUnitLine removes the whitespace a unit line may carry around "=", so
+// "Requires = yggdrasil.service" and "Requires=yggdrasil.service" are the same
+// line. A comment keeps its "#" and never matches a directive.
+func compactUnitLine(line string) string {
+	return strings.Join(strings.Fields(line), "")
 }
 
 // helperConnection handles one request. A request is one JSON document and the
