@@ -457,6 +457,17 @@ canvas.chart.mini { height: 108px; }
   }
 }
 
+/* A tablet has room for two card columns. One full-width card per client
+   leaves most of the screen empty, so the rows are packed into a grid while
+   the layout is in the card mode. */
+@media (min-width: 701px) and (max-width: 1300px) {
+  .table-wrap table.cards tbody {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+    gap: 10px;
+  }
+  .table-wrap table.cards tr { margin-bottom: 0; }
+}
+
 /* mobile */
 @media (max-width: 900px) {
   .app { grid-template-columns: 1fr; }

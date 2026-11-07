@@ -4,6 +4,12 @@ All notable changes to X-Node are documented here. The format is based on [Keep 
 
 The release workflow publishes the section of the tag as the GitHub release body, so every release has a short human-readable summary of what changed. Keep each bullet on a single line: GitHub turns every newline in a release body into a hard break, so a wrapped bullet would render as a narrow column instead of using the full width.
 
+## [1.6.16] — 2026-11-07
+
+### Changed
+
+- On a tablet the client and peer cards are packed into two columns, so a wide screen no longer shows one card per row with the other half empty.
+
 ## [1.6.15] — 2026-11-07
 
 ### Added
