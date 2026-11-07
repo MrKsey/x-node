@@ -419,7 +419,9 @@ async function render() {
       view.innerHTML = invitesHtml();
       wireInvites();
     } else if (state.view === "settings") {
-      await Promise.all([loadSettings(), loadPeers()]);
+      // The IPv6 card shows the source address and interface from the status,
+      // so a direct visit to Settings must fetch it as well.
+      await Promise.all([loadSettings(), loadPeers(), refreshStatus()]);
       view.innerHTML = settingsHtml();
       wireSettings();
     } else if (state.view === "config") {
@@ -510,6 +512,7 @@ function dashboardHtml() {
         <header><h3>Yggdrasil</h3><span class="muted small">${peers.adminReachable ? "admin socket connected" : "admin socket unavailable"}</span></header>
         <table class="facts">
           <tr><th>Version</th><td class="right">${escapeHtml(self.build_version || "—")}</td></tr>
+          <tr><th>Project</th><td class="right"><a class="break" href="https://github.com/yggdrasil-network/yggdrasil-go" target="_blank" rel="noopener noreferrer">yggdrasil-network/yggdrasil-go</a></td></tr>
           <tr><th>Address</th><td class="right mono">${escapeHtml(self.address || status.address || "—")}</td></tr>
           <tr><th>Public key</th><td class="right mono ellipsis" title="${escapeHtml(self.key || "")}">${escapeHtml(self.key || "—")}</td></tr>
           <tr><th>Routing entries</th><td class="right">${self.routing_entries == null ? "—" : self.routing_entries}</td></tr>
@@ -1660,6 +1663,28 @@ function wireInviteActions(root) {
 
 /* settings */
 
+// ipv6SourceHtml names the address and the interface the exit uses for
+// outbound IPv6 connections. "auto" and "prefer" only mean something when the
+// host has a global address, so the card shows what the daemon detected
+// instead of leaving the operator to guess.
+function ipv6SourceHtml(status, mode) {
+  if (!status || status.ipv6Available === undefined) {
+    return '<p class="hint">IPv6 detection has not finished yet.</p>';
+  }
+  if (!status.ipv6Available) {
+    const reason = status.ipv6Detail ? " (" + escapeHtml(status.ipv6Detail) + ")" : "";
+    return `<p class="hint">No global IPv6 address is detected on this host${reason}, so outbound connections use IPv4 only.</p>`;
+  }
+  const iface = status.ipv6Interface || "—";
+  return `<table class="facts">
+    <tr><th>Source address</th><td class="right mono break">${escapeHtml(status.ipv6Detail || "—")}</td></tr>
+    <tr><th>Interface</th><td class="right mono">${escapeHtml(iface)}</td></tr>
+  </table>
+  <p class="hint">${mode === "off"
+    ? "The mode is off, so outbound connections use IPv4 even though this host has a global IPv6 address."
+    : "This address and interface are used for outbound IPv6 connections. They are detected automatically."}</p>`;
+}
+
 function settingsHtml() {
   const settings = state.settings || {};
   const web = settings.web || {};
@@ -1707,12 +1732,14 @@ function settingsHtml() {
             ${["debug", "info", "warn", "error"].map((level) => `<option value="${level}" ${settings.logLevel === level ? "selected" : ""}>${level}</option>`).join("")}
           </select>
         </label>
-        <label class="switch"><input type="checkbox" id="s-usage" ${usage.enabled ? "checked" : ""}><span>Traffic accounting (needed for quotas)</span></label>
-        <label class="field"><span>Usage timezone</span>
-          <select id="s-timezone">
-            ${zones.map((zone) => `<option value="${escapeHtml(zone)}" ${zone === timezone ? "selected" : ""}>${escapeHtml(zone)}</option>`).join("")}
-          </select>
-        </label>
+        <div class="field-pair full">
+          <label class="field"><span>Usage timezone</span>
+            <select id="s-timezone">
+              ${zones.map((zone) => `<option value="${escapeHtml(zone)}" ${zone === timezone ? "selected" : ""}>${escapeHtml(zone)}</option>`).join("")}
+            </select>
+          </label>
+          <label class="switch"><input type="checkbox" id="s-usage" ${usage.enabled ? "checked" : ""}><span>Traffic accounting (needed for quotas)</span></label>
+        </div>
       </div>
       <p class="hint">The name is shown in the app, in the invite QR code and in the dashboard. The timezone decides when the daily and monthly quota counters roll over.</p>
     </form>
@@ -1777,6 +1804,7 @@ function settingsHtml() {
         </label>
       </div>
       <p class="hint">This only controls how the exit dials destinations. The Yggdrasil mesh itself is always IPv6.</p>
+      ${ipv6SourceHtml(state.status, settings.ipv6)}
     </form>
 
     <form class="card section settings-card" data-settings="peers">
@@ -1818,7 +1846,7 @@ function settingsHtml() {
         <button class="btn primary small save-btn hidden" type="submit">Save</button>
       </header>
       <div class="form-grid">
-        <label class="field full"><span>Public URL (shown on the dashboard and by "x-node web url")</span><input id="s-publicurl" value="${escapeHtml(web.publicURL || "")}" placeholder="https://example.com/abc123/web/"></label>
+        <label class="field full"><span>Public URL (shown on the dashboard and by "x-node web url")</span><input id="s-publicurl" value="${escapeHtml(web.publicURL || "")}" placeholder="https://example.com/abc123/web/" readonly></label>
         <label class="field"><span>URL path</span><input id="s-webpath" value="${escapeHtml(web.path || "")}"></label>
         <label class="field"><span>Session lifetime</span><input id="s-sessionttl" value="${escapeHtml(web.sessionTTL || "12h")}"></label>
         <label class="field"><span>Failed logins before a block</span><input id="s-maxfail" type="number" min="0" value="${web.maxFailedLogins || 5}"></label>
@@ -1827,7 +1855,7 @@ function settingsHtml() {
         <label class="field"><span>Port</span><input value="${web.port || 443}" disabled></label>
         <label class="switch full"><input type="checkbox" id="s-compact" ${web.compact ? "checked" : ""}><span>Compact layout — keep the interface 25% narrower on a desktop screen</span></label>
       </div>
-      <p class="hint">Listen address, port and TLS are read at start: change them in the Configuration tab and restart x-node.</p>
+      <p class="hint">The public URL is filled by the installer and is read-only here: change <span class="mono">web.publicURL</span> in the Configuration tab if it is wrong. Listen address, port and TLS are read at start: change them there too and restart x-node.</p>
     </form>
 
     <div class="card section">
@@ -1882,7 +1910,6 @@ function settingsPayload(kind) {
       return {
         web: {
           path: $("#s-webpath").value.trim(),
-          publicURL: $("#s-publicurl").value.trim(),
           sessionTTL: $("#s-sessionttl").value.trim(),
           maxFailedLogins: Number($("#s-maxfail").value),
           lockout: $("#s-lockout").value.trim(),

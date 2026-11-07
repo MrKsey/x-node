@@ -42,6 +42,7 @@ type ipv6Monitor struct {
 	mu        sync.RWMutex
 	available bool
 	detail    string
+	iface     string
 	checked   time.Time
 }
 
@@ -56,9 +57,14 @@ func newIPv6Monitor() *ipv6Monitor {
 // when the host is offline.
 func (m *ipv6Monitor) refresh() {
 	available, detail := detectIPv6()
+	iface := ""
+	if available {
+		iface = interfaceForIP(net.ParseIP(detail))
+	}
 	m.mu.Lock()
 	m.available = available
 	m.detail = detail
+	m.iface = iface
 	m.checked = time.Now()
 	m.mu.Unlock()
 }
@@ -76,13 +82,13 @@ func (m *ipv6Monitor) run(ctx context.Context) {
 	}
 }
 
-func (m *ipv6Monitor) status() (bool, string) {
+func (m *ipv6Monitor) status() (bool, string, string) {
 	if m == nil {
-		return false, "not checked"
+		return false, "not checked", ""
 	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.available, m.detail
+	return m.available, m.detail, m.iface
 }
 
 func detectIPv6() (bool, string) {
@@ -100,6 +106,38 @@ func detectIPv6() (bool, string) {
 		return false, "only " + ip.String()
 	}
 	return true, ip.String()
+}
+
+// interfaceForIP names the interface that carries the address. The settings
+// page shows it next to the source address, so an operator can tell which link
+// outbound IPv6 traffic leaves through without running "ip -6 addr".
+func interfaceForIP(ip net.IP) string {
+	if ip == nil {
+		return ""
+	}
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return ""
+	}
+	for _, iface := range interfaces {
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			switch value := addr.(type) {
+			case *net.IPNet:
+				if value.IP.Equal(ip) {
+					return iface.Name
+				}
+			case *net.IPAddr:
+				if value.IP.Equal(ip) {
+					return iface.Name
+				}
+			}
+		}
+	}
+	return ""
 }
 
 // isGlobalIPv6 reports whether the address is a routable IPv6 destination, as
@@ -206,7 +244,7 @@ func (d *outboundDialer) familyAllowed(ip net.IP) bool {
 	case ipv6Prefer:
 		return true
 	default:
-		available, _ := d.family.status()
+		available, _, _ := d.family.status()
 		return available
 	}
 }
@@ -216,7 +254,7 @@ func (d *outboundDialer) familyAllowed(ip net.IP) bool {
 func (d *outboundDialer) order(ips []net.IP) []net.IP {
 	preferV6 := d.mode() == ipv6Prefer
 	if d.mode() == ipv6Auto && d.family != nil {
-		preferV6, _ = d.family.status()
+		preferV6, _, _ = d.family.status()
 	}
 	ordered := make([]net.IP, 0, len(ips))
 	add := func(wantV6 bool) {

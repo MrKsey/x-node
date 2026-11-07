@@ -527,6 +527,7 @@ type webStatus struct {
 	IPv6Mode          string        `json:"ipv6Mode"`
 	IPv6Available     bool          `json:"ipv6Available"`
 	IPv6Detail        string        `json:"ipv6Detail"`
+	IPv6Interface     string        `json:"ipv6Interface"`
 	DomainResolution  bool          `json:"domainResolution"`
 	WebPath           string        `json:"webPath"`
 	WebURLs           []string      `json:"webURLs"`
@@ -592,7 +593,7 @@ func (w *webServer) handleStatus(rw http.ResponseWriter, r *http.Request) {
 		ConfigPath:        w.configPath,
 	}
 	if w.family != nil {
-		status.IPv6Available, status.IPv6Detail = w.family.status()
+		status.IPv6Available, status.IPv6Detail, status.IPv6Interface = w.family.status()
 	}
 	if doc, err := readRuntime(cfg.statePath(runtimeFileName)); err == nil && runtimeFresh(doc, time.Now()) {
 		status.ActiveConnections = doc.TotalConnections

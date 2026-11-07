@@ -72,6 +72,21 @@ func TestIsGlobalIPv6(t *testing.T) {
 	}
 }
 
+func TestInterfaceForIP(t *testing.T) {
+	// The loopback address is assigned to a loopback interface on every host,
+	// so this proves that the lookup compares the address and not the name.
+	iface := interfaceForIP(net.ParseIP("127.0.0.1"))
+	if iface == "" {
+		t.Fatal("the loopback address has no interface")
+	}
+	if iface := interfaceForIP(net.ParseIP("192.0.2.1")); iface != "" {
+		t.Fatalf("an unassigned address reported interface %q", iface)
+	}
+	if iface := interfaceForIP(nil); iface != "" {
+		t.Fatalf("a nil address reported interface %q", iface)
+	}
+}
+
 func TestDialerFamilyFilter(t *testing.T) {
 	cfg := testConfig(t)
 	mode := ipv6Off

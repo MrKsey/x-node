@@ -146,7 +146,10 @@ func cmdServe(args []string) error {
 		return err
 	}
 	family := newIPv6Monitor()
-	available, detail := family.status()
+	available, detail, iface := family.status()
+	if iface != "" {
+		detail += " on " + iface
+	}
 	log.info("IPv6 outbound: %s (%s)", onOff(available), detail)
 	log.info("allowlist: %d client(s), %d active invite(s)", len(store.List()), len(store.ListInvites()))
 
@@ -884,6 +887,11 @@ func cmdDoctor(args []string) error {
 func checkIPv6(cfg Config) {
 	mode := cfg.ipv6Mode()
 	available, detail := detectIPv6()
+	if available {
+		if iface := interfaceForIP(net.ParseIP(detail)); iface != "" {
+			detail += " on " + iface
+		}
+	}
 	switch mode {
 	case ipv6Off:
 		fmt.Println("  OK   IPv6 is off: outbound connections use IPv4 only")

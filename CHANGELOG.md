@@ -4,6 +4,20 @@ All notable changes to X-Node are documented here. The format is based on [Keep 
 
 The release workflow publishes the section of the tag as the GitHub release body, so every release has a short human-readable summary of what changed. Keep each bullet on a single line: GitHub turns every newline in a release body into a hard break, so a wrapped bullet would render as a narrow column instead of using the full width.
 
+## [1.6.15] — 2026-11-07
+
+### Added
+
+- The **Yggdrasil** card on the dashboard has a **Project** row linking to the yggdrasil-go repository.
+- The **IPv6 outbound** settings card names the source address and the interface the exit uses for outbound IPv6 connections, or says that the host has no global IPv6 address.
+
+### Changed
+
+- On the **Node** settings card the traffic accounting switch sits next to the usage timezone instead of above it.
+- The **Public URL** field of the Web interface card is read-only: the installer fills it, and a wrong value is fixed in the Configuration tab.
+- A tablet gets the one-column layout: the paired dashboard cards stack, and the clients and peers tables become cards instead of squeezing nine columns into the viewport.
+- Table headers no longer wrap, and a card header keeps its title on the baseline of the status text beside it, so the **Yggdrasil** heading lines up with **X-Node**.
+
 ## [1.6.14] — 2026-11-06
 
 ### Changed

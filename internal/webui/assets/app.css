@@ -210,14 +210,21 @@ input[type="checkbox"] { width: auto; accent-color: var(--accent); }
 .link-card:hover { text-decoration: none; border-color: var(--accent); }
 .link-card:active { transform: translateY(1px); }
 
-.section { padding: 18px 20px; display: grid; gap: 14px; }
-.section > header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.section { padding: 18px 20px; display: grid; gap: 14px; align-content: start; }
+/* The header keeps the title on the first baseline. The status text next to it
+   may wrap on a narrow card; with center alignment that wrapped text pushed the
+   title down, so the "Yggdrasil" heading no longer lined up with the "X-Node"
+   heading in the card beside it. */
+.section > header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
 .section > header h3 { margin: 0; font-size: 15px; flex: 1; }
 .section .hint { color: var(--muted); font-size: 13px; margin: 0; }
 
 table { width: 100%; border-collapse: collapse; }
 th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--border); vertical-align: middle; }
-th { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); font-weight: 600; }
+/* A table header names one column and never needs a line break: a wrapped
+   "Direction" makes the whole header row several lines tall on a tablet. The
+   wrapper scrolls sideways instead when the columns cannot fit. */
+th { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); font-weight: 600; white-space: nowrap; }
 tr:last-child td { border-bottom: 0; }
 .table-wrap { overflow-x: auto; }
 
@@ -390,59 +397,26 @@ canvas.chart.mini { height: 108px; }
   break-inside: avoid; margin: 0 0 16px; width: 100%;
 }
 .settings-grid > *:last-child { margin-bottom: 0; }
-@media (max-width: 1024px) {
+/* A tablet is narrower than it looks: two 400 px cards leave a few dozen
+   pixels per table column, so the peers and clients tables wrap every header.
+   Up to this width the settings cards and the paired cards (X-Node with
+   Yggdrasil, System Info with Update) go to one column, and the tables switch
+   to the card layout, which gives them the whole viewport. The nine-column
+   clients table needs about 980 px of content, which is a 1300 px window with
+   the sidebar. */
+@media (max-width: 1300px) {
+  .grid.two { grid-template-columns: 1fr; }
   .settings-grid { column-count: 1; }
 }
 
 .empty { padding: 28px; text-align: center; color: var(--muted); }
 
-/* mobile */
-@media (max-width: 900px) {
-  .app { grid-template-columns: 1fr; }
-  .settings-grid { column-count: 1; }
-  .sidebar {
-    position: fixed; inset: 0 auto 0 0; width: min(300px, 86vw); z-index: 40;
-    transform: translateX(-102%); transition: transform .2s ease;
-    box-shadow: var(--shadow); overflow-y: auto;
-  }
-  .app.menu-open .sidebar { transform: none; }
-  .app.menu-open::after {
-    content: ""; position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 30;
-  }
-  #menu { display: inline-flex; }
-  .view { padding: 16px; }
-  .topbar { padding: 12px 16px; }
-  th, td { padding: 9px 6px; overflow-wrap: anywhere; }
-  .hide-sm { display: none; }
-}
-
-@media (max-width: 700px) {
-  .view { padding: 12px; gap: 14px; }
-  .section { padding: 14px; }
-  .section > header { gap: 8px; }
-  .grid.kpi { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-  .kpi-card { padding: 14px; }
-  .kpi-card .value { font-size: 20px; }
-  .kpi-card .sub { font-size: 11.5px; }
-  .small-value { font-size: 13px !important; }
-  .topbar h2 { font-size: 16px; }
-  #clock { display: none; }
-  .range-switch { order: 3; width: 100%; }
-  .range-switch button { flex: 1; }
-  canvas.chart { height: 235px; }
-  .chart-legend { width: 100%; }
-  .actions .btn { flex: 1 1 auto; }
-  .login { padding: 16px; }
-  .login-card { padding: 22px; }
-  .row { gap: 8px; }
-  .row > input, .row > select, .row > .btn { width: 100%; }
-  .manual-peer-form { grid-template-columns: 1fr; }
-  .manual-peer-form .btn { width: 100%; }
-  .config-editor, pre.logs { height: calc(100vh - 210px); min-height: 260px; }
-  .settings-card > header { align-items: flex-start; }
-  .settings-card > header .save-btn { width: 100%; }
-
-  /* Tables become cards: a wide table is unusable on a phone. */
+/* Tablets get the card layout too. A 7.85" tablet is about 1100 px wide in CSS
+   pixels and keeps the sidebar, so the clients table has nine columns in about
+   800 px: squeezing them into a normal table turns every header into a
+   multi-line stack. The card layout below gives each row its own block, so a
+   value is read next to its label. */
+@media (max-width: 1300px) {
   .table-wrap { overflow: visible; }
   .table-wrap table.cards thead { display: none; }
   .table-wrap table.cards,
@@ -481,6 +455,53 @@ canvas.chart.mini { height: 108px; }
   .table-wrap table.cards td.row-actions .btn {
     flex: 1 1 auto; min-width: max-content; margin: 0;
   }
+}
+
+/* mobile */
+@media (max-width: 900px) {
+  .app { grid-template-columns: 1fr; }
+  .sidebar {
+    position: fixed; inset: 0 auto 0 0; width: min(300px, 86vw); z-index: 40;
+    transform: translateX(-102%); transition: transform .2s ease;
+    box-shadow: var(--shadow); overflow-y: auto;
+  }
+  .app.menu-open .sidebar { transform: none; }
+  .app.menu-open::after {
+    content: ""; position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 30;
+  }
+  #menu { display: inline-flex; }
+  .view { padding: 16px; }
+  .topbar { padding: 12px 16px; }
+  th, td { padding: 9px 6px; overflow-wrap: anywhere; }
+  .hide-sm { display: none; }
+  /* Four KPI cards do not fit in one row at this width; 2 × 2 is even. */
+  .grid.kpi { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+}
+
+@media (max-width: 700px) {
+  .view { padding: 12px; gap: 14px; }
+  .section { padding: 14px; }
+  .section > header { gap: 8px; }
+  .kpi-card { padding: 14px; }
+  .kpi-card .value { font-size: 20px; }
+  .kpi-card .sub { font-size: 11.5px; }
+  .small-value { font-size: 13px !important; }
+  .topbar h2 { font-size: 16px; }
+  #clock { display: none; }
+  .range-switch { order: 3; width: 100%; }
+  .range-switch button { flex: 1; }
+  canvas.chart { height: 235px; }
+  .chart-legend { width: 100%; }
+  .actions .btn { flex: 1 1 auto; }
+  .login { padding: 16px; }
+  .login-card { padding: 22px; }
+  .row { gap: 8px; }
+  .row > input, .row > select, .row > .btn { width: 100%; }
+  .manual-peer-form { grid-template-columns: 1fr; }
+  .manual-peer-form .btn { width: 100%; }
+  .config-editor, pre.logs { height: calc(100vh - 210px); min-height: 260px; }
+  .settings-card > header { align-items: flex-start; }
+  .settings-card > header .save-btn { width: 100%; }
   .client-line { gap: 6px; }
   .field-pair { grid-template-columns: 1fr; }
   canvas.chart.mini { height: 96px; }
