@@ -33,6 +33,11 @@ const (
 	webPasswordKeyBytes    = 32
 	webSessionKeyBytes     = 32
 	webCookieName          = "x_node_session"
+
+	// unlimitedSessionMaxAge is the cookie lifetime used when the session must
+	// never expire. Browsers cap a cookie at 400 days (Chrome), so a larger
+	// number would be shortened anyway; the signature itself never expires.
+	unlimitedSessionMaxAge = 400 * 24 * 60 * 60
 )
 
 // webCredentials is the content of web.json in the state directory.
@@ -188,7 +193,8 @@ type webSession struct {
 	Expires int64  `json:"e"`
 }
 
-// sessionSigner creates and verifies session cookies.
+// sessionSigner creates and verifies session cookies. A zero ttl means the
+// session never expires.
 type sessionSigner struct {
 	key []byte
 	ttl time.Duration
@@ -234,7 +240,11 @@ func (s *sessionSigner) verify(value string) (webSession, bool) {
 	if err := json.Unmarshal(payload, &session); err != nil {
 		return session, false
 	}
-	if session.Expires < time.Now().Unix() {
+	// With a lifetime the expiry in the payload decides; an unlimited session
+	// has none and stays valid while its signature matches. A cookie signed
+	// under "unlimited" is rejected once a real lifetime is configured, so the
+	// current setting is always the one that governs.
+	if s.ttl > 0 && (session.Expires == 0 || session.Expires < time.Now().Unix()) {
 		return session, false
 	}
 	return session, true

@@ -4,6 +4,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestConfigPeerURI(t *testing.T) {
@@ -31,6 +32,33 @@ func TestConfigPeerURI(t *testing.T) {
 	cfg.PeerURI = ""
 	if port, err := cfg.peerPort(); err != nil || port != 0 {
 		t.Fatalf("empty peer URI: port=%d err=%v", port, err)
+	}
+}
+
+// A session that must never expire is a supported setting, not a typo: the
+// web form accepts "0" and "unlimited" and the signer then skips the expiry
+// check. A negative or malformed value is still rejected.
+func TestConfigSessionLifetime(t *testing.T) {
+	cfg := testConfig(t)
+	for _, value := range []string{"0", "unlimited", "Unlimited", "0s"} {
+		cfg.Web.SessionTTL = value
+		if err := cfg.validate(); err != nil {
+			t.Fatalf("%q must be accepted: %v", value, err)
+		}
+		ttl, err := cfg.webSessionTTL()
+		if err != nil || ttl != 0 {
+			t.Fatalf("%q = %v, %v; want an unlimited session", value, ttl, err)
+		}
+	}
+	cfg.Web.SessionTTL = "12h"
+	if ttl, err := cfg.webSessionTTL(); err != nil || ttl != 12*time.Hour {
+		t.Fatalf("12h = %v, %v", ttl, err)
+	}
+	for _, value := range []string{"", "-1h", "soon"} {
+		cfg.Web.SessionTTL = value
+		if err := cfg.validate(); err == nil {
+			t.Fatalf("%q must be rejected", value)
+		}
 	}
 }
 

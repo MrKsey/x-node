@@ -138,6 +138,68 @@ func TestWebLoginAndSession(t *testing.T) {
 	}
 }
 
+func TestWebUnlimitedSession(t *testing.T) {
+	server, _ := newTestWebServer(t)
+	server.setSessionTTL(0)
+	ts := httptest.NewServer(server)
+	defer ts.Close()
+
+	request, err := http.NewRequest(http.MethodPost, ts.URL+"/test/web/api/login",
+		strings.NewReader(`{"username":"admin","password":"correct horse battery staple"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-Requested-With", "x-node")
+	response, err := (&http.Client{Timeout: 5 * time.Second}).Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("login = %d", response.StatusCode)
+	}
+	cookies := response.Cookies()
+	if len(cookies) != 1 {
+		t.Fatalf("cookies = %d, want one", len(cookies))
+	}
+	cookie := cookies[0]
+	// The cookie has to survive a browser restart: a session cookie (MaxAge 0)
+	// would be dropped on close, which is exactly the "password again" the
+	// setting is meant to stop.
+	if cookie.MaxAge < 300*24*60*60 {
+		t.Fatalf("max age = %d, want a long-lived cookie", cookie.MaxAge)
+	}
+	_, signer := server.credentials()
+	session, ok := signer.verify(cookie.Value)
+	if !ok {
+		t.Fatal("the unlimited session was rejected")
+	}
+	if session.Expires != 0 {
+		t.Fatalf("expires = %d, want no expiry", session.Expires)
+	}
+
+	// The cookie still authenticates the API.
+	parsed, err := url.Parse(ts.URL + "/test/web/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := testClient(t)
+	client.Jar.SetCookies(parsed, []*http.Cookie{cookie})
+	code, payload := doJSON(t, client, http.MethodGet, ts.URL+"/test/web/api/session", nil, false)
+	if code != http.StatusOK || payload["authenticated"] != true {
+		t.Fatalf("session = %d %v", code, payload)
+	}
+
+	// Switching back to a real lifetime governs the sessions again: a cookie
+	// signed without an expiry is no longer accepted.
+	server.setSessionTTL(12 * time.Hour)
+	_, signer = server.credentials()
+	if _, ok := signer.verify(cookie.Value); ok {
+		t.Fatal("a cookie without an expiry must be rejected once a lifetime is set")
+	}
+}
+
 func TestWebPasswordChangeWithoutRestart(t *testing.T) {
 	server, _ := newTestWebServer(t)
 	ts := httptest.NewServer(server)

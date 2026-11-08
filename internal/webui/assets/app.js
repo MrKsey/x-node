@@ -1979,6 +1979,7 @@ function settingsHtml() {
         <label class="field"><span>Port</span><input value="${web.port || 443}" disabled></label>
         <label class="switch full"><input type="checkbox" id="s-compact" ${web.compact ? "checked" : ""}><span>Compact layout — keep the interface 25% narrower on a desktop screen</span></label>
       </div>
+      <p class="hint">Session lifetime takes a duration such as <span class="mono">12h</span>; <span class="mono">0</span> or <span class="mono">unlimited</span> means the session never expires and the password is not asked again.</p>
       <p class="hint">The public URL is filled by the installer and is read-only here: change <span class="mono">web.publicURL</span> in the Configuration tab if it is wrong. Listen address, port and TLS are read at start: change them there too and restart x-node.</p>
     </form>
 

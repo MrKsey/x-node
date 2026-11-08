@@ -652,10 +652,18 @@ func (c Config) webBindHost() string {
 	}
 }
 
+// webSessionTTL turns the configured lifetime into a duration. A zero value,
+// "0" and "unlimited" mean the session never expires: the cookie carries no
+// expiry and the signer never rejects it.
 func (c Config) webSessionTTL() (time.Duration, error) {
-	d, err := time.ParseDuration(c.Web.SessionTTL)
-	if err != nil || d <= 0 {
-		return 0, fmt.Errorf("web.sessionTTL %q is not a positive duration", c.Web.SessionTTL)
+	raw := strings.TrimSpace(c.Web.SessionTTL)
+	switch strings.ToLower(raw) {
+	case "0", "unlimited":
+		return 0, nil
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d < 0 {
+		return 0, fmt.Errorf("web.sessionTTL %q is not a duration; use 0 or unlimited for a session that never expires", c.Web.SessionTTL)
 	}
 	return d, nil
 }

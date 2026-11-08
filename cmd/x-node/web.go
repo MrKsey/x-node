@@ -138,7 +138,10 @@ func newWebServer(cfg Config, configPath string, live *settings, store *Store, t
 // key. It also records the state of the file on disk, so a later change is
 // noticed by reloadCredentials.
 func (w *webServer) useCredentials(creds webCredentials) error {
-	signer, err := newSessionSigner(creds, w.sessionTTL)
+	w.credsMu.RLock()
+	ttl := w.sessionTTL
+	w.credsMu.RUnlock()
+	signer, err := newSessionSigner(creds, ttl)
 	if err != nil {
 		return err
 	}
@@ -154,6 +157,19 @@ func (w *webServer) useCredentials(creds webCredentials) error {
 	w.credsSize = size
 	w.credsMu.Unlock()
 	return nil
+}
+
+// setSessionTTL applies a new session lifetime without a restart. The signer is
+// rebuilt from the credentials already in memory, so the very next login uses
+// the new value.
+func (w *webServer) setSessionTTL(ttl time.Duration) {
+	w.credsMu.Lock()
+	w.sessionTTL = ttl
+	creds := w.creds
+	w.credsMu.Unlock()
+	if err := w.useCredentials(creds); err != nil {
+		w.log.warn("web: cannot apply the session lifetime: %v", err)
+	}
 }
 
 // credentials returns the credentials and the signer together, so a request
@@ -474,7 +490,18 @@ func (w *webServer) handleLogin(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.guard.success(address)
-	session := webSession{User: creds.Username, Expires: time.Now().Add(signer.ttl).Unix()}
+	session := webSession{User: creds.Username}
+	maxAge := 0
+	if signer.ttl > 0 {
+		session.Expires = time.Now().Add(signer.ttl).Unix()
+		maxAge = int(signer.ttl.Seconds())
+	} else {
+		// A MaxAge of zero is a browser-session cookie, which disappears when
+		// the browser closes. An unlimited session still has to survive that,
+		// so the cookie gets the longest lifetime browsers accept (Chrome caps
+		// a cookie at 400 days); the signature never expires.
+		maxAge = unlimitedSessionMaxAge
+	}
 	value, err := signer.sign(session)
 	if err != nil {
 		writeJSON(rw, http.StatusInternalServerError, errorResponse{Error: "session_failed"})
@@ -485,7 +512,7 @@ func (w *webServer) handleLogin(rw http.ResponseWriter, r *http.Request) {
 		Name:     webCookieName,
 		Value:    value,
 		Path:     cfg.Web.Path + "/",
-		MaxAge:   int(signer.ttl.Seconds()),
+		MaxAge:   maxAge,
 		HttpOnly: true,
 		Secure:   r.TLS != nil,
 		SameSite: http.SameSiteStrictMode,
@@ -1277,6 +1304,14 @@ func (w *webServer) handleSettingsPut(rw http.ResponseWriter, r *http.Request) {
 	w.live.set(next)
 	w.quotas.UpdateDefaults(next.Quotas)
 	w.log.setLevel(next.LogLevel)
+	// The session lifetime is read by the signer, which is built at start.
+	// Applying it here means "0" or "unlimited" takes effect without a
+	// restart, so the operator is not asked for the password once more.
+	if next.Web.SessionTTL != before.Web.SessionTTL {
+		if ttl, err := next.webSessionTTL(); err == nil {
+			w.setSessionTTL(ttl)
+		}
+	}
 
 	restartRequired := next.SocksPort != before.SocksPort ||
 		next.APIPort != before.APIPort ||

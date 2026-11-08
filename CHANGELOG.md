@@ -4,6 +4,12 @@ All notable changes to X-Node are documented here. The format is based on [Keep 
 
 The release workflow publishes the section of the tag as the GitHub release body, so every release has a short human-readable summary of what changed. Keep each bullet on a single line: GitHub turns every newline in a release body into a hard break, so a wrapped bullet would render as a narrow column instead of using the full width.
 
+## [1.6.22] — 2026-11-08
+
+### Fixed
+
+- **Session lifetime** accepts `0` and `unlimited`: the web session then never expires and the password is not asked again. The cookie is persistent, so it survives a browser restart, and the new value applies to the open sessions without a service restart.
+
 ## [1.6.21] — 2026-11-08
 
 ### Added
