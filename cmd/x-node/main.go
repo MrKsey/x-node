@@ -95,6 +95,8 @@ func run(command string, args []string) error {
 		return cmdUpdate(args)
 	case "web":
 		return cmdWeb(args)
+	case "dns":
+		return cmdDNS(args)
 	case "version":
 		return cmdVersion(args)
 	case "helper":
@@ -685,6 +687,19 @@ func cmdStatus(args []string) error {
 		line("Login", currentWebUser(cfg.statePath(webCredentialsFileName)))
 	} else {
 		line("Web", "disabled")
+	}
+
+	section("DNS server")
+	if cfg.DNS.Enabled {
+		line("State", "enabled (x-node dns status)")
+		line("Listen", cfg.dnsListen())
+		if alfisWebUISupported(dnsBinaryPath()) {
+			line("Alfis web", cfg.dnsWebURL())
+		} else {
+			line("Alfis web", "not available in this Alfis build")
+		}
+	} else {
+		line("State", "disabled")
 	}
 
 	section("Quotas")

@@ -8,6 +8,11 @@ on:
 permissions:
   contents: write
 
+env:
+  # The Alfis source tag that is built into the release archives. It must match
+  # the default of ALFIS_VERSION in install.sh.
+  ALFIS_VERSION: "0.10.0"
+
 jobs:
   build:
     name: package linux/${{ matrix.goarch }}${{ matrix.goarm }}
@@ -25,6 +30,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/checkout@v4
+        with:
+          repository: Revertron/Alfis
+          ref: v${{ env.ALFIS_VERSION }}
+          path: alfis-src
+
       - uses: actions/setup-go@v5
         with:
           # The probe is a separate module with the newer language requirement.
@@ -33,6 +44,34 @@ jobs:
           cache-dependency-path: |
             go.sum
             cmd/x-node-peerprobe/go.sum
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cross
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: alfis-src -> target
+          key: alfis-${{ matrix.goarch }}
+
+      - name: build Alfis with the web UI
+        working-directory: alfis-src
+        run: |
+          set -euo pipefail
+          case "${{ matrix.goarch }}" in
+            amd64) target=x86_64-unknown-linux-musl ;;
+            arm64) target=aarch64-unknown-linux-musl ;;
+            arm)   target=armv7-unknown-linux-musleabihf ;;
+            *) echo "unsupported architecture: ${{ matrix.goarch }}" >&2; exit 1 ;;
+          esac
+          # The upstream nogui builds use --no-default-features without webui.
+          # The dashboard links to the Alfis panel, so the bundled build keeps
+          # the web UI and drops only the desktop GUI.
+          cross build --release --no-default-features --features=webui,doh --target "$target"
+          mkdir -p "$RUNNER_TEMP/alfis"
+          install -m 0755 "target/$target/release/alfis" "$RUNNER_TEMP/alfis/alfis"
 
       - name: package
         env:
@@ -53,9 +92,10 @@ jobs:
             cd cmd/x-node-peerprobe
             go build -trimpath -ldflags "-s -w" -o "$stage/bin/x-node-peerprobe" .
           )
+          install -m 0755 "$RUNNER_TEMP/alfis/alfis" "$stage/bin/alfis"
 
           install -m 0755 install.sh uninstall.sh "$stage/"
-          install -m 0644 config.example.json README.md README.ru.md LICENSE SECURITY.md CHANGELOG.md "$stage/"
+          install -m 0644 config.example.json README.md README.ru.md LICENSE SECURITY.md CHANGELOG.md THIRD_PARTY_NOTICES.md "$stage/"
           cp -r deploy "$stage/deploy"
           find "$stage/deploy" -type d -exec chmod 0755 {} +
           find "$stage/deploy" -type f -exec chmod 0644 {} +
@@ -84,6 +124,14 @@ jobs:
           path: dist
           merge-multiple: true
 
+      - name: fetch the bundled Alfis source
+        run: |
+          set -euo pipefail
+          # The archives bundle an Alfis binary built from this tag. Alfis is
+          # AGPL-3.0, so the corresponding source is published next to it.
+          curl -fsSL -o "dist/alfis-v${ALFIS_VERSION}-source.tar.gz" \
+            "https://github.com/Revertron/Alfis/archive/refs/tags/v${ALFIS_VERSION}.tar.gz"
+
       - name: checksums
         run: |
           set -euo pipefail
@@ -94,12 +142,13 @@ jobs:
       - name: verify the archives
         run: |
           set -euo pipefail
-          for archive in dist/*.tar.gz; do
+          for archive in dist/x-node-*.tar.gz; do
             # Read the whole listing first: grep -q closes the pipe early and
             # tar then fails with "stdout: write error" under pipefail.
             listing="$(tar -tzf "$archive")"
             printf '%s\n' "$listing" | grep -qx '.*/install.sh'
             printf '%s\n' "$listing" | grep -qx '.*/bin/x-node'
+            printf '%s\n' "$listing" | grep -qx '.*/bin/alfis'
             printf '%s\n' "$listing" | grep -qx '.*/deploy/systemd/x-node.service'
             echo "$listing" | grep -qx '.*/deploy/systemd/x-node-helper.service'
           done

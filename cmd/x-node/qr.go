@@ -28,6 +28,15 @@ func exitLink(cfg Config, invite string) string {
 	if strings.TrimSpace(invite) != "" {
 		values.Set("i", invite)
 	}
+	// The app adds this resolver to its DNS list with the "exit node" note. The
+	// port is normally 53 and is sent separately, because the app stores DNS
+	// servers as bare Yggdrasil addresses.
+	if address := cfg.dnsServerAddress(); address != "" {
+		values.Set("dns", address)
+		if port := cfg.dnsServerPort(); port > 0 && port != 53 {
+			values.Set("dnsport", strconv.Itoa(port))
+		}
+	}
 	return "yggnode://exit?" + values.Encode()
 }
 
@@ -89,6 +98,9 @@ func printExitFacts(cfg Config) {
 	}
 	if strings.TrimSpace(cfg.PeerURI) != "" {
 		fmt.Println("Peer:     ", cfg.PeerURI)
+	}
+	if cfg.DNS.Enabled {
+		fmt.Println("DNS:      ", cfg.dnsListen())
 	}
 }
 

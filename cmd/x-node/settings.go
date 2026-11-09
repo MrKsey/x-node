@@ -100,6 +100,7 @@ func saveSettingsOverlay(cfg Config) error {
 		"quotas":                 cfg.Quotas,
 		"usage":                  cfg.Usage,
 		"web":                    cfg.Web,
+		"dns":                    cfg.DNS,
 	}
 	return writeJSONAtomic(cfg.statePath(settingsFileName), document)
 }

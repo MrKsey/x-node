@@ -19,6 +19,7 @@ const state = {
   trafficRange: "1h",
   system: null,
   logs: [],
+  logWrap: true,
   view: "dashboard",
   timer: null,
   logTimer: null,
@@ -469,6 +470,19 @@ function dashboardHtml() {
       </button>
     </div>
 
+    <div class="card link-strip" aria-label="Node addresses">
+      <div class="link-strip-item">
+        <span class="label">Yggdrasil address</span>
+        <span class="mono">${escapeHtml(status.address || "—")}</span>
+        <button class="btn small" data-copy="${escapeHtml(status.address || "")}">Copy</button>
+      </div>
+      <div class="link-strip-item">
+        <span class="label">Peer link</span>
+        <span class="mono">${escapeHtml(status.peerURI || "not advertised")}</span>
+        ${status.peerURI ? `<button class="btn small" data-copy="${escapeHtml(status.peerURI)}">Copy</button>` : ""}
+      </div>
+    </div>
+
     <div class="card section">
       <header>
         <h3>Traffic</h3>
@@ -486,7 +500,7 @@ function dashboardHtml() {
       <p class="hint" id="chart-hint">Download and upload through the exit node, in bit/s. Updated every 5 seconds.</p>
     </div>
 
-    <div class="grid two">
+    <div class="grid three">
       <div class="card section">
         <header><h3>X-Node</h3><span class="muted small">${escapeHtml(status.version || "")}</span></header>
         <table class="facts">
@@ -520,17 +534,10 @@ function dashboardHtml() {
           <tr><th>Peers</th><td class="right">${peers.up || 0} up · ${peers.managed || 0} automatic · ${peers.manualPeers ? peers.manualPeers.length : 0} manual · ${peers.inbound || 0} inbound</td></tr>
           <tr><th>Auto replace</th><td class="right">${peers.autoReplace ? "on" : "off"} · ${peers.peerCount || 0} wanted</td></tr>
         </table>
-        <div class="peer-box">
-          <div class="label">Peer link</div>
-          ${status.peerURI
-            ? `<div class="peer-link mono">${escapeHtml(status.peerURI)}</div>
-               <div class="actions">
-                 <button class="btn small" data-copy="${escapeHtml(status.peerURI)}">Copy peer link</button>
-               </div>
-               <p class="hint">Add it in Y-Node → Exit node → Add → Peers, or append it to the <span class="mono">Peers</span> list in yggdrasil.conf.</p>`
-            : '<p class="hint">Incoming peering is disabled. Start the installer with a public host and a peering port to get a wss:// or tls:// link.</p>'}
-        </div>
+        <p class="hint">The peer link is in the address strip above. Add it in Y-Node → Exit node → Add → Peers, or append it to the <span class="mono">Peers</span> list in yggdrasil.conf.</p>
       </div>
+
+      ${dnsCardHtml(status.dns || {})}
     </div>
 
     <div class="grid two">
@@ -600,6 +607,47 @@ function systemCardHtml() {
       </div>
       <p class="hint" id="system-hint">Sampled every 5 seconds. The history starts empty after a restart.</p>
     ` : '<p class="hint">CPU and memory history is read from /proc and is available on Linux only.</p>'}
+  </div>`;
+}
+
+// dnsCardHtml shows the Alfis DNS server that x-node runs for its clients. It
+// sits next to the X-Node and Yggdrasil cards, so the three tables share one
+// row on a desktop.
+function dnsCardHtml(dns) {
+  const enabled = Boolean(dns.enabled);
+  const running = Boolean(dns.running);
+  let statePill;
+  if (!enabled) {
+    statePill = '<span class="pill">off</span>';
+  } else if (dns.error) {
+    statePill = '<span class="pill warn">unknown</span>';
+  } else if (running) {
+    statePill = '<span class="pill ok">running</span>';
+  } else {
+    statePill = '<span class="pill bad">stopped</span>';
+  }
+  let hint = "Alfis answers DNS queries for Yggdrasil clients and runs its own web UI.";
+  if (!enabled) {
+    hint = "The DNS server is off. Turn it on in Settings → DNS server.";
+  } else if (!dns.installed) {
+    hint = "Alfis is not installed on this host. Run install.sh again to add it.";
+  } else if (dns.error) {
+    hint = "The root helper could not read the DNS state: " + dns.error;
+  } else if (dns.webUI === false) {
+    hint = "This Alfis build has no web interface. Reinstall X-Node to get the bundled build with the web UI.";
+  }
+  return `<div class="card section">
+    <header><h3>DNS server</h3><span class="muted small">Alfis</span></header>
+    <table class="facts">
+      <tr><th>Service</th><td class="right">${statePill}</td></tr>
+      <tr><th>Listen</th><td class="right mono">${escapeHtml(dns.listen || "—")}</td></tr>
+      <tr><th>Web UI</th><td class="right mono break">${enabled && dns.webURL ? escapeHtml(dns.webURL) : "—"}</td></tr>
+      ${enabled && dns.password ? `<tr><th>Web password</th><td class="right mono">${escapeHtml(dns.password)}</td></tr>` : ""}
+    </table>
+    ${enabled && dns.webURL
+      ? `<div class="actions"><a class="btn small" href="${escapeHtml(dns.webURL)}" target="_blank" rel="noopener noreferrer">Open Alfis web UI</a></div>`
+      : ""}
+    <p class="hint">${escapeHtml(hint)}</p>
   </div>`;
 }
 
@@ -1182,12 +1230,14 @@ function clientRowHtml(client) {
       </td>
       <td class="right hide-sm" data-label="Last seen">${when(client.lastSeenAt)}</td>
       <td class="right nowrap row-actions" data-label="">
-        <button class="btn small" data-edit="${escapeHtml(client.address)}">Edit</button>
-        <button class="btn small" data-link="${escapeHtml(client.address)}" title="Show the QR code and the link that add this exit to the client">QR / link</button>
-        <button class="btn small" data-token="${escapeHtml(client.address)}">New token</button>
-        <button class="btn small" data-disconnect="${escapeHtml(client.address)}" title="Close all TCP and UDP connections of this client">Disconnect all</button>
-        <button class="btn small ${client.suspended ? "primary" : ""}" data-suspend="${escapeHtml(client.address)}" data-suspended="${client.suspended ? "1" : "0"}">${client.suspended ? "Resume" : "Suspend"}</button>
-        <button class="btn small danger" data-remove="${escapeHtml(client.address)}">Remove</button>
+        <div class="action-grid">
+          <button class="btn small" data-edit="${escapeHtml(client.address)}">Edit</button>
+          <button class="btn small" data-link="${escapeHtml(client.address)}" title="Show the QR code and the link that add this exit to the client">QR / link</button>
+          <button class="btn small" data-token="${escapeHtml(client.address)}">New token</button>
+          <button class="btn small" data-disconnect="${escapeHtml(client.address)}" title="Close all TCP and UDP connections of this client">Disconnect all</button>
+          <button class="btn small ${client.suspended ? "primary" : ""}" data-suspend="${escapeHtml(client.address)}" data-suspended="${client.suspended ? "1" : "0"}">${client.suspended ? "Resume" : "Suspend"}</button>
+          <button class="btn small danger" data-remove="${escapeHtml(client.address)}">Remove</button>
+        </div>
       </td>
     </tr>`;
 }
@@ -1812,6 +1862,8 @@ function settingsHtml() {
   const settings = state.settings || {};
   const web = settings.web || {};
   const usage = settings.usage || {};
+  const dns = settings.dns || {};
+  const dnsStatus = (state.status && state.status.dns) || {};
   const manualPeers = (state.peers && state.peers.manualPeers) || [];
   const candidates = (state.peers && state.peers.candidates) || [];
   const probing = Boolean(state.peers && state.peers.probing);
@@ -1863,6 +1915,24 @@ function settingsHtml() {
       </div>
       <label class="switch"><input type="checkbox" id="s-usage" ${usage.enabled ? "checked" : ""}><span>Traffic accounting (needed for quotas)</span></label>
       <p class="hint">The name is shown in the app, in the invite QR code and in the dashboard. The timezone decides when the daily and monthly quota counters roll over.</p>
+    </form>
+
+    <form class="card section settings-card" data-settings="dns">
+      <header>
+        <h3>DNS server</h3>
+        <button class="btn primary small save-btn hidden" type="submit">Save</button>
+      </header>
+      <div class="form-grid">
+        <label class="switch full"><input type="checkbox" id="s-dns" ${dns.enabled ? "checked" : ""}><span>Run the Alfis DNS server for Yggdrasil clients</span></label>
+        <label class="field"><span>Listen</span><input value="${escapeHtml(dns.listen || "")}" disabled></label>
+        <label class="field"><span>Alfis web password</span><input id="s-dnspass" value="${escapeHtml(dns.webPassword || "")}" placeholder="generated when the server is turned on"></label>
+      </div>
+      <div class="actions">
+        ${dnsStatus.enabled && dnsStatus.webURL
+          ? `<a class="btn small" href="${escapeHtml(dnsStatus.webURL)}" target="_blank" rel="noopener noreferrer">Open Alfis web UI</a>`
+          : ""}
+      </div>
+      <p class="hint">Alfis answers <span class="mono">.ygg</span> names and forwards ordinary names to the upstream resolvers. The client finds this server on its own: Y-Node lists it under Available servers as "DNS from exit node". The link opens the Alfis admin page in a new tab.</p>
     </form>
 
     <form class="card section settings-card" data-settings="access">
@@ -2031,6 +2101,13 @@ function settingsPayload(kind) {
       return { ipv6: $("#s-ipv6").value };
     case "peers":
       return { peerCount: Number($("#s-peercount").value), peerAutoReplace: $("#s-peerauto").checked };
+    case "dns":
+      return {
+        dns: {
+          enabled: $("#s-dns").checked,
+          webPassword: $("#s-dnspass").value.trim(),
+        },
+      };
     case "web":
       return {
         web: {
@@ -2357,23 +2434,35 @@ function wireConfig() {
 /* logs */
 
 function logsHtml() {
+  const wrap = state.logWrap !== false;
   return `
     <div class="card section logs-card">
       <header>
         <h3>Recent log lines</h3>
+        <label class="switch"><input type="checkbox" id="log-wrap" ${wrap ? "checked" : ""}><span>Wrap lines</span></label>
         <label class="switch"><input type="checkbox" id="log-auto" checked><span>Auto refresh</span></label>
         <button class="btn small" id="log-refresh">Refresh</button>
       </header>
-      <pre class="logs" id="log-box">${state.logs.map((entry) =>
+      <pre class="logs${wrap ? " wrap" : ""}" id="log-box">${state.logs.map((entry) =>
         `<span class="${entry.level.toLowerCase()}">${escapeHtml(entry.time)} ${escapeHtml(entry.level)} ${escapeHtml(entry.message)}</span>`
       ).join("\n")}</pre>
-      <p class="hint">journalctl -u x-node -f shows the full log.</p>
+      <div class="actions">
+        <a class="btn small" href="help" target="_blank" rel="noopener noreferrer">Help</a>
+        <span class="hint">journalctl -u x-node -f shows the full log. Help opens the X-Node and Y-Node guide in a new tab.</span>
+      </div>
     </div>`;
 }
 
 function wireLogs() {
   const box = $("#log-box");
   box.scrollTop = box.scrollHeight;
+  const wrap = $("#log-wrap");
+  if (wrap) {
+    wrap.addEventListener("change", () => {
+      state.logWrap = wrap.checked;
+      box.classList.toggle("wrap", wrap.checked);
+    });
+  }
   $("#log-refresh").addEventListener("click", async () => {
     await loadLogs();
     render();

@@ -118,6 +118,26 @@ WEB_PUBLIC_PORT=""
 CREDENTIALS_FILE="/root/x-node-credentials.txt"
 IPV6_MODE="auto"
 IPV6_MODE_SET=0
+# The Alfis DNS server. A fresh installation enables it: the clients get a
+# resolver on the Yggdrasil address of the exit, and the dashboard can turn it
+# off later. ALFIS_VERSION may be overridden from the environment.
+DNS_ENABLED=1
+DNS_ENABLED_SET=0
+DNS_PORT=53
+DNS_PORT_SET=0
+DNS_WEB_PORT=8082
+DNS_WEB_PORT_SET=0
+ALFIS_VERSION="${ALFIS_VERSION:-0.10.0}"
+ALFIS_VERSION_SET=0
+ALFIS_CONF="/etc/x-node/alfis.conf"
+DNS_STATE_DIR="/var/lib/x-node-dns"
+DNS_UNIT="/etc/systemd/system/x-node-dns.service"
+ALFIS_BIN="/usr/local/bin/alfis"
+ALFIS_INSTALLED=0
+# Set when the installed Alfis binary was built with the web UI. The release
+# archive bundles such a build; an upstream nogui binary has no panel.
+ALFIS_WEBUI=0
+DNS_WEB_PASSWORD=""
 UPGRADE=0
 PUBLIC_HOST=""
 PUBLIC_HOST_SET=0
@@ -186,6 +206,13 @@ Options:
   --ipv6 MODE           outbound IPv6: auto (default), prefer or off
   --firewall            install the optional nftables rules
   --no-invite           do not create the first invite
+  --dns                 run the Alfis DNS server for clients (default: ask,
+                        default yes)
+  --no-dns              do not install or run the DNS server
+  --dns-port N          DNS port on the Yggdrasil address (default: 53)
+  --dns-web-port N      Alfis web interface port (default: 8082)
+  --alfis-version VER   download this Alfis version instead of the bundled
+                        binary (default: the bundled 0.10.0)
   --web                 enable the web interface (default: ask, default yes)
   --no-web              do not serve the web interface at all
   --web-port N          port of the web interface (default: 8443 behind nginx,
@@ -218,6 +245,8 @@ Examples:
   sudo ./install.sh --ygg-port 0 --yes
   sudo ./install.sh --web-port 9443 --web-bind all --web-tls self --yes
   sudo ./install.sh --no-web --yes
+  sudo ./install.sh --no-dns --yes
+  sudo ./install.sh --dns --dns-port 5353 --yes
   sudo ./install.sh --upgrade --yes
   sudo ./install.sh --firewall --allow-all
 EOF
@@ -391,6 +420,11 @@ while [ "$#" -gt 0 ]; do
         --firewall)       FIREWALL=1; FIREWALL_SET=1; shift ;;
         --no-invite)      MAKE_INVITE=0; MAKE_INVITE_SET=1; shift ;;
         --ipv6)           need_value "$@"; IPV6_MODE="$2"; IPV6_MODE_SET=1; shift 2 ;;
+        --dns)            DNS_ENABLED=1; DNS_ENABLED_SET=1; shift ;;
+        --no-dns)         DNS_ENABLED=0; DNS_ENABLED_SET=1; shift ;;
+        --dns-port)       need_value "$@"; DNS_PORT="$2"; DNS_PORT_SET=1; shift 2 ;;
+        --dns-web-port)   need_value "$@"; DNS_WEB_PORT="$2"; DNS_WEB_PORT_SET=1; shift 2 ;;
+        --alfis-version)  need_value "$@"; ALFIS_VERSION="$2"; ALFIS_VERSION_SET=1; shift 2 ;;
         --web)            WEB_ENABLED=1; WEB_ENABLED_SET=1; shift ;;
         --no-web)         WEB_ENABLED=0; WEB_ENABLED_SET=1; shift ;;
         --web-port)       need_value "$@"; WEB_PORT="$2"; WEB_PORT_SET=1; shift 2 ;;
@@ -412,6 +446,7 @@ while [ "$#" -gt 0 ]; do
 done
 
 YGG_VERSION="${YGG_VERSION#v}"
+ALFIS_VERSION="${ALFIS_VERSION#v}"
 
 # --uninstall hands the whole job to uninstall.sh: one entry point is easier to
 # remember, and the uninstaller already knows about the manifest and Yggdrasil.
@@ -434,9 +469,13 @@ command -v systemctl >/dev/null 2>&1 || die "systemd is required"
 command -v apt-get >/dev/null 2>&1 || die "apt-get is required"
 
 ARCH="$(uname -m)"
+# The upstream Alfis release names the 32-bit hard-float build "armhf", while
+# the X-Node archive and the Go build call it "arm".
+ALFIS_ARCH="$ARCH"
 case "$ARCH" in
-    x86_64|amd64)   ARCH=amd64 ;;
-    aarch64|arm64)  ARCH=arm64 ;;
+    x86_64|amd64)   ARCH=amd64; ALFIS_ARCH=amd64 ;;
+    aarch64|arm64)  ARCH=arm64; ALFIS_ARCH=arm64 ;;
+    armv7l|armv7)   ARCH=arm; ALFIS_ARCH=armhf ;;
     *) die "unsupported architecture: $ARCH" ;;
 esac
 
@@ -514,6 +553,26 @@ if [ -f "$PREVIOUS_CONFIG" ] && command -v python3 >/dev/null 2>&1; then
             auto|prefer|off) IPV6_MODE="$previous_ipv6" ;;
         esac
     fi
+    if [ "$DNS_ENABLED_SET" -eq 0 ]; then
+        case "$(config_get "$PREVIOUS_CONFIG" dns.enabled)" in
+            0) DNS_ENABLED=0 ;;
+            1) DNS_ENABLED=1 ;;
+        esac
+    fi
+    if [ "$DNS_PORT_SET" -eq 0 ]; then
+        previous_dns_port="$(config_get "$PREVIOUS_CONFIG" dns.port)"
+        case "$previous_dns_port" in
+            ''|*[!0-9]*) ;;
+            *) DNS_PORT="$previous_dns_port"; DNS_PORT_SET=1 ;;
+        esac
+    fi
+    if [ "$DNS_WEB_PORT_SET" -eq 0 ]; then
+        previous_dns_web_port="$(config_get "$PREVIOUS_CONFIG" dns.webPort)"
+        case "$previous_dns_web_port" in
+            ''|*[!0-9]*) ;;
+            *) DNS_WEB_PORT="$previous_dns_web_port"; DNS_WEB_PORT_SET=1 ;;
+        esac
+    fi
 fi
 
 # The defaults are chosen here, before the questions, so the prompt shows the
@@ -589,6 +648,11 @@ Every question has a default in brackets: press Enter to accept it.
   --firewall     install the optional nftables rules (a second line of
                  defence around the SOCKS5/API ports).
   --no-invite    do not create the first invite QR code.
+  --dns          run the built-in Alfis DNS server for the clients: .ygg names
+                 and ordinary names through upstream resolvers. The dashboard
+                 and Y-Node discover it automatically. On by default. The
+                 release bundles Alfis with its web UI; the link in Settings
+                 opens the Alfis panel in a new tab.
 
 EOF
     if [ "$NODE_NAME_SET" -eq 0 ]; then
@@ -656,6 +720,15 @@ if [ "$ASSUME_YES" -eq 0 ] && [ "$WEB_ENABLED_SET" -eq 0 ]; then
     read -r -p "Serve the web interface (browser dashboard)? [Y/n]: " answer
     case "$answer" in
         n|N|no|NO) WEB_ENABLED=0 ;;
+    esac
+fi
+
+# The DNS server is offered once, like the web interface. It is independent of
+# the dashboard: the unit can also be managed with "x-node dns on|off".
+if [ "$ASSUME_YES" -eq 0 ] && [ "$DNS_ENABLED_SET" -eq 0 ]; then
+    read -r -p "Run the Alfis DNS server for clients? [Y/n]: " answer
+    case "$answer" in
+        n|N|no|NO) DNS_ENABLED=0 ;;
     esac
 fi
 
@@ -773,6 +846,23 @@ if [ "$WEB_ENABLED" -eq 1 ]; then
     fi
 fi
 
+if [ "$DNS_ENABLED" -eq 1 ]; then
+    case "$DNS_PORT" in ''|*[!0-9]*) die "the DNS port must be a number" ;; esac
+    case "$DNS_WEB_PORT" in ''|*[!0-9]*) die "the Alfis web port must be a number" ;; esac
+    [ "$DNS_PORT" -ge 1 ] && [ "$DNS_PORT" -le 65535 ] || die "the DNS port is out of range"
+    [ "$DNS_WEB_PORT" -ge 1 ] && [ "$DNS_WEB_PORT" -le 65535 ] || die "the Alfis web port is out of range"
+    [ "$DNS_PORT" -ne "$DNS_WEB_PORT" ] || die "the DNS and Alfis web ports must differ"
+    # Both listeners are bound to the Yggdrasil address, so they share a port
+    # space with SOCKS5 and, when it is bound there, the web interface.
+    [ "$DNS_PORT" -ne "$SOCKS_PORT" ] || die "the DNS port must differ from the SOCKS5 port"
+    if [ "$API_PORT" -gt 0 ]; then
+        [ "$DNS_PORT" -ne "$API_PORT" ] || die "the DNS port must differ from the API port"
+    fi
+    if [ "$WEB_ENABLED" -eq 1 ] && [ "$WEB_BIND" != "loopback" ]; then
+        [ "$DNS_WEB_PORT" -ne "$WEB_PORT" ] || die "the Alfis web port must differ from the web interface port"
+    fi
+fi
+
 # The port the HTTP API is reachable on; 0 means it shares the SOCKS5 listener.
 API_PORT_EFFECTIVE="$API_PORT"
 [ "$API_PORT_EFFECTIVE" -ne 0 ] || API_PORT_EFFECTIVE="$SOCKS_PORT"
@@ -795,6 +885,7 @@ $([ "$YGG_PROTO" = "wss" ] && [ "$YGG_PORT" -gt 0 ] && printf '  WS backend:    
   Public peers:  $PEER_COUNT, automatic replacement $([ "$PEER_AUTO_REPLACE" -eq 1 ] && echo "on" || echo "off")
   IPv6:          $IPV6_MODE
   Web interface: $([ "$WEB_ENABLED" -eq 1 ] && echo "on, $WEB_TLS TLS, $WEB_BIND:${WEB_PORT}${WEB_PATH}" || echo "off")
+  DNS server:    $([ "$DNS_ENABLED" -eq 1 ] && echo "on, Alfis $ALFIS_VERSION, port $DNS_PORT, web $DNS_WEB_PORT" || echo "off")
   Firewall:      $FIREWALL
   First invite:  $MAKE_INVITE
 
@@ -933,6 +1024,52 @@ install -m 0755 -o root -g root "$BIN_DIR/x-node-peerprobe" /usr/local/bin/x-nod
 LEGACY_PROBE=/usr/local/bin/ygg-peerprobe
 if [ -f "$LEGACY_PROBE" ] && [ "$LEGACY_PROBE" != "/usr/local/bin/x-node-peerprobe" ]; then
     rm -f "$LEGACY_PROBE"
+fi
+
+# Alfis is the DNS server the exit offers to its clients. The release archive
+# bundles a build with the web UI: the upstream nogui binaries are built
+# without that feature, and the dashboard link to the Alfis panel would lead
+# nowhere. An explicit --alfis-version or an archive without the binary (a local
+# build, an older release) falls back to the upstream nogui download, which
+# still serves DNS.
+if [ "$DNS_ENABLED" -eq 1 ]; then
+    log "Installing Alfis $ALFIS_VERSION (DNS server)"
+    # A binary from an earlier run stays owned by this installer even when the
+    # download below fails, so the uninstaller removes it.
+    if [ -x "$ALFIS_BIN" ]; then
+        ALFIS_INSTALLED=1
+        if grep -aq "alfis_session" "$ALFIS_BIN" 2>/dev/null; then
+            ALFIS_WEBUI=1
+        fi
+    fi
+    if [ "$ALFIS_VERSION_SET" -eq 0 ] && [ -f "$BIN_DIR/alfis" ]; then
+        install -m 0755 -o root -g root "$BIN_DIR/alfis" "$ALFIS_BIN"
+        ALFIS_INSTALLED=1
+        ALFIS_WEBUI=1
+        echo "    binary: $ALFIS_BIN (bundled, with web UI)"
+    else
+        alfis_url="https://github.com/Revertron/Alfis/releases/download/v${ALFIS_VERSION}/alfis-linux-${ALFIS_ARCH}-v${ALFIS_VERSION}-nogui"
+        alfis_tmp="$(mktemp)"
+        if curl -fsSL --retry 3 --connect-timeout 15 -o "$alfis_tmp" "$alfis_url"; then
+            install -m 0755 -o root -g root "$alfis_tmp" "$ALFIS_BIN"
+            ALFIS_INSTALLED=1
+            ALFIS_WEBUI=0
+            # The upstream nogui build has no web UI. Detect it here as well, so
+            # the summary and the credentials file match what the daemon will
+            # report at runtime.
+            if grep -aq "alfis_session" "$ALFIS_BIN" 2>/dev/null; then
+                ALFIS_WEBUI=1
+            fi
+            echo "    binary: $ALFIS_BIN"
+        elif [ -x "$ALFIS_BIN" ]; then
+            warn "could not download $alfis_url; keeping the installed $ALFIS_BIN"
+        else
+            warn "could not download $alfis_url"
+            warn "the DNS server stays off; install Alfis by hand and run: x-node dns on"
+            DNS_ENABLED=0
+        fi
+        rm -f "$alfis_tmp"
+    fi
 fi
 
 PEERS_MODE="set"
@@ -1220,6 +1357,9 @@ if ! id -u "$SERVICE_USER" >/dev/null 2>&1; then
 fi
 install -d -m 0700 -o "$SERVICE_USER" -g "$SERVICE_USER" "$STATE_DIR"
 chown -R "$SERVICE_USER:$SERVICE_USER" "$STATE_DIR"
+# Alfis keeps its keys and zone data here. The unit runs as the service user
+# with ProtectSystem=strict, so this directory is the only writable path.
+install -d -m 0750 -o "$SERVICE_USER" -g "$SERVICE_USER" "$DNS_STATE_DIR"
 install -d -m 0750 -o root -g "$SERVICE_USER" /etc/x-node
 
 # The dashboard can restart the two services and write the configuration files.
@@ -1267,14 +1407,15 @@ python3 - "$EXIT_CONFIG" "$exit_tmp" "$NODE_NAME" "$ADDRESS" "$SOCKS_PORT" "$API
     "$allow_arg" "$registration_arg" "$PEER_URI" "$peer_count_arg" \
     "$peer_replace_arg" "$SEED_PEERS" "$UPGRADE" "$WEB_ENABLED" "$WEB_PORT" \
     "$WEB_BIND" "$WEB_TLS" "$WEB_PATH" "$IPV6_MODE" "$SYSTEM_TIMEZONE" \
-    "$WEB_PUBLIC_URL" <<'PY'
+    "$WEB_PUBLIC_URL" "$DNS_ENABLED" "$DNS_PORT" "$DNS_WEB_PORT" <<'PY'
 import json
 import os
 import sys
 
 (source, target, name, address, socks, api, allow_all, registration, peer_uri,
  peer_count, peer_replace, seed_peers, upgrade, web_enabled, web_port, web_bind,
- web_tls, web_path, ipv6_mode, timezone, public_url) = sys.argv[1:22]
+ web_tls, web_path, ipv6_mode, timezone, public_url, dns_enabled, dns_port,
+ dns_web_port) = sys.argv[1:25]
 defaults = {
     "inviteTTL": "24h",
     "inviteUses": 1,
@@ -1385,6 +1526,21 @@ for key in ("monthlyBytes", "dailyBytes", "downKbps", "upKbps"):
     quotas.setdefault(key, 0)
 config["quotas"] = quotas
 
+# The DNS server is Alfis running as "x-node-dns.service". The listener
+# addresses are derived from listenAddress by the daemon, so the file only
+# carries the switch, the ports and the upstream resolvers. The web password
+# stays empty here: "x-node dns on" generates it once and keeps it in the
+# settings overlay.
+dns = config.get("dns")
+if not isinstance(dns, dict):
+    dns = {}
+dns["enabled"] = dns_enabled == "1"
+dns["port"] = int(dns_port)
+dns["webPort"] = int(dns_web_port)
+dns.setdefault("forwarders", ["94.140.14.14:53", "94.140.15.15:53"])
+dns.setdefault("cacheMemoryLimitMB", 100)
+config["dns"] = dns
+
 with open(target, "w", encoding="utf-8") as handle:
     json.dump(config, handle, indent=2, ensure_ascii=False)
     handle.write("\n")
@@ -1431,13 +1587,15 @@ if [ -f "$STATE_DIR/install.json" ]; then
 fi
 python3 - "$STATE_DIR/install.json" "$INSTALLED_YGG_VERSION" "$YGGDRASIL_WAS_INSTALLED" \
     "$YGG_CONF" "$YGG_CONF_BACKUP" "$YGG_PORT" "$YGG_PROTO" "$YGG_WS_PORT" \
-    "$SOCKS_PORT" "$API_PORT" "$PEER_URI" <<'PY'
+    "$SOCKS_PORT" "$API_PORT" "$PEER_URI" "$DNS_ENABLED" "$DNS_PORT" \
+    "$DNS_WEB_PORT" "$ALFIS_VERSION" "$ALFIS_INSTALLED" <<'PY'
 import datetime
 import json
 import sys
 
 (path, version, was_installed, ygg_conf, ygg_backup,
- listen_port, listen_proto, ws_port, socks_port, api_port, peer_uri) = sys.argv[1:12]
+ listen_port, listen_proto, ws_port, socks_port, api_port, peer_uri,
+ dns_enabled, dns_port, dns_web_port, alfis_version, alfis_installed) = sys.argv[1:17]
 manifest = {
     "version": 2,
     "installedAt": datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -1451,8 +1609,14 @@ manifest = {
     "socksPort": int(socks_port),
     "apiPort": int(api_port),
     "peerURI": peer_uri,
+    "dnsEnabled": dns_enabled == "1",
+    "dnsPort": int(dns_port),
+    "dnsWebPort": int(dns_web_port),
+    "alfisVersion": alfis_version,
+    "alfisInstalled": alfis_installed == "1",
     "serviceUser": "x-node",
     "stateDir": "/var/lib/x-node",
+    "dnsStateDir": "/var/lib/x-node-dns",
     "configPath": "/etc/x-node/config.json",
 }
 with open(path, "w", encoding="utf-8") as handle:
@@ -1556,6 +1720,36 @@ if [ "$api_ready" -eq 0 ]; then
     die "the registration API did not answer on [$ADDRESS]:$API_PORT_EFFECTIVE"
 fi
 
+# The DNS server is started through the CLI, so the password generation, the
+# Alfis configuration and the unit all come from one code path. The daemon is
+# already running: the settings overlay it writes is hot-reloaded, and the
+# dashboard sees the new state at once.
+if [ "$DNS_ENABLED" -eq 1 ]; then
+    log "Starting the DNS server"
+    if dns_output="$(/usr/local/bin/x-node dns on -config "$EXIT_CONFIG" 2>&1)"; then
+        DNS_WEB_PASSWORD="$(printf '%s\n' "$dns_output" | sed -n 's/^Alfis web password: //p' | head -n 1)"
+        echo "    listen: [$ADDRESS]:$DNS_PORT"
+        if [ "$ALFIS_WEBUI" -eq 1 ]; then
+            echo "    web:    http://[$ADDRESS]:$DNS_WEB_PORT/"
+        else
+            echo "    web:    not available in this Alfis build"
+        fi
+        if [ -n "$DNS_WEB_PASSWORD" ]; then
+            echo "    password: $DNS_WEB_PASSWORD"
+        fi
+    else
+        warn "the DNS server did not start:"
+        printf '%s\n' "$dns_output" | sed 's/^/    /' >&2
+        warn "the exit keeps running; fix the problem and run: x-node dns on"
+        # Keep the saved switch in step with the summary: the unit is not up.
+        /usr/local/bin/x-node dns off -config "$EXIT_CONFIG" >/dev/null 2>&1 || true
+        DNS_ENABLED=0
+    fi
+else
+    # A reinstall with --no-dns must stop a unit left by an earlier run.
+    /usr/local/bin/x-node dns off -config "$EXIT_CONFIG" >/dev/null 2>&1 || true
+fi
+
 peers_up=0
 for _ in $(seq 1 20); do
     peers_up="$(yggdrasilctl getPeers 2>/dev/null | grep -c -i 'true' || true)"
@@ -1615,6 +1809,40 @@ EOF
     fi
 fi
 
+# The Alfis web password is generated once, like the panel password. The file
+# may already exist with the web credentials, so the DNS block is appended
+# instead of overwriting it.
+if [ "$DNS_ENABLED" -eq 1 ] && [ -n "$DNS_WEB_PASSWORD" ] \
+    && ! grep -q "DNS server (Alfis)" "$CREDENTIALS_FILE" 2>/dev/null; then
+    umask 077
+    {
+        [ -f "$CREDENTIALS_FILE" ] || printf 'X-Node DNS server\n=================\n'
+        cat <<EOF
+
+DNS server (Alfis)
+==================
+URL:      http://[$ADDRESS]:$DNS_WEB_PORT/
+Password: $DNS_WEB_PASSWORD
+
+The password is stored in dns.webPassword and shown on the dashboard.
+Change it in Settings -> DNS server.
+EOF
+    } >> "$CREDENTIALS_FILE"
+    chmod 0600 "$CREDENTIALS_FILE"
+    umask 022
+    echo "    DNS credentials: $CREDENTIALS_FILE"
+fi
+
+if [ "$DNS_ENABLED" -eq 1 ]; then
+    if [ "$ALFIS_WEBUI" -eq 1 ]; then
+        DNS_SUMMARY="[$ADDRESS]:$DNS_PORT, web http://[$ADDRESS]:$DNS_WEB_PORT/ (Alfis)"
+    else
+        DNS_SUMMARY="[$ADDRESS]:$DNS_PORT (Alfis, no web UI)"
+    fi
+else
+    DNS_SUMMARY="disabled"
+fi
+
 echo
 log "The exit node is running"
 cat <<EOF
@@ -1628,6 +1856,7 @@ cat <<EOF
   API:         [$ADDRESS]:$API_PORT_EFFECTIVE$([ "$API_PORT" -eq 0 ] && echo " (shared with SOCKS5, /v1/...)" || echo "")
   IPv6:        $IPV6_MODE
   Web:         $([ "$WEB_ENABLED" -eq 1 ] && echo "$WEB_URL (login $WEB_LOGIN)" || echo "disabled")
+  DNS:         $DNS_SUMMARY
   Config:      $EXIT_CONFIG
   State:       $STATE_DIR
   Allowlist:   $(x-node allow list -config "$EXIT_CONFIG" 2>/dev/null | tail -n +2 | wc -l) client(s)
@@ -1641,6 +1870,9 @@ Useful commands:
   x-node allow add 200:... -config $EXIT_CONFIG
   x-node web url -config $EXIT_CONFIG
   x-node web password -config $EXIT_CONFIG
+  x-node dns status -config $EXIT_CONFIG
+  x-node dns on -config $EXIT_CONFIG
+  x-node dns off -config $EXIT_CONFIG
   x-node peers status -config $EXIT_CONFIG
   x-node peers count 5 -config $EXIT_CONFIG
   x-node peers auto off -config $EXIT_CONFIG

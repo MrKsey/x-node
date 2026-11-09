@@ -36,7 +36,7 @@ type commandHelp struct {
 
 var commandOrder = []string{
 	"serve", "invite", "allow", "clients", "usage", "quota", "peers",
-	"status", "doctor", "update", "web", "keygen", "version", "help",
+	"status", "doctor", "update", "web", "dns", "keygen", "version", "help",
 }
 
 var commands = map[string]commandHelp{
@@ -338,6 +338,33 @@ login attempt, so no restart is needed.
 			"sudo x-node web reset-path",
 		},
 		SeeAlso: []string{"status"},
+	},
+	"dns": {
+		Name:    "dns",
+		Summary: "Turn the Alfis DNS server for clients on or off",
+		Usage: []string{
+			"x-node dns status [-config PATH]",
+			"sudo x-node dns on [-config PATH]",
+			"sudo x-node dns off [-config PATH]",
+		},
+		Details: `The DNS server is Alfis running as "x-node-dns.service". It listens on
+the Yggdrasil address of this exit, so a client that already reaches the exit
+can use it for names in the Yggdrasil network. The same switch is on the
+dashboard and in Settings → DNS server; the web UI opens the Alfis interface in
+a new tab.
+
+"on" generates the Alfis web password when it is empty, writes the effective
+settings and starts the unit. "off" stops and disables the unit but keeps the
+configuration, so turning it back on does not lose the password.`,
+		Flags: []flagHelp{
+			{Flag: "-config PATH", Default: "/etc/x-node/config.json", Env: "X_NODE_CONFIG", Text: "configuration file to read"},
+		},
+		Examples: []string{
+			"x-node dns status",
+			"sudo x-node dns on",
+			"sudo x-node dns off",
+		},
+		SeeAlso: []string{"status", "web"},
 	},
 	"keygen": {
 		Name:    "keygen",

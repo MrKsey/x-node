@@ -50,6 +50,7 @@ In both cases traffic travels over the Yggdrasil IPv6 tunnel to X-Node and only 
 - **Quotas and speed limits.** Individual daily and monthly traffic limits, as well as inbound and outbound speed limits.
 - **Traffic accounting.** Separate statistics for each client: per day, per month and for all time. Counters survive service restarts.
 - **Web interface.** Monitoring of the node, clients, peers and traffic; management of invites, quotas and settings; log viewing and configuration editing.
+- **DNS server for clients.** An optional [Alfis](https://github.com/Revertron/Alfis) resolver on the Yggdrasil address of the exit: `.ygg` names from the Alfis zone and ordinary names through upstream resolvers. It is installed by default, managed by `x-node-dns.service`, and advertised to Y-Node automatically.
 - **Yggdrasil peer management.** Automatic selection of public peers, availability checks and replacement of unstable nodes. Peers added manually are kept without automatic replacement.
 - **CLI.** Management of the server, clients, invites, quotas and peers from the command line.
 - **Updates and diagnostics.** New version checks, binary updates and a built-in check of the configuration and installation state.
@@ -62,7 +63,7 @@ Ubuntu 24.04 and Debian 12 are supported. Installation is performed as `root`:
 sudo bash <(curl -fsSL https://raw.githubusercontent.com/MrKsey/x-node/main/install.sh)
 ```
 
-The installer downloads the current release, installs Yggdrasil and the X-Node components, configures network parameters and systemd services. During the process you can specify the node name, public address, peering parameters and web interface settings.
+The installer downloads the current release, installs Yggdrasil and the X-Node components, configures network parameters and systemd services. During the process you can specify the node name, public address, peering parameters, web interface settings and whether the DNS server should run.
 
 After installation you are offered to create the first invite for connecting a client. The web interface address and administrator credentials are printed at the end of the installation and saved to:
 
@@ -101,6 +102,10 @@ Main installer options:
 | `--web` / `--no-web` | Enable or disable the web interface |
 | `--web-port N` | Web interface port |
 | `--web-password PASS` | Set the administrator password |
+| `--dns` / `--no-dns` | Enable or skip the Alfis DNS server (default: ask, default yes) |
+| `--dns-port N` | DNS port on the Yggdrasil address (default `53`) |
+| `--dns-web-port N` | Alfis web interface port (default `8082`) |
+| `--alfis-version VER` | Download this Alfis version instead of the bundled binary (default: the bundled `0.10.0`) |
 | `--firewall` | Install nftables rules |
 | `--upgrade` | Upgrade X-Node keeping settings and state |
 | `--yes` | Disable interactive questions |
@@ -125,16 +130,60 @@ The current panel address can be obtained with:
 sudo x-node web url
 ```
 
+## DNS server
+
+X-Node can run [Alfis](https://github.com/Revertron/Alfis) as a DNS resolver for its clients. It listens on the Yggdrasil address of the exit and is reachable only through Yggdrasil:
+
+- `.ygg` names and other Yggdrasil names come from the Alfis zone;
+- ordinary names are forwarded to the upstream resolvers from `dns.forwarders` (two Quad9 addresses by default);
+- the Alfis web interface listens on the Yggdrasil address on port `8082` and is protected by its own password.
+
+The installer enables the server by default. It installs the `alfis` binary, writes `/etc/x-node/alfis.conf`, creates `/var/lib/x-node-dns` and enables `x-node-dns.service`. The unit runs as the `x-node` user with `CAP_NET_BIND_SERVICE` and a read-only filesystem except for its state directory.
+
+Release archives bundle Alfis built with the `webui` feature, so the panel link works out of the box. The upstream `nogui` binaries are built without it: when such a binary is installed instead (a local build or an older archive), the resolver keeps working, the unit omits `--web-ui` and the link is hidden.
+
+The same switch is available in three places:
+
+```bash
+sudo x-node dns status
+sudo x-node dns on
+sudo x-node dns off
+```
+
+- **Settings → DNS server** in the web interface: the switch, the Alfis web password and a link that opens the Alfis panel in a new tab;
+- the **DNS server** card on the dashboard: state, listen address, password and the same link;
+- `x-node status`: a short DNS section.
+
+When the server is enabled, the status API reports `capabilities.dns = true` with `dnsAddress` and `dnsPort`, and the `yggnode://` link carries `dns` and `dnsport`. Y-Node reads them and offers the resolver under **Available servers** as **DNS from exit node**; the **DNS exit node** switch in the Y-Node exit settings puts it into **IN USE** with a lock.
+
+The configuration lives in the `dns` section of `config.json`:
+
+```json
+{
+  "dns": {
+    "enabled": true,
+    "port": 53,
+    "webPort": 8082,
+    "forwarders": ["94.140.14.14:53", "94.140.15.15:53"],
+    "cacheMemoryLimitMB": 100
+  }
+}
+```
+
+`dns.listen` and `dns.webListen` are derived from `listenAddress` and the two ports; set them explicitly only when the resolver must bind another address. `dns.webPassword` is generated when the server is first enabled and is shown on the dashboard and in `/root/x-node-credentials.txt`.
+
+If the archive has no bundled binary and Alfis cannot be downloaded during the installation, the exit still installs and runs; the DNS card shows that Alfis is missing, and `x-node dns on` explains what to do after the binary is installed.
+
 ## Management
 
 X-Node provides a web interface and a CLI. The web panel includes the following sections:
 
-- **Dashboard** — server state, traffic statistics, peers, quotas and the main node parameters.
+- **Dashboard** — server state, traffic statistics, peers, quotas, the DNS server and the main node parameters.
 - **Clients** — the list of registered clients, device details, statistics, access and limit management.
 - **Invites** — creating and revoking invites, setting the expiry time and the number of registrations, viewing QR codes.
-- **Settings** — node, access, limits, UDP, IPv6, public and manual peers, and web interface parameters.
+- **Settings** — node, DNS server, access, limits, UDP, IPv6, public and manual peers, and web interface parameters.
 - **Configuration** — viewing and editing `config.json` and `yggdrasil.conf` with validation before saving.
-- **Logs** — viewing the latest log entries.
+- **Logs** — viewing the latest log entries, with a wrap-lines switch and a link to the built-in guide.
 
 Administrative operations such as applying configuration and restarting services from the web interface are handled by a separate `x-node-helper` service. It performs privileged actions over a Unix socket without giving the web process full root access.
 
@@ -157,6 +206,9 @@ sudo x-node usage                  # traffic statistics
 sudo x-node quota show             # current quotas
 sudo x-node web url                # web interface address
 sudo x-node web password           # change the web interface password
+sudo x-node dns status             # DNS server state
+sudo x-node dns on                 # start the DNS server
+sudo x-node dns off                # stop the DNS server
 ```
 
 ## Connecting clients

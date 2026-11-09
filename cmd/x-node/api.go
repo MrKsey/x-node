@@ -48,6 +48,13 @@ type capabilities struct {
 	Registration bool `json:"registration"`
 	Token        bool `json:"token"`
 
+	// DNS tells the app that this exit also runs a resolver for its clients.
+	// DNSAddress is the Yggdrasil address to query; DNSPort is normally 53 and
+	// is sent separately because the app stores DNS servers as bare addresses.
+	DNS        bool   `json:"dns"`
+	DNSAddress string `json:"dnsAddress,omitempty"`
+	DNSPort    int    `json:"dnsPort,omitempty"`
+
 	// IPv6State explains the IPv6 flag: "ok", "none" (no global address),
 	// "broken" (an address the provider does not route) or "off" (disabled in
 	// the settings). An old client ignores it; a new one stops sending IPv6
@@ -225,6 +232,9 @@ func (a *apiServer) capabilities() capabilities {
 		UDP:          a.config().UDPEnabled,
 		Registration: a.config().Registration,
 		Token:        true,
+		DNS:          a.config().DNS.Enabled,
+		DNSAddress:   a.config().dnsServerAddress(),
+		DNSPort:      a.config().dnsServerPort(),
 	}
 	// IPv6 is a property of the host, not of the build: the exit may have an
 	// address the provider does not route, or no address at all. Reporting a

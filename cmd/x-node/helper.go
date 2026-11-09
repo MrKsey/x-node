@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -14,6 +15,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -37,6 +39,14 @@ const (
 	helperManifest   = "/var/lib/x-node/install.json"
 	helperBackupDir  = "/var/backups"
 	helperMaxConfig  = 512 << 10
+
+	// The DNS server is a separate process: Alfis needs CAP_NET_BIND_SERVICE
+	// for port 53, which the hardened x-node service deliberately does not
+	// have. The helper owns the config, the unit and the enable/disable calls.
+	helperDNSConfig  = "/etc/x-node/alfis.conf"
+	helperDNSState   = "/var/lib/x-node-dns"
+	helperDNSUnit    = "/etc/systemd/system/x-node-dns.service"
+	helperDNSUnitBin = "/usr/local/bin/alfis"
 	// helperUnitPath is the service the installer writes. The helper repairs it
 	// at start, because an in-place upgrade only replaces binaries.
 	helperUnitPath = "/etc/systemd/system/x-node.service"
@@ -48,6 +58,9 @@ type helperRequest struct {
 	Service string `json:"service,omitempty"`
 	File    string `json:"file,omitempty"`
 	Content string `json:"content,omitempty"`
+	// Enabled is used by dns-sync: true writes the configuration and starts the
+	// unit, false stops and disables it.
+	Enabled *bool `json:"enabled,omitempty"`
 }
 
 // requestHelperInstalled reports whether the root helper is running. Without
@@ -246,11 +259,208 @@ func helperDispatch(request helperRequest) (any, error) {
 			return nil, err
 		}
 		return map[string]any{"ok": true, "path": path}, nil
+	case "dns-status":
+		return helperDNSStatus()
+	case "dns-sync":
+		if request.Enabled == nil {
+			return nil, errors.New("dns-sync needs the enabled field")
+		}
+		return helperDNSSync(*request.Enabled, request.Content)
 	case "upgrade":
 		return helperUpgrade()
 	default:
 		return nil, fmt.Errorf("unknown helper action %q", request.Action)
 	}
+}
+
+// dnsBinaryPath finds the Alfis binary the unit should run. The installer puts
+// it in /usr/local/bin; a distribution package keeps it in /usr/bin.
+func dnsBinaryPath() string {
+	if path, err := exec.LookPath("alfis"); err == nil {
+		return path
+	}
+	if info, err := os.Stat(helperDNSUnitBin); err == nil && !info.IsDir() {
+		return helperDNSUnitBin
+	}
+	return ""
+}
+
+// alfisWebUICache keeps the last probe of the Alfis binary. The dashboard asks
+// for the DNS state every few seconds, and reading a 20 MB executable on every
+// request would be wasteful.
+var alfisWebUICache struct {
+	sync.Mutex
+	path      string
+	size      int64
+	mod       time.Time
+	supported bool
+}
+
+// alfisWebUISupported reports whether the Alfis binary was built with the
+// "webui" feature. The nogui binaries published upstream are built without it
+// and exit when --web-ui is passed, so the unit must not use the flag there.
+//
+// The session cookie name is compiled into the webui module only, while the
+// "no web UI support" message is compiled into the branch that rejects the
+// flag. Both are string literals, so stripping the symbols keeps them.
+func alfisWebUISupported(binary string) bool {
+	if binary == "" {
+		return false
+	}
+	info, err := os.Stat(binary)
+	if err != nil {
+		return false
+	}
+	alfisWebUICache.Lock()
+	if alfisWebUICache.path == binary && alfisWebUICache.size == info.Size() &&
+		alfisWebUICache.mod.Equal(info.ModTime()) {
+		supported := alfisWebUICache.supported
+		alfisWebUICache.Unlock()
+		return supported
+	}
+	alfisWebUICache.Unlock()
+
+	data, err := os.ReadFile(binary)
+	supported := err == nil &&
+		bytes.Contains(data, []byte("alfis_session")) &&
+		!bytes.Contains(data, []byte("This build of ALFIS has no web UI support!"))
+
+	alfisWebUICache.Lock()
+	alfisWebUICache.path = binary
+	alfisWebUICache.size = info.Size()
+	alfisWebUICache.mod = info.ModTime()
+	alfisWebUICache.supported = supported
+	alfisWebUICache.Unlock()
+	return supported
+}
+
+// helperDNSStatus reports what the dashboard needs to draw the DNS card. The
+// service state comes from systemd; a missing unit is "inactive", not an error.
+func helperDNSStatus() (any, error) {
+	binary := dnsBinaryPath()
+	state, _ := systemctlOutput("is-active", "x-node-dns")
+	if state == "" {
+		state = "inactive"
+	}
+	enabled, _ := systemctlOutput("is-enabled", "x-node-dns")
+	config := false
+	if info, err := os.Stat(helperDNSConfig); err == nil && !info.IsDir() {
+		config = true
+	}
+	return map[string]any{
+		"ok":        true,
+		"installed": binary != "",
+		"binary":    binary,
+		"webUI":     alfisWebUISupported(binary),
+		"config":    config,
+		"active":    state == "active" || state == "activating",
+		"enabled":   enabled == "enabled",
+		"state":     state,
+	}, nil
+}
+
+func systemctlOutput(args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "systemctl", args...).CombinedOutput()
+	return strings.TrimSpace(string(out)), err
+}
+
+// helperDNSSync writes the Alfis configuration and the unit, then starts or
+// stops the service. The configuration is generated by the daemon from the
+// live settings, so this function never has to parse TOML.
+func helperDNSSync(enabled bool, content string) (any, error) {
+	if !enabled {
+		out, err := systemctlOutput("disable", "--now", "x-node-dns")
+		if err != nil {
+			// A unit that does not exist is already in the wanted state.
+			message := strings.ToLower(out + " " + err.Error())
+			if !strings.Contains(message, "not found") && !strings.Contains(message, "no such file") &&
+				!strings.Contains(message, "does not exist") {
+				return nil, fmt.Errorf("stop x-node-dns: %s", strings.TrimSpace(out))
+			}
+		}
+		return helperDNSStatus()
+	}
+
+	binary := dnsBinaryPath()
+	if binary == "" {
+		return nil, errors.New("Alfis is not installed; install the alfis binary in /usr/local/bin or run the installer again")
+	}
+	if strings.TrimSpace(content) == "" {
+		return nil, errors.New("the DNS configuration is empty")
+	}
+	if !strings.Contains(content, "[dns]") || !strings.Contains(content, "[webui]") {
+		return nil, errors.New("the DNS configuration has no [dns] or [webui] section")
+	}
+	if len(content) > helperMaxConfig {
+		return nil, fmt.Errorf("the DNS configuration is larger than %d KiB", helperMaxConfig>>10)
+	}
+	if err := os.MkdirAll(helperDNSState, 0o700); err != nil {
+		return nil, fmt.Errorf("create %s: %w", helperDNSState, err)
+	}
+	if entry, err := user.Lookup("x-node"); err == nil {
+		if uid, uidErr := strconv.Atoi(entry.Uid); uidErr == nil {
+			if gid, gidErr := strconv.Atoi(entry.Gid); gidErr == nil {
+				if err := os.Chown(helperDNSState, uid, gid); err != nil {
+					return nil, fmt.Errorf("chown %s: %w", helperDNSState, err)
+				}
+			}
+		}
+	}
+	if err := helperBackup(helperDNSConfig); err != nil {
+		return nil, err
+	}
+	if err := writeFileAs(helperDNSConfig, []byte(content), 0o640, "x-node"); err != nil {
+		return nil, fmt.Errorf("write %s: %w", helperDNSConfig, err)
+	}
+	if err := writeFileAs(helperDNSUnit, []byte(dnsUnit(binary, alfisWebUISupported(binary))), 0o644, ""); err != nil {
+		return nil, fmt.Errorf("write %s: %w", helperDNSUnit, err)
+	}
+	if _, err := systemctlOutput("daemon-reload"); err != nil {
+		return nil, fmt.Errorf("systemctl daemon-reload: %w", err)
+	}
+	if _, err := systemctlOutput("enable", "x-node-dns"); err != nil {
+		return nil, fmt.Errorf("enable x-node-dns: %w", err)
+	}
+	if _, err := systemctlOutput("restart", "x-node-dns"); err != nil {
+		return nil, fmt.Errorf("start x-node-dns: %w", err)
+	}
+	return helperDNSStatus()
+}
+
+func dnsUnit(binary string, webUI bool) string {
+	// --web-ui makes a build without the feature exit at once, and systemd
+	// would restart it forever. The installer bundles a build with the web UI,
+	// but an upstream nogui binary or a package from the distribution may still
+	// be in place, so the flag is added only when the binary supports it.
+	webUIFlag := ""
+	if webUI {
+		webUIFlag = " --web-ui"
+	}
+	return fmt.Sprintf(`[Unit]
+Description=X-Node DNS resolver (Alfis)
+Wants=network-online.target
+After=network-online.target yggdrasil.service
+
+[Service]
+User=x-node
+Group=x-node
+WorkingDirectory=%s
+ExecStart=%s -n -c %s%s
+Restart=always
+RestartSec=5
+SecureBits=keep-caps
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=%s
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+`, helperDNSState, binary, helperDNSConfig, webUIFlag, helperDNSState)
 }
 
 // helperUpgrade replaces the installed binaries with the latest release and
@@ -299,7 +509,7 @@ func helperReadConfig(file string) (any, error) {
 // would be killed with it before the reply is written.
 func helperRestart(service string) error {
 	switch service {
-	case "x-node", "yggdrasil":
+	case "x-node", "yggdrasil", "x-node-dns":
 	default:
 		return fmt.Errorf("refusing to restart %q", service)
 	}

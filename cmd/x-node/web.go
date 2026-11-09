@@ -230,6 +230,8 @@ func (w *webServer) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	switch {
 	case rest == "" || rest == "index.html":
 		w.serveIndex(rw, r)
+	case rest == "help" || rest == "help.html":
+		w.serveHelp(rw, r)
 	case strings.HasPrefix(rest, "static/"):
 		w.serveStatic(rw, r, strings.TrimPrefix(rest, "static/"))
 	case strings.HasPrefix(rest, "api/"):
@@ -257,6 +259,24 @@ func (w *webServer) serveIndex(rw http.ResponseWriter, r *http.Request) {
 	raw, err := fs.ReadFile(w.assets, "index.html")
 	if err != nil {
 		http.Error(rw, "index.html is missing", http.StatusInternalServerError)
+		return
+	}
+	rw.Header().Set("Content-Type", "text/html; charset=utf-8")
+	rw.Header().Set("Cache-Control", "no-store")
+	_, _ = rw.Write(raw)
+}
+
+// serveHelp returns the static guide that the Help button opens in a new tab.
+// It has no API access and no secrets: the random path is the only thing that
+// keeps it out of a search engine, and the content is the same for everyone.
+func (w *webServer) serveHelp(rw http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		http.Error(rw, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	raw, err := fs.ReadFile(w.assets, "help.html")
+	if err != nil {
+		http.Error(rw, "help.html is missing", http.StatusInternalServerError)
 		return
 	}
 	rw.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -563,6 +583,7 @@ type webStatus struct {
 	WebPath           string        `json:"webPath"`
 	WebURLs           []string      `json:"webURLs"`
 	WebLogin          string        `json:"webLogin"`
+	DNS               webDNSStatus  `json:"dns"`
 	PendingRestart    bool          `json:"pendingRestart"`
 	RestartSupported  bool          `json:"restartSupported"`
 	Clients           int           `json:"clients"`
@@ -609,6 +630,7 @@ func (w *webServer) handleStatus(rw http.ResponseWriter, r *http.Request) {
 		WebPath:           cfg.Web.Path,
 		WebURLs:           webURLs(cfg),
 		WebLogin:          currentWebUser(w.credsPath),
+		DNS:               w.dnsStatus(cfg),
 		PendingRestart:    pendingSettings(cfg, w.configPath),
 		RestartSupported:  requestHelperInstalled(),
 		Clients:           len(w.store.List()),
@@ -1121,6 +1143,7 @@ type webSettingsView struct {
 	Quotas             QuotaDefaults `json:"quotas"`
 	Usage              UsageConfig   `json:"usage"`
 	Web                WebConfig     `json:"web"`
+	DNS                DNSConfig     `json:"dns"`
 	PendingRestart     bool          `json:"pendingRestart"`
 }
 
@@ -1152,6 +1175,7 @@ func (w *webServer) handleSettingsGet(rw http.ResponseWriter, r *http.Request) {
 		Quotas:             cfg.Quotas,
 		Usage:              cfg.Usage,
 		Web:                cfg.Web,
+		DNS:                cfg.DNS,
 		PendingRestart:     pendingSettings(cfg, w.configPath),
 	})
 }
@@ -1181,6 +1205,12 @@ type settingsPatch struct {
 	Quotas             *QuotaDefaults `json:"quotas"`
 	Usage              *UsageConfig   `json:"usage"`
 	Web                *webPatch      `json:"web"`
+	DNS                *dnsPatch      `json:"dns"`
+}
+
+type dnsPatch struct {
+	Enabled     *bool   `json:"enabled"`
+	WebPassword *string `json:"webPassword"`
 }
 
 type webPatch struct {
@@ -1291,11 +1321,37 @@ func (w *webServer) handleSettingsPut(rw http.ResponseWriter, r *http.Request) {
 			next.Web.Compact = *patch.Web.Compact
 		}
 	}
+	if patch.DNS != nil {
+		if patch.DNS.Enabled != nil {
+			next.DNS.Enabled = *patch.DNS.Enabled
+		}
+		if patch.DNS.WebPassword != nil {
+			next.DNS.WebPassword = strings.TrimSpace(*patch.DNS.WebPassword)
+		}
+	}
 
 	next.applyDefaults()
 	if err := next.validate(); err != nil {
 		writeJSON(rw, http.StatusBadRequest, errorResponse{Error: "bad_settings", Message: err.Error()})
 		return
+	}
+	// The Alfis web interface refuses to start without a password. Generate
+	// one the first time the server is enabled through this form; the settings
+	// view shows it so the operator can open the new tab and sign in. A save
+	// of another card must not touch the DNS unit.
+	if patch.DNS != nil && next.DNS.Enabled && strings.TrimSpace(next.DNS.WebPassword) == "" {
+		password, err := generatePassword()
+		if err != nil {
+			writeJSON(rw, http.StatusInternalServerError, errorResponse{Error: "dns_password", Message: err.Error()})
+			return
+		}
+		next.DNS.WebPassword = password
+	}
+	if patch.DNS != nil && dnsConfigChanged(before, next) {
+		if err := applyDNSConfig(next); err != nil {
+			writeJSON(rw, http.StatusBadGateway, errorResponse{Error: "dns_failed", Message: err.Error()})
+			return
+		}
 	}
 	if err := saveSettingsOverlay(next); err != nil {
 		writeJSON(rw, http.StatusInternalServerError, errorResponse{Error: "save_failed", Message: err.Error()})

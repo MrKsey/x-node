@@ -19,6 +19,8 @@ LISTEN_PORT="0"
 WS_PORT="0"
 LISTEN_PROTO=""
 WAS_INSTALLED="0"
+DNS_ENABLED="0"
+ALFIS_INSTALLED="0"
 
 ASSUME_YES=0
 PURGE=0
@@ -111,6 +113,8 @@ if [ -f "$MANIFEST" ]; then
     WS_PORT="$(manifest_get wsPort)"
     LISTEN_PROTO="$(manifest_get listenProto)"
     WAS_INSTALLED="$(manifest_get yggdrasilWasInstalled)"
+    DNS_ENABLED="$(manifest_get dnsEnabled)"
+    ALFIS_INSTALLED="$(manifest_get alfisInstalled)"
 fi
 [ -n "$YGG_CONF" ] || YGG_CONF="/etc/yggdrasil/yggdrasil.conf"
 [ -n "$LISTEN_PORT" ] || LISTEN_PORT=0
@@ -157,6 +161,7 @@ fi
 
 log "Stopping x-node"
 systemctl disable --now x-node-firewall 2>/dev/null || true
+systemctl disable --now x-node-dns 2>/dev/null || true
 systemctl disable --now x-node-helper 2>/dev/null || true
 systemctl disable --now x-node 2>/dev/null || true
 rm -f /run/x-node/helper.sock
@@ -168,6 +173,7 @@ fi
 log "Removing the systemd units"
 rm -f /etc/systemd/system/x-node.service \
       /etc/systemd/system/x-node-helper.service \
+      /etc/systemd/system/x-node-dns.service \
       /etc/systemd/system/x-node-firewall.service
 systemctl daemon-reload 2>/dev/null || true
 
@@ -193,6 +199,11 @@ rm -f /usr/local/bin/x-node /usr/local/bin/x-node-peerprobe
 # The probe was called ygg-peerprobe before the rename; an upgrade removes it,
 # an installation that skipped one may still have it.
 rm -f /usr/local/bin/ygg-peerprobe
+# Alfis was installed by this installer only when the manifest says so; a
+# package or a manual installation of Alfis is left alone.
+if [ "$ALFIS_INSTALLED" = "1" ]; then
+    rm -f /usr/local/bin/alfis
+fi
 # The password cannot be recovered from web.json, and a reinstall generates a
 # new one, so the plaintext copy is not kept around.
 rm -f /root/x-node-credentials.txt
@@ -200,8 +211,14 @@ rm -f /root/x-node-credentials.txt
 if [ "$KEEP_STATE" -eq 0 ]; then
     log "Removing the state directory"
     rm -rf "$STATE_DIR"
+    # The Alfis keys and zone data belong to the DNS server that the same
+    # installation created, so they go with the state.
+    rm -rf /var/lib/x-node-dns
 else
     log "Keeping $STATE_DIR"
+    if [ "$DNS_ENABLED" = "1" ]; then
+        log "Keeping /var/lib/x-node-dns"
+    fi
 fi
 
 if id -u "$SERVICE_USER" >/dev/null 2>&1; then
@@ -268,6 +285,7 @@ cat <<EOF
 
   Removed:   x-node service, /etc/x-node, /usr/local/bin/x-node,
              /usr/local/bin/x-node-peerprobe, /root/x-node-credentials.txt
+  DNS:       $([ "$ALFIS_INSTALLED" = "1" ] && echo "Alfis binary and unit removed" || echo "not installed by this installer")
   State:     $([ "$KEEP_STATE" -eq 0 ] && echo "removed ($STATE_DIR)" || echo "kept ($STATE_DIR)")
   Yggdrasil: $([ "$KEEP_YGGDRASIL" -eq 0 ] && echo "removed" || echo "kept")
 

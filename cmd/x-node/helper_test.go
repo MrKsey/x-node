@@ -129,3 +129,46 @@ func TestRepairUnitDependencyIgnoresAMissingFile(t *testing.T) {
 		t.Fatalf("a missing unit returned an error: %v", err)
 	}
 }
+
+func TestDNSUnitAddsWebUIOnlyWhenSupported(t *testing.T) {
+	withUI := dnsUnit("/usr/local/bin/alfis", true)
+	if !strings.Contains(withUI, " -n -c /etc/x-node/alfis.conf --web-ui") {
+		t.Fatalf("the web UI flag is missing:\n%s", withUI)
+	}
+	withoutUI := dnsUnit("/usr/local/bin/alfis", false)
+	if strings.Contains(withoutUI, "--web-ui") {
+		t.Fatalf("a build without the web UI got the flag:\n%s", withoutUI)
+	}
+	if !strings.Contains(withoutUI, " -n -c /etc/x-node/alfis.conf\n") {
+		t.Fatalf("the ExecStart line changed unexpectedly:\n%s", withoutUI)
+	}
+}
+
+func TestAlfisWebUISupportedReadsTheBinary(t *testing.T) {
+	dir := t.TempDir()
+	withUI := filepath.Join(dir, "alfis-webui")
+	if err := os.WriteFile(withUI, []byte("prefix alfis_session suffix"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if !alfisWebUISupported(withUI) {
+		t.Fatal("a webui binary was reported as unsupported")
+	}
+	withoutUI := filepath.Join(dir, "alfis-nogui")
+	if err := os.WriteFile(withoutUI, []byte("This build of ALFIS has no web UI support!"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if alfisWebUISupported(withoutUI) {
+		t.Fatal("a nogui binary was reported as supported")
+	}
+	// The negative marker wins even when the cookie name is also present.
+	both := filepath.Join(dir, "alfis-both")
+	if err := os.WriteFile(both, []byte("alfis_session This build of ALFIS has no web UI support!"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if alfisWebUISupported(both) {
+		t.Fatal("the no-webui marker was ignored")
+	}
+	if alfisWebUISupported(filepath.Join(dir, "absent")) {
+		t.Fatal("a missing binary was reported as supported")
+	}
+}

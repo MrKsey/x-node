@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -126,6 +127,11 @@ type Config struct {
 	// Web is the built-in web interface. It is served from the same binary.
 	Web WebConfig `json:"web"`
 
+	// DNS is the optional Alfis-based DNS server for the clients of this exit.
+	// It runs as a separate systemd unit next to the daemon, because binding
+	// port 53 needs a capability the hardened x-node service does not have.
+	DNS DNSConfig `json:"dns"`
+
 	// Quotas holds the defaults applied to a client that has no explicit
 	// limit. Zero means "no limit".
 	Quotas QuotaDefaults `json:"quotas"`
@@ -177,6 +183,35 @@ type WebConfig struct {
 	// Compact keeps the interface 25% narrower on a desktop screen. On a phone
 	// the layout already fills the width, so the switch has no effect there.
 	Compact bool `json:"compact"`
+}
+
+// DNSConfig describes the Alfis DNS server that is offered to the clients of
+// this exit node. The server runs as "x-node-dns.service" and listens on the
+// Yggdrasil address of the host, so a client reaches it through the same tunnel
+// it already uses for the exit.
+type DNSConfig struct {
+	// Enabled turns the DNS server on. A fresh installation enables it by
+	// default; the installer asks once and the dashboard can change it later.
+	Enabled bool `json:"enabled"`
+
+	// Listen is the full host:port the resolver binds to, e.g.
+	// "[200:...]:53". Empty means "the Yggdrasil address on port 53".
+	Listen string `json:"listen,omitempty"`
+	Port   int    `json:"port"`
+
+	// WebListen is the address of the Alfis web interface. It is opened in a
+	// new browser tab from the dashboard; empty means "the Yggdrasil address
+	// on WebPort". Alfis speaks plain HTTP, so the link is http://.
+	WebListen string `json:"webListen,omitempty"`
+	WebPort   int    `json:"webPort"`
+	// WebPassword protects the Alfis web interface. Alfis refuses to start the
+	// interface without one; the installer and the dashboard generate it.
+	WebPassword string `json:"webPassword,omitempty"`
+
+	// Forwarders are the upstream resolvers Alfis uses for ordinary names.
+	Forwarders []string `json:"forwarders,omitempty"`
+	// CacheMemoryLimitMB caps the resolver cache. 0 means unlimited.
+	CacheMemoryLimitMB int `json:"cacheMemoryLimitMB,omitempty"`
 }
 
 // QuotaDefaults are the limits of a client without its own quota entry.
@@ -291,6 +326,13 @@ func defaultConfig() Config {
 			MaxFailedLogins: 5,
 			Lockout:         "15m",
 			TrustedProxies:  []string{"127.0.0.1", "::1"},
+		},
+		DNS: DNSConfig{
+			Enabled:            true,
+			Port:               53,
+			WebPort:            8082,
+			Forwarders:         []string{"94.140.14.14:53", "94.140.15.15:53"},
+			CacheMemoryLimitMB: 100,
 		},
 		Usage: UsageConfig{
 			Enabled:  true,
@@ -460,6 +502,24 @@ func (c *Config) applyDefaults() {
 	if c.Web.TrustedProxies == nil {
 		c.Web.TrustedProxies = d.Web.TrustedProxies
 	}
+	if c.DNS.Port == 0 {
+		c.DNS.Port = d.DNS.Port
+	}
+	if c.DNS.WebPort == 0 {
+		c.DNS.WebPort = d.DNS.WebPort
+	}
+	if c.DNS.Forwarders == nil {
+		c.DNS.Forwarders = d.DNS.Forwarders
+	}
+	if c.DNS.CacheMemoryLimitMB == 0 {
+		c.DNS.CacheMemoryLimitMB = d.DNS.CacheMemoryLimitMB
+	}
+	if strings.TrimSpace(c.DNS.Listen) == "" {
+		c.DNS.Listen = net.JoinHostPort(c.ListenAddress, strconv.Itoa(c.DNS.Port))
+	}
+	if strings.TrimSpace(c.DNS.WebListen) == "" {
+		c.DNS.WebListen = net.JoinHostPort(c.ListenAddress, strconv.Itoa(c.DNS.WebPort))
+	}
 	if c.Usage.Timezone == "" {
 		c.Usage.Timezone = d.Usage.Timezone
 	}
@@ -584,6 +644,44 @@ func (c *Config) validate() error {
 	if _, err := c.usageLocation(); err != nil {
 		return err
 	}
+	if err := c.validateDNS(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateDNS checks the two listeners of the Alfis process. The forwarders
+// may be plain host:port pairs or DoH URLs, so Alfis is the authority on them;
+// only the listeners that x-node prints and links to are checked here.
+func (c *Config) validateDNS() error {
+	// The raw fields may be empty: the effective address is derived from
+	// listenAddress and the port. Validating the derived value catches both a
+	// hand-written address and a broken fallback.
+	for name, value := range map[string]string{
+		"dns.listen":    c.dnsListen(),
+		"dns.webListen": c.dnsWebListen(),
+	} {
+		host, port, err := net.SplitHostPort(strings.TrimSpace(value))
+		if err != nil {
+			return fmt.Errorf("%s %q is not host:port: %w", name, value, err)
+		}
+		if strings.TrimSpace(host) != "" && net.ParseIP(host) == nil {
+			return fmt.Errorf("%s %q must use an IP address", name, value)
+		}
+		number, err := strconv.Atoi(port)
+		if err != nil || number < 1 || number > 65535 {
+			return fmt.Errorf("%s %q has no valid port", name, value)
+		}
+	}
+	if c.DNS.Port < 1 || c.DNS.Port > 65535 {
+		return fmt.Errorf("dns.port %d is out of range", c.DNS.Port)
+	}
+	if c.DNS.WebPort < 1 || c.DNS.WebPort > 65535 {
+		return fmt.Errorf("dns.webPort %d is out of range", c.DNS.WebPort)
+	}
+	if c.DNS.CacheMemoryLimitMB < 0 {
+		return fmt.Errorf("dns.cacheMemoryLimitMB must not be negative")
+	}
 	return nil
 }
 
@@ -650,6 +748,103 @@ func (c Config) webBindHost() string {
 	default:
 		return ""
 	}
+}
+
+// dnsListen is the host:port the Alfis resolver binds to.
+func (c Config) dnsListen() string {
+	if value := strings.TrimSpace(c.DNS.Listen); value != "" {
+		return value
+	}
+	return net.JoinHostPort(c.ListenAddress, strconv.Itoa(c.DNS.Port))
+}
+
+// dnsWebListen is the host:port of the Alfis web interface.
+func (c Config) dnsWebListen() string {
+	if value := strings.TrimSpace(c.DNS.WebListen); value != "" {
+		return value
+	}
+	return net.JoinHostPort(c.ListenAddress, strconv.Itoa(c.DNS.WebPort))
+}
+
+// dnsWebURL is the address a browser opens for the Alfis interface. A wildcard
+// listener is shown as the Yggdrasil address, because 0.0.0.0 and :: are not
+// useful in a link.
+func (c Config) dnsWebURL() string {
+	host, port, err := net.SplitHostPort(c.dnsWebListen())
+	if err != nil {
+		return ""
+	}
+	switch strings.TrimSpace(host) {
+	case "", "0.0.0.0", "::":
+		host = c.ListenAddress
+	}
+	return "http://" + net.JoinHostPort(host, port) + "/"
+}
+
+// dnsServerAddress is the address published to Y-Node in the exit link and in
+// the capabilities block. The client always queries port 53; DNSPort carries a
+// non-default port for a future client that understands it.
+func (c Config) dnsServerAddress() string {
+	if !c.DNS.Enabled {
+		return ""
+	}
+	return c.ListenAddress
+}
+
+func (c Config) dnsServerPort() int {
+	if !c.DNS.Enabled {
+		return 0
+	}
+	return c.DNS.Port
+}
+
+// alfisConfig renders the TOML document of the resolver. Alfis runs its own
+// Yggdrasil node (the Alfis network), so it has a separate peering listener and
+// its own key store; only the DNS and web listeners point at this host's
+// Yggdrasil address.
+func (c Config) alfisConfig() string {
+	forwarders := c.DNS.Forwarders
+	if len(forwarders) == 0 {
+		forwarders = defaultConfig().DNS.Forwarders
+	}
+	cache := c.DNS.CacheMemoryLimitMB
+	if cache <= 0 {
+		cache = defaultConfig().DNS.CacheMemoryLimitMB
+	}
+	var out strings.Builder
+	out.WriteString("# Generated by X-Node. Changes are overwritten by the dashboard.\n")
+	out.WriteString("origin = \"0000001D2A77D63477172678502E51DE7F346061FF7EB188A2445ECA3FC0780E\"\n")
+	out.WriteString("key_files = []\n")
+	out.WriteString("check_blocks = 8\n")
+	out.WriteString("dark_theme = true\n\n")
+	out.WriteString("[net]\n")
+	out.WriteString("peers = [\"peer-v4.alfis.name:4244\", \"peer-v6.alfis.name:4244\"]\n")
+	out.WriteString("listen = \"127.0.0.1:4244\"\n")
+	out.WriteString("public = false\n")
+	out.WriteString("yggdrasil_only = false\n\n")
+	out.WriteString("[dns]\n")
+	fmt.Fprintf(&out, "listen = %s\n", strconv.Quote(c.dnsListen()))
+	out.WriteString("threads = 10\n")
+	fmt.Fprintf(&out, "forwarders = %s\n", tomlStringList(forwarders))
+	out.WriteString("bootstraps = [\"9.9.9.9:53\", \"94.140.14.14:53\"]\n")
+	out.WriteString("hosts = []\n")
+	out.WriteString("enable_0x20 = true\n")
+	fmt.Fprintf(&out, "cache_memory_limit_mb = %d\n\n", cache)
+	out.WriteString("[mining]\n")
+	out.WriteString("threads = 0\n")
+	out.WriteString("lower = true\n\n")
+	out.WriteString("[webui]\n")
+	fmt.Fprintf(&out, "listen = %s\n", strconv.Quote(c.dnsWebListen()))
+	fmt.Fprintf(&out, "password = %s\n", strconv.Quote(c.DNS.WebPassword))
+	return out.String()
+}
+
+func tomlStringList(values []string) string {
+	quoted := make([]string, 0, len(values))
+	for _, value := range values {
+		quoted = append(quoted, strconv.Quote(value))
+	}
+	return "[" + strings.Join(quoted, ", ") + "]"
 }
 
 // webSessionTTL turns the configured lifetime into a duration. A zero value,

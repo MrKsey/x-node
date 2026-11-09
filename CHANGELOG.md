@@ -4,6 +4,24 @@ All notable changes to X-Node are documented here. The format is based on [Keep 
 
 The release workflow publishes the section of the tag as the GitHub release body, so every release has a short human-readable summary of what changed. Keep each bullet on a single line: GitHub turns every newline in a release body into a hard break, so a wrapped bullet would render as a narrow column instead of using the full width.
 
+## [1.7.0] — 2026-11-09
+
+### Added
+
+- **DNS server for clients.** X-Node can install and run [Alfis](https://github.com/Revertron/Alfis) as `x-node-dns.service` on the Yggdrasil address of the exit, so clients get a resolver that answers `.ygg` names and forwards ordinary names to upstream resolvers. The installer asks about it (on by default), writes `/etc/x-node/alfis.conf`, installs the binary and starts the unit. `x-node dns status|on|off` manages it from the shell, and `Settings → DNS server` has the switch, the Alfis web password and a link that opens the Alfis panel in a new tab.
+- The dashboard has a **DNS server** card beside the X-Node and Yggdrasil cards; the three cards share one row and one height on a desktop. The card shows the unit state, the listen address, the password and the link.
+- The status API and the exit link advertise the resolver: `capabilities.dns`, `capabilities.dnsAddress`, `capabilities.dnsPort`, and the `dns` / `dnsport` parameters of the `yggnode://` link, so Y-Node can offer it as **DNS from exit node**.
+- The **Help** button under **Recent log lines** opens a static guide about X-Node and Y-Node in a new tab: roles, tabs, settings, the DNS flow and troubleshooting, with two diagrams.
+- **Wrap lines** switch in **Recent log lines**, on by default; turning it off keeps long stack traces on one line and scrolls sideways.
+- Installer options `--dns`, `--no-dns`, `--dns-port`, `--dns-web-port` and `--alfis-version`; the manifest records the DNS settings and the uninstaller removes the unit, the Alfis binary and, with `--purge`, the DNS state.
+- Release archives bundle an Alfis build with the `webui` feature, so the **Open Alfis web UI** link works. The upstream `nogui` binaries are built without that feature; when such a binary is installed instead, X-Node keeps serving DNS, does not pass `--web-ui` to it and hides the link. The Alfis source is published next to the binaries under the AGPL.
+
+### Changed
+
+- The dashboard address strip puts the **Yggdrasil address** and the **peer link** on one line with horizontal scrolling, so both are readable in full. The peer box is gone.
+- The six client actions are arranged in two rows of three on a desktop, which keeps the action column narrow; the tablet card layout still fills the row.
+- `x-node status` has a **DNS server** section.
+
 ## [1.6.22] — 2026-11-08
 
 ### Fixed

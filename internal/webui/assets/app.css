@@ -209,6 +209,17 @@ input[type="checkbox"] { width: auto; accent-color: var(--accent); }
 .grid { display: grid; gap: 16px; }
 .grid.kpi { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
 .grid.two { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+/* Three cards share one row on a desktop: X-Node, Yggdrasil and the DNS
+   server. Stretch keeps them the same height, so the cards read as one block
+   and the row below does not shift when one table is shorter. */
+.grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: stretch; }
+.grid.three > .card { height: 100%; }
+/* Address strip under the KPI row: the Yggdrasil address and the peer link on
+   one line. It scrolls sideways instead of wrapping, so both stay visible at
+   full length. */
+.link-strip { display: flex; align-items: center; gap: 24px; padding: 12px 20px; overflow-x: auto; }
+.link-strip-item { display: flex; align-items: center; gap: 10px; white-space: nowrap; }
+.link-strip-item .label { font-size: 12.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
 .kpi-card { padding: 18px; display: grid; gap: 6px; }
 .kpi-card .label { font-size: 12.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
 .kpi-card .value { font-size: 26px; font-weight: 650; letter-spacing: -.02em; }
@@ -236,6 +247,11 @@ th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--bor
 th { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); font-weight: 600; white-space: nowrap; }
 tr:last-child td { border-bottom: 0; }
 .table-wrap { overflow-x: auto; }
+/* Six actions in the client row. On a desktop they take two rows of three, so
+   the action column stays narrow; the tablet card layout lets them fill the
+   row again. */
+.action-grid { display: grid; grid-template-columns: repeat(3, auto); gap: 6px; justify-content: end; }
+@media (max-width: 1300px) { .action-grid { display: contents; } }
 
 .bar { height: 7px; border-radius: 999px; background: var(--bg-soft); overflow: hidden; min-width: 90px; }
 .bar > i { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
@@ -264,8 +280,11 @@ pre.logs {
   height: calc(100vh - 230px); min-height: 320px; overflow: auto;
   font-size: 12.5px; line-height: 1.55;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  white-space: pre-wrap; word-break: break-word;
+  white-space: pre; word-break: normal;
 }
+/* "Wrap lines" is on by default. Without it the box scrolls sideways, which
+   keeps the columns of a stack trace readable. */
+pre.logs.wrap { white-space: pre-wrap; word-break: break-word; }
 pre.logs .warn { color: var(--warn); }
 pre.logs .error { color: var(--bad); }
 pre.logs .debug { color: var(--muted); }
@@ -336,6 +355,66 @@ canvas.chart.mini { height: 108px; }
 /* The auto refresh switch and the refresh button sit on the same line as the
    title, so they are centred instead of sharing the baseline of the heading. */
 .logs-card > header { align-items: center; }
+
+/* Help page: a static guide served at <prefix>/help. It shares the colours and
+   the font with the dashboard, but it has no scripts and no sidebar. */
+.help-page {
+  max-width: 1080px; margin: 0 auto;
+  padding: 32px 24px 80px; display: grid; gap: 30px;
+}
+.help-top { display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+.help-top > div { flex: 1 1 320px; display: grid; gap: 8px; }
+.help-top h1 { margin: 0; font-size: 30px; letter-spacing: -.02em; }
+.help-lead { margin: 0; color: var(--muted); font-size: 16px; max-width: 760px; }
+.help-toc { display: flex; flex-wrap: wrap; gap: 8px; }
+.help-toc a {
+  padding: 6px 12px; border: 1px solid var(--border); border-radius: 999px;
+  background: var(--bg-elev); font-size: 13px;
+}
+.help-toc a:hover { border-color: var(--accent); text-decoration: none; }
+.help-section { display: grid; gap: 16px; }
+.help-section > h2 { margin: 10px 0 0; font-size: 23px; letter-spacing: -.01em; }
+.help-section > p { margin: 0; }
+.help-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; align-items: start; }
+.help-card {
+  background: var(--bg-elev); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow);
+  padding: 18px 20px; display: grid; gap: 10px; align-content: start;
+}
+.help-card h3 { margin: 0; font-size: 16px; }
+.help-card p { margin: 0; }
+.help-card ul, .help-card ol { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
+.help-card li { margin: 0; }
+.help-page code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px; background: var(--bg-soft);
+  padding: 1px 5px; border-radius: 6px; overflow-wrap: anywhere;
+}
+.help-figure { margin: 0; display: grid; gap: 8px; }
+.help-figure svg {
+  width: 100%; height: auto; display: block;
+  background: var(--bg-elev); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 10px;
+}
+.help-figure figcaption { font-size: 13px; color: var(--muted); }
+.help-table-wrap { overflow-x: auto; background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius); padding: 4px 16px; }
+.help-table th { white-space: nowrap; }
+.help-table td { vertical-align: top; font-size: 14px; }
+.help-table td:first-child { white-space: nowrap; }
+.help-footer {
+  display: flex; flex-wrap: wrap; gap: 16px; align-items: center;
+  border-top: 1px solid var(--border); padding-top: 18px;
+  color: var(--muted); font-size: 13px;
+}
+.help-footer span { margin-right: auto; }
+
+@media (max-width: 700px) {
+  .help-page { padding: 20px 12px 60px; gap: 22px; }
+  .help-top h1 { font-size: 24px; }
+  .help-top .btn { width: 100%; }
+  .help-card { padding: 14px; }
+  .help-table td:first-child { white-space: normal; }
+}
 
 /* The file picker keeps the width of one two-column settings field, and the
    actions sit right next to it instead of under it or at the far edge. */
@@ -437,6 +516,7 @@ canvas.chart.mini { height: 108px; }
    the sidebar. */
 @media (max-width: 1300px) {
   .grid.two { grid-template-columns: 1fr; }
+  .grid.three { grid-template-columns: 1fr; }
   .settings-grid { column-count: 1; }
 }
 
