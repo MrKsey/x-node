@@ -450,7 +450,7 @@ function dashboardHtml() {
     <div class="grid kpi">
       <a class="card kpi-card link-card" href="#settings" title="Open the Settings tab">
         <div class="label">Yggdrasil address</div>
-        <div class="value mono small-value">${escapeHtml(status.address || "—")}</div>
+        <div class="value mono small-value address-value" title="${escapeHtml(status.address || "")}">${escapeHtml(status.address || "—")}</div>
         <div class="sub">${escapeHtml(status.name || "")}</div>
       </a>
       <a class="card kpi-card link-card" href="#clients" title="Open the Clients tab">
@@ -470,19 +470,6 @@ function dashboardHtml() {
       </button>
     </div>
 
-    <div class="card link-strip" aria-label="Node addresses">
-      <div class="link-strip-item">
-        <span class="label">Yggdrasil address</span>
-        <span class="mono">${escapeHtml(status.address || "—")}</span>
-        <button class="btn small" data-copy="${escapeHtml(status.address || "")}">Copy</button>
-      </div>
-      <div class="link-strip-item">
-        <span class="label">Peer link</span>
-        <span class="mono">${escapeHtml(status.peerURI || "not advertised")}</span>
-        ${status.peerURI ? `<button class="btn small" data-copy="${escapeHtml(status.peerURI)}">Copy</button>` : ""}
-      </div>
-    </div>
-
     <div class="card section">
       <header>
         <h3>Traffic</h3>
@@ -500,7 +487,7 @@ function dashboardHtml() {
       <p class="hint" id="chart-hint">Download and upload through the exit node, in bit/s. Updated every 5 seconds.</p>
     </div>
 
-    <div class="grid three">
+    <div class="grid two">
       <div class="card section">
         <header><h3>X-Node</h3><span class="muted small">${escapeHtml(status.version || "")}</span></header>
         <table class="facts">
@@ -522,22 +509,30 @@ function dashboardHtml() {
         <p class="hint">${ipv6StatusHint(status)}</p>
       </div>
 
-      <div class="card section">
-        <header><h3>Yggdrasil</h3><span class="muted small">${peers.adminReachable ? "admin socket connected" : "admin socket unavailable"}</span></header>
-        <table class="facts">
-          <tr><th>Version</th><td class="right">${escapeHtml(self.build_version || "—")}</td></tr>
-          <tr><th>Project</th><td class="right"><a class="link-wrap" href="https://github.com/yggdrasil-network/yggdrasil-go" title="yggdrasil-network/yggdrasil-go" target="_blank" rel="noopener noreferrer">yggdrasil-go</a></td></tr>
-          <tr><th>Address</th><td class="right mono">${escapeHtml(self.address || status.address || "—")}</td></tr>
-          <tr><th>Public key</th><td class="right mono ellipsis" title="${escapeHtml(self.key || "")}">${escapeHtml(self.key || "—")}</td></tr>
-          <tr><th>Routing entries</th><td class="right">${self.routing_entries == null ? "—" : self.routing_entries}</td></tr>
-          <tr><th>Subnet</th><td class="right mono">${escapeHtml(self.subnet || "—")}</td></tr>
-          <tr><th>Peers</th><td class="right">${peers.up || 0} up · ${peers.managed || 0} automatic · ${peers.manualPeers ? peers.manualPeers.length : 0} manual · ${peers.inbound || 0} inbound</td></tr>
-          <tr><th>Auto replace</th><td class="right">${peers.autoReplace ? "on" : "off"} · ${peers.peerCount || 0} wanted</td></tr>
-        </table>
-        <p class="hint">The peer link is in the address strip above. Add it in Y-Node → Exit node → Add → Peers, or append it to the <span class="mono">Peers</span> list in yggdrasil.conf.</p>
-      </div>
+      <div class="stack">
+        <div class="card section">
+          <header><h3>Yggdrasil</h3><span class="muted small">${peers.adminReachable ? "admin socket connected" : "admin socket unavailable"}</span></header>
+          <table class="facts">
+            <tr><th>Version</th><td class="right">${escapeHtml(self.build_version || "—")}</td></tr>
+            <tr><th>Project</th><td class="right"><a class="link-wrap" href="https://github.com/yggdrasil-network/yggdrasil-go" title="yggdrasil-network/yggdrasil-go" target="_blank" rel="noopener noreferrer">yggdrasil-go</a></td></tr>
+            <tr><th>Address</th><td class="right mono nowrap-cell">${escapeHtml(self.address || status.address || "—")}</td></tr>
+            <tr><th>Peer link</th><td class="right">
+              <div class="inline-copy">
+                <span class="mono nowrap-cell" title="${escapeHtml(status.peerURI || "")}">${escapeHtml(status.peerURI || "not advertised")}</span>
+                ${status.peerURI ? `<button class="btn small" data-copy="${escapeHtml(status.peerURI)}">Copy</button>` : ""}
+              </div>
+            </td></tr>
+            <tr><th>Public key</th><td class="right mono ellipsis" title="${escapeHtml(self.key || "")}">${escapeHtml(self.key || "—")}</td></tr>
+            <tr><th>Routing entries</th><td class="right">${self.routing_entries == null ? "—" : self.routing_entries}</td></tr>
+            <tr><th>Subnet</th><td class="right mono">${escapeHtml(self.subnet || "—")}</td></tr>
+            <tr><th>Peers</th><td class="right">${peers.up || 0} up · ${peers.managed || 0} automatic · ${peers.manualPeers ? peers.manualPeers.length : 0} manual · ${peers.inbound || 0} inbound</td></tr>
+            <tr><th>Auto replace</th><td class="right">${peers.autoReplace ? "on" : "off"} · ${peers.peerCount || 0} wanted</td></tr>
+          </table>
+          <p class="hint">Add the peer link in Y-Node → Exit node → Add → Peers, or append it to the <span class="mono">Peers</span> list in yggdrasil.conf.</p>
+        </div>
 
-      ${dnsCardHtml(status.dns || {})}
+        ${dnsCardHtml(status.dns || {})}
+      </div>
     </div>
 
     <div class="grid two">
@@ -2447,8 +2442,7 @@ function logsHtml() {
         `<span class="${entry.level.toLowerCase()}">${escapeHtml(entry.time)} ${escapeHtml(entry.level)} ${escapeHtml(entry.message)}</span>`
       ).join("\n")}</pre>
       <div class="actions">
-        <a class="btn small" href="help" target="_blank" rel="noopener noreferrer">Help</a>
-        <span class="hint">journalctl -u x-node -f shows the full log. Help opens the X-Node and Y-Node guide in a new tab.</span>
+        <span class="hint">journalctl -u x-node -f shows the full log. The guide is in the sidebar under Logs.</span>
       </div>
     </div>`;
 }

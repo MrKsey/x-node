@@ -4,6 +4,19 @@ All notable changes to X-Node are documented here. The format is based on [Keep 
 
 The release workflow publishes the section of the tag as the GitHub release body, so every release has a short human-readable summary of what changed. Keep each bullet on a single line: GitHub turns every newline in a release body into a hard break, so a wrapped bullet would render as a narrow column instead of using the full width.
 
+## [1.7.1] — 2026-11-09
+
+### Changed
+
+- The **Yggdrasil address** card keeps the address on one line: it scrolls sideways instead of breaking in the middle of the IPv6 address. The separate address strip is gone.
+- The **peer link** is back inside the **Yggdrasil** card: it sits in the facts table on one line with a **Copy** button, next to the other node parameters.
+- The **DNS server** card is directly below the **Yggdrasil** card instead of beside it, so the resolver reads as part of the node it belongs to.
+- **Help** is a sidebar item under **Logs** and opens the guide in a new tab. The guide exists in English and Russian: the first visit follows the browser language, a switcher in the header remembers the choice, and `?lang=en` / `?lang=ru` selects it explicitly.
+
+### Fixed
+
+- Turning the **DNS server** on after installation now downloads Alfis automatically instead of failing with "Alfis is not installed". The binary comes from the X-Node release archive with a verified checksum; an upstream Alfis release is the fallback for a local build.
+
 ## [1.7.0] — 2026-11-09
 
 ### Added

@@ -385,7 +385,14 @@ func helperDNSSync(enabled bool, content string) (any, error) {
 
 	binary := dnsBinaryPath()
 	if binary == "" {
-		return nil, errors.New("Alfis is not installed; install the alfis binary in /usr/local/bin or run the installer again")
+		// The installer adds Alfis only when the DNS server was enabled during
+		// installation. Turning it on later must still work: fetch the binary
+		// instead of sending the operator back to the installer.
+		installed, err := installAlfisWithTimeout()
+		if err != nil {
+			return nil, fmt.Errorf("Alfis is not installed and could not be downloaded: %w", err)
+		}
+		binary = installed
 	}
 	if strings.TrimSpace(content) == "" {
 		return nil, errors.New("the DNS configuration is empty")

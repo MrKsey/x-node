@@ -231,7 +231,9 @@ func (w *webServer) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	case rest == "" || rest == "index.html":
 		w.serveIndex(rw, r)
 	case rest == "help" || rest == "help.html":
-		w.serveHelp(rw, r)
+		w.serveHelp(rw, r, "help.html")
+	case rest == "help.ru" || rest == "help.ru.html":
+		w.serveHelp(rw, r, "help.ru.html")
 	case strings.HasPrefix(rest, "static/"):
 		w.serveStatic(rw, r, strings.TrimPrefix(rest, "static/"))
 	case strings.HasPrefix(rest, "api/"):
@@ -266,17 +268,19 @@ func (w *webServer) serveIndex(rw http.ResponseWriter, r *http.Request) {
 	_, _ = rw.Write(raw)
 }
 
-// serveHelp returns the static guide that the Help button opens in a new tab.
-// It has no API access and no secrets: the random path is the only thing that
-// keeps it out of a search engine, and the content is the same for everyone.
-func (w *webServer) serveHelp(rw http.ResponseWriter, r *http.Request) {
+// serveHelp returns the static guide that the Help entry opens in a new tab.
+// The English and Russian pages share one handler: both are plain files with no
+// API access and no secrets. The random path of the panel is the only thing
+// that keeps them out of a search engine, and the content is the same for
+// everyone.
+func (w *webServer) serveHelp(rw http.ResponseWriter, r *http.Request, name string) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		http.Error(rw, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	raw, err := fs.ReadFile(w.assets, "help.html")
+	raw, err := fs.ReadFile(w.assets, name)
 	if err != nil {
-		http.Error(rw, "help.html is missing", http.StatusInternalServerError)
+		http.Error(rw, name+" is missing", http.StatusInternalServerError)
 		return
 	}
 	rw.Header().Set("Content-Type", "text/html; charset=utf-8")

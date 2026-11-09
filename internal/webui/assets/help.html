@@ -15,7 +15,10 @@
       <h1>X-Node and Y-Node</h1>
       <p class="help-lead">A short guide to the exit node, the Android client, and the DNS server they can share.</p>
     </div>
-    <a class="btn small" href="./">Back to dashboard</a>
+    <div class="actions">
+      <a class="btn small" href="help.ru.html?lang=ru">Русский</a>
+      <a class="btn small" href="./">Back to dashboard</a>
+    </div>
   </header>
 
   <nav class="help-toc" aria-label="Contents">
@@ -143,11 +146,11 @@
     <div class="help-grid">
       <div class="help-card">
         <h3>Dashboard</h3>
-        <p>Four counters on top: the Yggdrasil address, the number of clients, the traffic today and this month. Below them the address strip shows the Yggdrasil address and the peer link in one line; both can be copied with one click.</p>
-        <p>The traffic chart covers 15 minutes, 1 hour, 6 hours or 24 hours. The row below holds three cards with the same height:</p>
+        <p>Four counters on top: the Yggdrasil address, the number of clients, the traffic today and this month. The traffic chart follows them. Below it are two cards: <strong>X-Node</strong> on the left and <strong>Yggdrasil</strong> on the right, with the <strong>DNS server</strong> card directly under Yggdrasil. The Yggdrasil address and the peer link stay on one line without wrapping; a value wider than the card scrolls sideways.</p>
+        <p>The traffic chart covers 15 minutes, 1 hour, 6 hours or 24 hours. The right-hand column holds:</p>
         <ul>
           <li><strong>X-Node</strong> — service state, SOCKS5 and API ports, access mode, connection limits, UDP relay, IPv6 outbound, paths.</li>
-          <li><strong>Yggdrasil</strong> — version, public key, routing entries, subnet, peers.</li>
+          <li><strong>Yggdrasil</strong> — version, public key, routing entries, subnet, peers and the peer link.</li>
           <li><strong>DNS server</strong> — the Alfis state, listen address, the Alfis web password and a link that opens the Alfis panel in a new tab.</li>
         </ul>
         <p>System Info and Update share the next row, then Quotas and Web interface, and the peer table closes the page.</p>
@@ -174,7 +177,7 @@
       <div class="help-card">
         <h3>Configuration and Logs</h3>
         <p><strong>Configuration</strong> shows <code>config.json</code> and <code>yggdrasil.conf</code>. The editor validates a file before saving and keeps a backup. Listener changes need a restart; the dashboard offers the buttons.</p>
-        <p><strong>Logs</strong> shows the latest service lines. <em>Wrap lines</em> is on by default; turn it off to read a stack trace without wrapping. <em>Auto refresh</em> polls every three seconds. The <em>Help</em> button under the log opens this guide in a new tab.</p>
+        <p><strong>Logs</strong> shows the latest service lines. <em>Wrap lines</em> is on by default; turn it off to read a stack trace without wrapping. <em>Auto refresh</em> polls every three seconds. The <em>Help</em> entry in the sidebar under Logs opens this guide in a new tab.</p>
       </div>
     </div>
   </section>
@@ -389,7 +392,7 @@
         <h3>The DNS card says stopped</h3>
         <ul>
           <li>The helper is not installed: the card shows the error. Run <code>install.sh</code> again.</li>
-          <li>Alfis is missing: the card says <em>Alfis is not installed</em>. The installer adds the binary; re-run it.</li>
+          <li>Alfis is missing: the card says <em>Alfis is not installed</em>. Turn the DNS server on again: X-Node downloads and installs Alfis by itself. The installer adds the binary too.</li>
           <li>The unit failed: <code>journalctl -u x-node-dns -n 50</code> shows why. Port 53 may already be taken by another resolver.</li>
         </ul>
       </div>
@@ -445,5 +448,6 @@
   </footer>
 
 </main>
+<script src="static/help-lang.js"></script>
 </body>
 </html>

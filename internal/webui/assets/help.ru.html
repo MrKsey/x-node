@@ -1,0 +1,453 @@
+<!doctype html>
+<html lang="ru" data-theme="auto">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>X-Node и Y-Node — руководство</title>
+  <link rel="icon" href="static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="static/app.css">
+</head>
+<body>
+<main class="help-page">
+
+  <header class="help-top">
+    <div>
+      <h1>X-Node и Y-Node</h1>
+      <p class="help-lead">Краткое руководство по exit-узлу, Android-клиенту и DNS-серверу, которым они могут пользоваться совместно.</p>
+    </div>
+    <div class="actions">
+      <a class="btn small" href="help?lang=en">English</a>
+      <a class="btn small" href="./">Вернуться на дашборд</a>
+    </div>
+  </header>
+
+  <nav class="help-toc" aria-label="Содержание">
+    <a href="#roles">Что делают приложения</a>
+    <a href="#xnode">X-Node</a>
+    <a href="#xnode-web">Веб-интерфейс</a>
+    <a href="#xnode-settings">Настройки</a>
+    <a href="#dns">DNS-сервер</a>
+    <a href="#ynode">Y-Node</a>
+    <a href="#ynode-dns">DNS в Y-Node</a>
+    <a href="#flow">Как DNS находит exit</a>
+    <a href="#troubles">Решение проблем</a>
+    <a href="#security">Безопасность</a>
+  </nav>
+
+  <!-- ------------------------------------------------------------ roles -->
+  <section class="help-section" id="roles">
+    <h2>Что делают приложения</h2>
+    <p>Yggdrasil — это зашифрованная оверлейная IPv6-сеть. Она соединяет свои узлы, но сама по себе не маршрутизирует трафик в обычный интернет. <strong>Exit-узел</strong> — это шлюз, который этим занимается.</p>
+    <div class="help-grid">
+      <div class="help-card">
+        <h3>X-Node — exit-узел</h3>
+        <p>Работает на сервере с Ubuntu или Debian. Принимает SOCKS5-запросы через Yggdrasil, проверяет список разрешённых клиентов, применяет квоты и отправляет трафик в интернет с сервера. Здесь же работают веб-интерфейс и, при желании, DNS-сервер Alfis для клиентов.</p>
+      </div>
+      <div class="help-card">
+        <h3>Y-Node — клиент</h3>
+        <p>Android-приложение. Запускает узел Yggdrasil, создаёт системный VPN-интерфейс и направляет трафик выбранных приложений через туннель. Профиль exit-узла указывает, какой X-Node использовать для выхода в обычный интернет.</p>
+      </div>
+    </div>
+
+    <figure class="help-figure">
+      <svg viewBox="0 0 920 300" role="img" aria-labelledby="diagram-roles-title">
+        <title id="diagram-roles-title">Путь трафика от приложений Android через Y-Node и X-Node в интернет</title>
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/>
+          </marker>
+        </defs>
+
+        <rect x="16" y="70" width="190" height="120" rx="14" fill="var(--bg-soft)" stroke="var(--border)"/>
+        <text x="111" y="108" text-anchor="middle" fill="var(--text)" font-size="16" font-weight="600">Приложения</text>
+        <text x="111" y="132" text-anchor="middle" fill="var(--muted)" font-size="13">браузер, Telegram,</text>
+        <text x="111" y="150" text-anchor="middle" fill="var(--muted)" font-size="13">другие программы</text>
+        <text x="111" y="174" text-anchor="middle" fill="var(--muted)" font-size="12">маршрутизация по приложениям</text>
+
+        <rect x="266" y="55" width="200" height="150" rx="14" fill="var(--bg-elev)" stroke="var(--accent)"/>
+        <text x="366" y="92" text-anchor="middle" fill="var(--text)" font-size="16" font-weight="600">Y-Node</text>
+        <text x="366" y="116" text-anchor="middle" fill="var(--muted)" font-size="13">VPN-интерфейс</text>
+        <text x="366" y="136" text-anchor="middle" fill="var(--muted)" font-size="13">узел Yggdrasil</text>
+        <text x="366" y="156" text-anchor="middle" fill="var(--muted)" font-size="13">профиль exit-узла</text>
+        <text x="366" y="180" text-anchor="middle" fill="var(--muted)" font-size="12">IPv6 200::/7</text>
+
+        <rect x="526" y="45" width="220" height="170" rx="14" fill="var(--bg-elev)" stroke="var(--accent)"/>
+        <text x="636" y="82" text-anchor="middle" fill="var(--text)" font-size="16" font-weight="600">X-Node</text>
+        <text x="636" y="106" text-anchor="middle" fill="var(--muted)" font-size="13">SOCKS5 · список доступа</text>
+        <text x="636" y="126" text-anchor="middle" fill="var(--muted)" font-size="13">квоты · счётчики трафика</text>
+        <text x="636" y="146" text-anchor="middle" fill="var(--muted)" font-size="13">веб-интерфейс</text>
+        <text x="636" y="166" text-anchor="middle" fill="var(--muted)" font-size="13">Alfis DNS (необязательно)</text>
+        <text x="636" y="192" text-anchor="middle" fill="var(--muted)" font-size="12">исходящий IPv4 / IPv6</text>
+
+        <rect x="806" y="80" width="100" height="100" rx="14" fill="var(--bg-soft)" stroke="var(--border)"/>
+        <text x="856" y="124" text-anchor="middle" fill="var(--text)" font-size="16" font-weight="600">Интернет</text>
+        <text x="856" y="148" text-anchor="middle" fill="var(--muted)" font-size="12">сайты</text>
+
+        <line x1="208" y1="130" x2="262" y2="130" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arrow)"/>
+        <line x1="468" y1="130" x2="522" y2="130" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arrow)"/>
+        <line x1="748" y1="130" x2="802" y2="130" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+        <text x="238" y="118" text-anchor="middle" fill="var(--muted)" font-size="11">VPN</text>
+        <text x="495" y="118" text-anchor="middle" fill="var(--muted)" font-size="11">Yggdrasil</text>
+        <text x="775" y="118" text-anchor="middle" fill="var(--muted)" font-size="11">TCP / UDP</text>
+      </svg>
+      <figcaption>Телефон попадает на X-Node через зашифрованный туннель Yggdrasil. Только X-Node общается с обычным интернетом.</figcaption>
+    </figure>
+  </section>
+
+  <!-- ------------------------------------------------------------ xnode -->
+  <section class="help-section" id="xnode">
+    <h2>X-Node</h2>
+    <div class="help-card">
+      <h3>Установка</h3>
+      <p>Поддерживаются Ubuntu 24.04 и Debian 12. Запустите установщик от root:</p>
+      <p><code>sudo bash &lt;(curl -fsSL https://raw.githubusercontent.com/MrKsey/x-node/main/install.sh)</code></p>
+      <p>Установщик добавляет Yggdrasil, X-Node и root-helper, записывает конфигурацию и печатает адрес веб-интерфейса и пароль администратора. Он также спрашивает, включать ли DNS-сервер, и создаёт первое приглашение. Учётные данные сохраняются в <code>/root/x-node-credentials.txt</code>.</p>
+    </div>
+
+    <div class="help-grid">
+      <div class="help-card">
+        <h3>Что он умеет</h3>
+        <ul>
+          <li>SOCKS5 поверх TCP и UDP, поэтому работают DNS и QUIC.</li>
+          <li>Регистрация клиентов по одноразовым приглашениям, QR-кодам и ссылкам.</li>
+          <li>Метки клиентов, доступ, дневные и месячные квоты, ограничения скорости.</li>
+          <li>Учёт трафика, который переживает перезапуски.</li>
+          <li>Автоматические публичные пиры Yggdrasil и пиры, закреплённые вручную.</li>
+          <li>Веб-интерфейс и полноценная командная строка.</li>
+          <li>Необязательный DNS-сервер Alfis для имён Yggdrasil.</li>
+        </ul>
+      </div>
+      <div class="help-card">
+        <h3>Командная строка</h3>
+        <p>Те же операции доступны в оболочке. Каждая команда принимает <code>-config PATH</code>.</p>
+        <ul>
+          <li><code>x-node status</code> — конфигурация и текущие счётчики.</li>
+          <li><code>x-node invite</code> — новое приглашение, QR-код и ссылка.</li>
+          <li><code>x-node allow list</code>, <code>allow add</code>, <code>allow remove</code> — список доступа.</li>
+          <li><code>x-node allow link ADDRESS</code> — QR-код для уже разрешённого клиента.</li>
+          <li><code>x-node clients</code>, <code>x-node usage</code> — кто подключён и сколько потратил.</li>
+          <li><code>x-node quota show</code>, <code>quota set</code>, <code>quota reset</code> — лимиты.</li>
+          <li><code>x-node peers</code> — состояние публичных пиров; <code>peers refresh</code> проверяет их заново.</li>
+          <li><code>x-node dns status</code>, <code>dns on</code>, <code>dns off</code> — DNS-сервер.</li>
+          <li><code>x-node web url</code>, <code>web password</code> — адрес панели и пароль.</li>
+          <li><code>x-node doctor</code> — проверки установки с подсказками.</li>
+          <li><code>x-node update check</code>, <code>update upgrade</code> — релизы.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- -------------------------------------------------------- xnode-web -->
+  <section class="help-section" id="xnode-web">
+    <h2>Веб-интерфейс X-Node</h2>
+    <p>Панель отдаётся по случайному пути и защищена входом. Адрес печатает <code>x-node web url</code> и установщик.</p>
+
+    <div class="help-grid">
+      <div class="help-card">
+        <h3>Дашборд</h3>
+        <p>Сверху четыре счётчика: адрес Yggdrasil, число клиентов, трафик за сегодня и за этот месяц. Под ними — график трафика. Ниже две карточки: <strong>X-Node</strong> слева и <strong>Yggdrasil</strong> справа, а карточка <strong>DNS-сервер</strong> стоит прямо под Yggdrasil. Адрес Yggdrasil и peer link показаны в одну строку, без переноса; длинное значение можно прокрутить по горизонтали.</p>
+        <p>График трафика показывает 15 минут, 1 час, 6 часов или 24 часа. В карточке X-Node:</p>
+        <ul>
+          <li><strong>X-Node</strong> — состояние службы, порты SOCKS5 и API, режим доступа, лимиты подключений, UDP-ретранслятор, исходящий IPv6, пути.</li>
+          <li><strong>Yggdrasil</strong> — версия, публичный ключ, записи маршрутизации, подсеть, пиры и peer link.</li>
+          <li><strong>DNS-сервер</strong> — состояние Alfis, адрес прослушивания, пароль веб-интерфейса Alfis и ссылка, открывающая панель Alfis в новой вкладке.</li>
+        </ul>
+        <p>Дальше идут System Info и Update, затем Quotas и Web interface, а таблица пиров закрывает страницу.</p>
+      </div>
+
+      <div class="help-card">
+        <h3>Клиенты</h3>
+        <p>Зарегистрированные клиенты с адресом, именем устройства, версией приложения, живыми счётчиками TCP и UDP, трафиком и квотой. Шесть действий строки на десктопе располагаются в два ряда по три; на планшете таблица превращается в карточки.</p>
+        <ul>
+          <li><strong>Edit</strong> — метка, заметки и лимиты клиента.</li>
+          <li><strong>QR / link</strong> — показать код, который снова добавит этот exit на телефон.</li>
+          <li><strong>New token</strong> — аннулировать старый API-токен и выдать новый.</li>
+          <li><strong>Disconnect all</strong> — закрыть открытые сессии TCP и UDP.</li>
+          <li><strong>Suspend</strong> — оставить клиента в списке, но отказывать в новых подключениях.</li>
+          <li><strong>Remove</strong> — убрать адрес из списка доступа.</li>
+        </ul>
+      </div>
+
+      <div class="help-card">
+        <h3>Приглашения</h3>
+        <p>Приглашение — одноразовый секрет. Укажите, сколько устройств могут им воспользоваться и сколько оно действует, затем покажите QR-код или скопируйте ссылку <code>yggnode://</code>. Токен хранится на сервере, поэтому код можно показать снова позже.</p>
+      </div>
+
+      <div class="help-card">
+        <h3>Конфигурация и журналы</h3>
+        <p><strong>Configuration</strong> показывает <code>config.json</code> и <code>yggdrasil.conf</code>. Редактор проверяет файл перед сохранением и оставляет резервную копию. Изменения слушателей требуют перезапуска; кнопки есть на дашборде.</p>
+        <p><strong>Logs</strong> показывает последние строки службы. <em>Wrap lines</em> включён по умолчанию; выключите его, чтобы читать трассировку без переносов. <em>Auto refresh</em> опрашивает журнал каждые три секунды. Пункт <em>Help</em> в меню слева под Logs открывает это руководство в новой вкладке.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- --------------------------------------------------- xnode-settings -->
+  <section class="help-section" id="xnode-settings">
+    <h2>Настройки X-Node</h2>
+    <p>Каждая карточка сохраняет только свои поля, поэтому изменение в одной форме никогда не перезаписывает другую.</p>
+
+    <div class="help-table-wrap">
+      <table class="help-table">
+        <thead>
+          <tr><th>Карточка</th><th>Что настраивает</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><strong>Node</strong></td><td>Имя узла, уровень журнала, часовой пояс учёта, учёт трафика. Часовой пояс определяет, когда сбрасываются дневные и месячные счётчики.</td></tr>
+          <tr><td><strong>DNS server</strong></td><td>Запускает Alfis для клиентов, показывает адрес прослушивания и пароль веб-интерфейса Alfis, ведёт в панель Alfis. См. <a href="#dns">DNS-сервер</a>.</td></tr>
+          <tr><td><strong>Access</strong></td><td>Открытый режим (<code>allowAll</code>) и API регистрации. Открытый режим отключает список доступа и квоты — используйте его только на приватном сервере.</td></tr>
+          <tr><td><strong>Limits</strong></td><td>Места для клиентов, подключения на клиента и всего, тайм-ауты простоя и соединения, заблокированные порты.</td></tr>
+          <tr><td><strong>UDP relay</strong></td><td>Пересылка UDP, разрешение доменных имён на exit-узле, лимит ассоциаций и тайм-аут простоя.</td></tr>
+          <tr><td><strong>IPv6 outbound</strong></td><td><code>auto</code>, <code>prefer</code> или <code>off</code>. Exit проверяет маршрут реальным подключением и сообщает клиенту, если провайдер не маршрутизирует IPv6.</td></tr>
+          <tr><td><strong>Public peers</strong></td><td>Сколько публичных пиров Yggdrasil держать и заменять ли мёртвые или медленные.</td></tr>
+          <tr><td><strong>Manual peers</strong></td><td>Пиры, закреплённые по адресу. Они всегда сохраняются и никогда не заменяются супервизором.</td></tr>
+          <tr><td><strong>Web interface</strong></td><td>Путь URL, время жизни сессии, блокировка после неудачных входов, компактная вёрстка. Публичный URL заполняет установщик.</td></tr>
+          <tr><td><strong>Admin password</strong></td><td>Меняет пароль входа. Другие открытые браузеры остаются в системе до истечения их сессии.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- -------------------------------------------------------------- dns -->
+  <section class="help-section" id="dns">
+    <h2>DNS-сервер</h2>
+    <p>X-Node может запускать <a href="https://github.com/Revertron/Alfis" target="_blank" rel="noopener noreferrer">Alfis</a> отдельной службой <code>x-node-dns.service</code>. Он отвечает на DNS-запросы клиентов exit-узла и доступен только через Yggdrasil, по адресу Yggdrasil сервера.</p>
+
+    <div class="help-grid">
+      <div class="help-card">
+        <h3>На что отвечает Alfis</h3>
+        <ul>
+          <li>Имена внутри Yggdrasil, включая <code>.ygg</code>, из собственной распределённой зоны.</li>
+          <li>Обычные имена, пересылаемые настроенным вышестоящим резолверам (по умолчанию два адреса Quad9).</li>
+          <li>Имена кэшируются в памяти; лимит кэша по умолчанию — 100 МБ.</li>
+        </ul>
+      </div>
+      <div class="help-card">
+        <h3>Как включить</h3>
+        <ol>
+          <li>Откройте <strong>Settings → DNS server</strong>, включите тумблер и нажмите <strong>Save</strong>.</li>
+          <li>Сервер сгенерирует пароль веб-интерфейса Alfis, если он пуст, запишет <code>/etc/x-node/alfis.conf</code>, установит unit и запустит его. Если Alfis ещё не установлен, X-Node скачает и поставит его сам.</li>
+          <li>Карточка на дашборде переключится в <em>running</em>. Кнопка <strong>Open Alfis web UI</strong> откроет <code>http://ADDRESS:8082/</code> в новой вкладке; войдите с паролем из карточки.</li>
+        </ol>
+        <p>Тот же переключатель есть в оболочке: <code>sudo x-node dns on</code> и <code>sudo x-node dns off</code>. Выключение останавливает unit, но сохраняет пароль и данные зоны.</p>
+        <p>Архивы релизов содержат Alfis со встроенным веб-интерфейсом. Если вместо него установлен <code>nogui</code>-бинарник с upstream, DNS продолжит работать, но unit не передаст <code>--web-ui</code>, и ссылка на панель будет скрыта.</p>
+      </div>
+    </div>
+
+    <div class="help-card">
+      <h3>Что видят клиенты</h3>
+      <p>Когда сервер включён, Y-Node узнаёт о нём от exit-узла и показывает его в <strong>Settings → DNS → Available servers</strong> с пометкой <em>DNS from exit node</em>. Адрес — это адрес Yggdrasil узла X-Node и порт 53, если установщик не выбрал другой порт.</p>
+      <p>Оператор exit-узла может сделать его сервером по умолчанию для профиля тумблером <strong>DNS exit node</strong> в настройках exit-узла Y-Node. Тогда сервер появляется в <strong>IN USE</strong> с замком: пока тумблер включён, удалить его вручную нельзя.</p>
+    </div>
+
+    <div class="help-card">
+      <h3>Порты и файлы</h3>
+      <ul>
+        <li><code>dns.listen</code> — адрес резолвера, по умолчанию адрес Yggdrasil на порту 53.</li>
+        <li><code>dns.webListen</code> — веб-интерфейс Alfis, по умолчанию адрес Yggdrasil на порту 8082. Он говорит по обычному HTTP и не выставлен в обычный интернет.</li>
+        <li><code>/etc/x-node/alfis.conf</code> — сгенерированная конфигурация Alfis. Редактируйте её через вкладку Configuration или настройки; ручные правки заменяются при следующей синхронизации.</li>
+        <li><code>/var/lib/x-node-dns</code> — состояние Alfis: ключи, данные зоны и кэш.</li>
+        <li><code>dns.forwarders</code> — вышестоящие резолверы для обычных имён.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------------------- ynode -->
+  <section class="help-section" id="ynode">
+    <h2>Y-Node</h2>
+    <p>Y-Node — это Android-клиент. Установите APK под архитектуру устройства (<code>arm64-v8a</code> для большинства телефонов, <code>armeabi-v7a</code> для старых 32-битных устройств), откройте приложение и разрешите VPN.</p>
+
+    <div class="help-grid">
+      <div class="help-card">
+        <h3>Вкладки</h3>
+        <ul>
+          <li><strong>Tunnel</strong> — подключение и отключение, ваш адрес и ключ Yggdrasil, текущий трафик, задержка, карточка exit-узла и состояние переключения.</li>
+          <li><strong>Peers</strong> — используемые пиры, пул замены, поиск пиров с ранжированием по задержке и ручные адреса пиров.</li>
+          <li><strong>Address book</strong> — каталог сайтов и сервисов Yggdrasil с поиском и своими записями.</li>
+          <li><strong>Apps</strong> — маршрутизация по приложениям: какие приложения идут через туннель, а какие остаются в мобильной сети.</li>
+          <li><strong>Settings</strong> — подключение, DNS, сеть, питание, журналы, оформление, обновления и сведения.</li>
+        </ul>
+      </div>
+
+      <div class="help-card">
+        <h3>Добавление exit-узла</h3>
+        <ol>
+          <li>На X-Node создайте приглашение: <code>sudo x-node invite</code> или страница Invites.</li>
+          <li>В Y-Node откройте карточку exit-узла и нажмите <strong>Add an exit node</strong>.</li>
+          <li>Отсканируйте QR-код, вставьте ссылку <code>yggnode://</code> или введите адрес и порты вручную.</li>
+          <li>Активируйте профиль. Приложение зарегистрирует устройство, получит API-токен и проверит exit.</li>
+        </ol>
+        <p>Профиль можно добавить и как обычный SOCKS5-прокси, указав только адрес Yggdrasil и порт. Такой профиль помечается <em>SOCKS5</em>; позже его можно расширить приглашением или токеном.</p>
+      </div>
+
+      <div class="help-card">
+        <h3>Карточка exit-узла</h3>
+        <p>Карточка показывает состояние — <em>Online</em>, <em>Connecting</em>, <em>Degraded</em>, <em>Direct fallback</em>, <em>Not allowed</em>, <em>Unreachable</em> — и время отклика. Здесь же видны квоты и ограничения скорости, о которых сообщил сервер, и состояние IPv6 на exit-узле.</p>
+        <p>Несколько профилей образуют список переключения: когда активный перестаёт отвечать, приложение пробует следующий. Профиль можно проверить по требованию кнопкой <strong>Check now</strong>.</p>
+      </div>
+
+      <div class="help-card">
+        <h3>Журналы</h3>
+        <p><strong>Settings → Logs</strong> открывает журнал событий приложения и узла Yggdrasil. Там же журнал можно скопировать или отправить для отчёта об ошибке. Этапы подключения — разрешение, туннель, пиры, первый ответ — видны на вкладке Tunnel, пока приложение подключается.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- --------------------------------------------------------- ynode-dns -->
+  <section class="help-section" id="ynode-dns">
+    <h2>DNS в Y-Node</h2>
+    <p><strong>Settings → DNS</strong> решает, как телефон разрешает имена, пока туннель поднят.</p>
+
+    <div class="help-table-wrap">
+      <table class="help-table">
+        <thead>
+          <tr><th>Режим</th><th>Поведение</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><strong>Yggdrasil</strong></td><td>Запросы идут на DNS-серверы, доступные внутри Yggdrasil. Имена <code>.ygg</code> разрешаются, а DNS-сервер exit-узла может разрешать и обычные имена. Выберите этот режим, чтобы пользоваться DNS-сервером exit-узла.</td></tr>
+          <tr><td><strong>System</strong></td><td>Телефон использует собственный DNS. Имена <code>.ygg</code> по-прежнему разрешает встроенный резолвер; обычные имена идут на резолвер мобильной сети или Wi-Fi.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="help-grid">
+      <div class="help-card">
+        <h3>IN USE и Available servers</h3>
+        <p><strong>IN USE</strong> перечисляет серверы, которые действительно опрашиваются, по порядку. <strong>Available servers</strong> содержит пресеты и серверы, найденные в сети. <strong>Add server</strong> принимает IPv6-адрес внутри Yggdrasil.</p>
+        <p>Сервер может пометиться <em>Not working</em>: приложение не получило от него ответ. Проверка идёт в фоне и не блокирует туннель.</p>
+      </div>
+      <div class="help-card">
+        <h3>DNS от exit-узла</h3>
+        <p>Когда X-Node запускает DNS-сервер, Y-Node автоматически добавляет его в <strong>Available servers</strong> с пометкой <em>DNS from exit node</em>. Это адрес Yggdrasil exit-узла на порту 53.</p>
+        <p>Тумблер <strong>DNS exit node</strong> в настройках профиля exit-узла помещает этот сервер в <strong>IN USE</strong> и запирает его значком замка: пока тумблер включён, сервер нельзя удалить вручную. Выключите тумблер, чтобы управлять списком самостоятельно.</p>
+      </div>
+    </div>
+
+    <div class="help-card">
+      <h3>DNS-серверы exit-узла</h3>
+      <p>В настройках профиля exit-узла <em>Exit DNS servers</em> — это резолверы, которыми телефон пользуется, пока трафик идёт через этот exit. Они отделены от режима DNS: режим решает, используется ли Yggdrasil DNS вообще, а список exit определяет, к каким адресам обращаться. Сервер, полученный от exit-узла, добавляется в этот список и может храниться для каждого профиля.</p>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------------------- flow -->
+  <section class="help-section" id="flow">
+    <h2>Как DNS находит exit</h2>
+    <p>DNS-сервер объявляет сам exit-узел, поэтому между двумя машинами ничего не нужно копировать вручную.</p>
+
+    <figure class="help-figure">
+      <svg viewBox="0 0 920 260" role="img" aria-labelledby="diagram-dns-title">
+        <title id="diagram-dns-title">Y-Node узнаёт адрес DNS от exit-узла и разрешает имена через него</title>
+        <defs>
+          <marker id="arrow2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/>
+          </marker>
+        </defs>
+
+        <rect x="20" y="70" width="200" height="120" rx="14" fill="var(--bg-elev)" stroke="var(--accent)"/>
+        <text x="120" y="104" text-anchor="middle" fill="var(--text)" font-size="15" font-weight="600">Y-Node</text>
+        <text x="120" y="128" text-anchor="middle" fill="var(--muted)" font-size="12">профиль exit-узла</text>
+        <text x="120" y="146" text-anchor="middle" fill="var(--muted)" font-size="12">режим DNS: Yggdrasil</text>
+        <text x="120" y="168" text-anchor="middle" fill="var(--muted)" font-size="12">Available servers</text>
+
+        <rect x="340" y="50" width="240" height="160" rx="14" fill="var(--bg-elev)" stroke="var(--accent)"/>
+        <text x="460" y="84" text-anchor="middle" fill="var(--text)" font-size="15" font-weight="600">X-Node</text>
+        <text x="460" y="108" text-anchor="middle" fill="var(--muted)" font-size="12">capabilities: dns=true</text>
+        <text x="460" y="128" text-anchor="middle" fill="var(--muted)" font-size="12">адрес: 200:…:53</text>
+        <text x="460" y="152" text-anchor="middle" fill="var(--muted)" font-size="12">Alfis · x-node-dns.service</text>
+        <text x="460" y="176" text-anchor="middle" fill="var(--muted)" font-size="12">зона .ygg + форвардеры</text>
+
+        <rect x="700" y="70" width="200" height="120" rx="14" fill="var(--bg-soft)" stroke="var(--border)"/>
+        <text x="800" y="108" text-anchor="middle" fill="var(--text)" font-size="15" font-weight="600">Ответы</text>
+        <text x="800" y="132" text-anchor="middle" fill="var(--muted)" font-size="12">.ygg → зона</text>
+        <text x="800" y="152" text-anchor="middle" fill="var(--muted)" font-size="12">прочие имена → upstream</text>
+
+        <line x1="224" y1="112" x2="336" y2="112" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arrow2)"/>
+        <text x="280" y="100" text-anchor="middle" fill="var(--muted)" font-size="11">1. статус</text>
+        <line x1="336" y1="148" x2="224" y2="148" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arrow2)"/>
+        <text x="280" y="164" text-anchor="middle" fill="var(--muted)" font-size="11">2. адрес DNS</text>
+        <line x1="584" y1="130" x2="696" y2="130" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#arrow2)"/>
+        <text x="640" y="118" text-anchor="middle" fill="var(--muted)" font-size="11">3. запрос</text>
+      </svg>
+      <figcaption>Клиент читает адрес DNS из статуса exit-узла, а затем отправляет запросы на него по тому же туннелю Yggdrasil. Exit пересылает обычные имена и сам отвечает на имена Yggdrasil.</figcaption>
+    </figure>
+
+    <div class="help-card">
+      <h3>Проверка</h3>
+      <ol class="help-steps">
+        <li>На X-Node <code>x-node dns status</code> сообщает, что сервер включён и unit активен.</li>
+        <li>Карточка DNS на дашборде показывает <em>running</em>, а веб-интерфейс Alfis открывается по кнопке.</li>
+        <li>В Y-Node профиль exit-узла активен, и карточка показывает <em>Online</em>.</li>
+        <li>Режим DNS — <strong>Yggdrasil</strong>, а сервер виден в <strong>Available servers</strong> с пометкой <em>DNS from exit node</em>.</li>
+        <li>Включите <strong>DNS exit node</strong> в настройках exit-узла, чтобы он появился в <strong>IN USE</strong>.</li>
+        <li>Откройте сайт <code>.ygg</code> и обычный сайт, чтобы проверить оба пути.</li>
+      </ol>
+    </div>
+  </section>
+
+  <!-- -------------------------------------------------------- troubles -->
+  <section class="help-section" id="troubles">
+    <h2>Решение проблем</h2>
+    <div class="help-grid">
+      <div class="help-card">
+        <h3>Карточка DNS показывает stopped</h3>
+        <ul>
+          <li>Helper не установлен: карточка показывает ошибку. Запустите <code>install.sh</code> ещё раз.</li>
+          <li>Alfis отсутствует: карточка сообщает <em>Alfis is not installed</em>. Установщик добавляет бинарник; запустите его заново или включите DNS в настройках — X-Node скачает Alfis сам.</li>
+          <li>Unit упал: <code>journalctl -u x-node-dns -n 50</code> покажет причину. Порт 53 может быть занят другим резолвером.</li>
+        </ul>
+      </div>
+      <div class="help-card">
+        <h3>Клиент не может зарегистрироваться</h3>
+        <ul>
+          <li>Приглашение использовано или истекло: создайте новое.</li>
+          <li>Телефон не подключён к Yggdrasil: проверьте вкладку Tunnel.</li>
+          <li>Exit-узел недоступен: проверьте peer link и <code>x-node status</code>.</li>
+          <li>Регистрация отключена в X-Node Settings → Access.</li>
+        </ul>
+      </div>
+      <div class="help-card">
+        <h3>Обычные имена не разрешаются</h3>
+        <ul>
+          <li>Режим DNS — <em>System</em>: переключите на <em>Yggdrasil</em>, чтобы использовать резолвер exit-узла.</li>
+          <li>DNS-сервер exit-узла выключен или его форвардеры недоступны.</li>
+          <li>Сервера нет в <strong>IN USE</strong>: добавьте его или включите тумблер exit-узла.</li>
+          <li>UDP заблокирован на пути: X-Node Settings → UDP relay должен быть включён.</li>
+        </ul>
+      </div>
+      <div class="help-card">
+        <h3>Панель не открывается</h3>
+        <ul>
+          <li>Используйте точный адрес из <code>x-node web url</code>, включая случайный путь.</li>
+          <li>Публичный URL зависит от настроек nginx и файрвола в установщике.</li>
+          <li>Слишком много неудачных входов блокируют адрес на 15 минут по умолчанию.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ---------------------------------------------------------- security -->
+  <section class="help-section" id="security">
+    <h2>Безопасность</h2>
+    <div class="help-card">
+      <ul>
+        <li>Приватный ключ Yggdrasil — это идентичность узла. Любой, у кого он есть, может пользоваться адресом; не кладите его в общие резервные копии.</li>
+        <li>Приглашение — одноразовый секрет. Относитесь к QR-коду как к паролю и отзывайте неиспользованные приглашения.</li>
+        <li>Открытый режим отключает список доступа и квоты. Не включайте его на публичном exit-узле.</li>
+        <li>У веб-интерфейса Alfis свой пароль. Он хранится в <code>dns.webPassword</code> и показан на дашборде; смените его при утечке.</li>
+        <li>Панель защищена входом и случайным путём URL, но не заменяет HTTPS. Публикуйте её через nginx с сертификатом, если она доступна из интернета.</li>
+        <li>Yggdrasil скрывает трафик от промежуточных узлов, но exit-узел видит назначения. Запускайте свой exit или доверяйте его оператору.</li>
+      </ul>
+    </div>
+  </section>
+
+  <footer class="help-footer">
+    <span>X-Node · Y-Node</span>
+    <a href="https://github.com/MrKsey/x-node" target="_blank" rel="noopener noreferrer">X-Node на GitHub</a>
+    <a href="https://github.com/MrKsey/y-node" target="_blank" rel="noopener noreferrer">Y-Node на GitHub</a>
+    <a href="https://yggdrasil-network.github.io/" target="_blank" rel="noopener noreferrer">Документация Yggdrasil</a>
+  </footer>
+
+</main>
+<script src="static/help-lang.js"></script>
+</body>
+</html>
