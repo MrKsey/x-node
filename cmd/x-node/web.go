@@ -1628,9 +1628,13 @@ func (w *webServer) listenAndServe(ctx context.Context) error {
 		Handler:           w,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      60 * time.Second,
-		IdleTimeout:       120 * time.Second,
-		MaxHeaderBytes:    16 << 10,
+		// Enabling the DNS server downloads Alfis before the settings form
+		// answers, and installAlfisWithTimeout allows three minutes for it.
+		// The write deadline must outlast that download, otherwise a slow
+		// mirror turns a successful install into a failed request.
+		WriteTimeout:   4 * time.Minute,
+		IdleTimeout:    120 * time.Second,
+		MaxHeaderBytes: 16 << 10,
 	}
 	go func() {
 		<-ctx.Done()
