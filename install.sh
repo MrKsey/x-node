@@ -129,9 +129,7 @@ DNS_WEB_PORT=8082
 DNS_WEB_PORT_SET=0
 ALFIS_VERSION="${ALFIS_VERSION:-0.10.0}"
 ALFIS_VERSION_SET=0
-ALFIS_CONF="/etc/x-node/alfis.conf"
 DNS_STATE_DIR="/var/lib/x-node-dns"
-DNS_UNIT="/etc/systemd/system/x-node-dns.service"
 ALFIS_BIN="/usr/local/bin/alfis"
 ALFIS_INSTALLED=0
 # Set when the installed Alfis binary was built with the web UI. The release
