@@ -154,6 +154,8 @@ sudo x-node dns off
 - the **DNS server** card on the dashboard: state, listen address, password and the same link;
 - `x-node status`: a short DNS section.
 
+The panel is proxied by the daemon under the sibling of the dashboard path: when the interface lives at `/<random>/web`, the panel is at `/<random>/dns/`. It opens on the same TLS endpoint and port as the dashboard, so no second public port is needed; the installer adds the nginx location for it. The proxy does not bypass the Alfis password.
+
 When the server is enabled, the status API reports `capabilities.dns = true` with `dnsAddress` and `dnsPort`, and the `yggnode://` link carries `dns` and `dnsport`. Y-Node reads them and offers the resolver under **Available servers** as **DNS from exit node**; the **DNS exit node** switch in the Y-Node exit settings puts it into **IN USE** with a lock.
 
 The configuration lives in the `dns` section of `config.json`:
@@ -182,7 +184,7 @@ X-Node provides a web interface and a CLI. The web panel includes the following 
 - **Clients** — the list of registered clients, device details, statistics, access and limit management.
 - **Invites** — creating and revoking invites, setting the expiry time and the number of registrations, viewing QR codes.
 - **Settings** — node, DNS server, access, limits, UDP, IPv6, public and manual peers, and web interface parameters.
-- **Configuration** — viewing and editing `config.json` and `yggdrasil.conf` with validation before saving.
+- **Configuration** — viewing and editing `config.json`, `yggdrasil.conf` and `alfis.conf` with validation before saving, and restart buttons for x-node, yggdrasil and the DNS server.
 - **Logs** — viewing the latest log entries, with a wrap-lines switch and a link to the built-in guide.
 
 Administrative operations such as applying configuration and restarting services from the web interface are handled by a separate `x-node-helper` service. It performs privileged actions over a Unix socket without giving the web process full root access.

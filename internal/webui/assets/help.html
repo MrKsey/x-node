@@ -176,7 +176,7 @@
 
       <div class="help-card">
         <h3>Configuration and Logs</h3>
-        <p><strong>Configuration</strong> shows <code>config.json</code> and <code>yggdrasil.conf</code>. The editor validates a file before saving and keeps a backup. Listener changes need a restart; the dashboard offers the buttons.</p>
+        <p><strong>Configuration</strong> shows <code>config.json</code>, <code>yggdrasil.conf</code> and <code>alfis.conf</code> with their full paths. The editor validates a file before saving and keeps a backup. Listener changes need a restart; the tab has the buttons for x-node, yggdrasil and the DNS server.</p>
         <p><strong>Logs</strong> shows the latest service lines. <em>Wrap lines</em> is on by default; turn it off to read a stack trace without wrapping. <em>Auto refresh</em> polls every three seconds. The <em>Help</em> entry in the sidebar under Logs opens this guide in a new tab.</p>
       </div>
     </div>
@@ -227,7 +227,7 @@
         <ol>
           <li>Open <strong>Settings → DNS server</strong> and enable the switch, then press <strong>Save</strong>.</li>
           <li>The server generates the Alfis web password if it is empty, writes <code>/etc/x-node/alfis.conf</code>, installs the unit and starts it.</li>
-          <li>The dashboard card turns to <em>running</em>. The <strong>Open Alfis web UI</strong> button opens <code>http://ADDRESS:8082/</code> in a new tab; log in with the password from the card.</li>
+          <li>The dashboard card turns to <em>running</em>. The <strong>Open Alfis web UI</strong> button opens the panel through the dashboard address, at <code>/&lt;random&gt;/dns/</code>; log in with the password from the card. The panel is also reachable directly at <code>http://ADDRESS:8082/</code> over Yggdrasil.</li>
         </ol>
         <p>The same switch is available in the shell: <code>sudo x-node dns on</code> and <code>sudo x-node dns off</code>. Turning it off stops the unit but keeps the password and the zone data.</p>
         <p>Release archives bundle Alfis with its web UI. If an upstream <code>nogui</code> binary is installed instead, DNS still works, but the unit does not pass <code>--web-ui</code> and the panel link is hidden.</p>

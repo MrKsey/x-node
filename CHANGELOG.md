@@ -4,6 +4,15 @@ All notable changes to X-Node are documented here. The format is based on [Keep 
 
 The release workflow publishes the section of the tag as the GitHub release body, so every release has a short human-readable summary of what changed. Keep each bullet on a single line: GitHub turns every newline in a release body into a hard break, so a wrapped bullet would render as a narrow column instead of using the full width.
 
+## [1.7.2] — 2026-11-09
+
+### Changed
+
+- The **Yggdrasil** card keeps its width: the address and the peer link are read-only fields that scroll sideways inside the card instead of stretching the page.
+- The **Alfis web UI** is proxied through the dashboard: when the interface lives at `/<random>/web`, the panel is at `/<random>/dns/` on the same TLS endpoint, and the dashboard and Settings links open it there. The installer adds the nginx location; the proxy keeps the Alfis password.
+- **Registered clients** puts the client label and the suspended pill on the second line next to the device details, so the address and the info icon stay alone on the first line.
+- **Configuration → Configuration files** lists `config.json`, `yggdrasil.conf` and `alfis.conf` with their full paths, validates `alfis.conf` with the Alfis parser and has a **Restart DNS (Alfis)** button.
+
 ## [1.7.1] — 2026-11-09
 
 ### Changed

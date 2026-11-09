@@ -172,3 +172,16 @@ func TestAlfisWebUISupportedReadsTheBinary(t *testing.T) {
 		t.Fatal("a missing binary was reported as supported")
 	}
 }
+
+func TestHelperConfigTargetKnowsAlfis(t *testing.T) {
+	path, group, err := helperConfigTarget("alfis")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path != helperDNSConfig || group != "x-node" {
+		t.Fatalf("alfis target = %q, group %q", path, group)
+	}
+	if _, _, err := helperConfigTarget("nope"); err == nil {
+		t.Fatal("an unknown file was accepted")
+	}
+}

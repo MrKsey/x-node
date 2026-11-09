@@ -145,9 +145,9 @@ func (w *webServer) handleRestart(rw http.ResponseWriter, r *http.Request) {
 	}
 	service := strings.TrimSpace(request.Service)
 	switch service {
-	case "x-node", "yggdrasil":
+	case "x-node", "yggdrasil", "x-node-dns":
 	default:
-		writeJSON(rw, http.StatusBadRequest, errorResponse{Error: "bad_service", Message: "service must be x-node or yggdrasil"})
+		writeJSON(rw, http.StatusBadRequest, errorResponse{Error: "bad_service", Message: "service must be x-node, yggdrasil or x-node-dns"})
 		return
 	}
 	w.log.info("web: %s restart requested", service)

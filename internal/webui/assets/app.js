@@ -426,6 +426,9 @@ async function render() {
       view.innerHTML = settingsHtml();
       wireSettings();
     } else if (state.view === "config") {
+      // The file list carries the real paths, so a direct visit to the tab
+      // needs the status as well.
+      await refreshStatus();
       view.innerHTML = configHtml();
       wireConfig();
     } else if (state.view === "logs") {
@@ -515,10 +518,12 @@ function dashboardHtml() {
           <table class="facts">
             <tr><th>Version</th><td class="right">${escapeHtml(self.build_version || "—")}</td></tr>
             <tr><th>Project</th><td class="right"><a class="link-wrap" href="https://github.com/yggdrasil-network/yggdrasil-go" title="yggdrasil-network/yggdrasil-go" target="_blank" rel="noopener noreferrer">yggdrasil-go</a></td></tr>
-            <tr><th>Address</th><td class="right mono nowrap-cell">${escapeHtml(self.address || status.address || "—")}</td></tr>
+            <tr><th>Address</th><td class="right">
+              <div class="scroll-field mono" title="${escapeHtml(self.address || status.address || "")}">${escapeHtml(self.address || status.address || "—")}</div>
+            </td></tr>
             <tr><th>Peer link</th><td class="right">
-              <div class="inline-copy">
-                <span class="mono nowrap-cell" title="${escapeHtml(status.peerURI || "")}">${escapeHtml(status.peerURI || "not advertised")}</span>
+              <div class="copy-line">
+                <div class="scroll-field mono" title="${escapeHtml(status.peerURI || "")}">${escapeHtml(status.peerURI || "not advertised")}</div>
                 ${status.peerURI ? `<button class="btn small" data-copy="${escapeHtml(status.peerURI)}">Copy</button>` : ""}
               </div>
             </td></tr>
@@ -631,16 +636,19 @@ function dnsCardHtml(dns) {
   } else if (dns.webUI === false) {
     hint = "This Alfis build has no web interface. Reinstall X-Node to get the bundled build with the web UI.";
   }
+  // The panel is proxied through the dashboard address, so it opens on the
+  // same TLS endpoint as the rest of the web interface.
+  const panel = enabled && dns.webUI !== false ? (dns.proxyPath || dns.webURL || "") : "";
   return `<div class="card section">
     <header><h3>DNS server</h3><span class="muted small">Alfis</span></header>
     <table class="facts">
       <tr><th>Service</th><td class="right">${statePill}</td></tr>
       <tr><th>Listen</th><td class="right mono">${escapeHtml(dns.listen || "—")}</td></tr>
-      <tr><th>Web UI</th><td class="right mono break">${enabled && dns.webURL ? escapeHtml(dns.webURL) : "—"}</td></tr>
+      <tr><th>Web UI</th><td class="right mono break">${panel ? `<a href="${escapeHtml(panel)}" target="_blank" rel="noopener noreferrer">${escapeHtml(panel)}</a>` : "—"}</td></tr>
       ${enabled && dns.password ? `<tr><th>Web password</th><td class="right mono">${escapeHtml(dns.password)}</td></tr>` : ""}
     </table>
-    ${enabled && dns.webURL
-      ? `<div class="actions"><a class="btn small" href="${escapeHtml(dns.webURL)}" target="_blank" rel="noopener noreferrer">Open Alfis web UI</a></div>`
+    ${panel
+      ? `<div class="actions"><a class="btn small" href="${escapeHtml(panel)}" target="_blank" rel="noopener noreferrer">Open Alfis web UI</a></div>`
       : ""}
     <p class="hint">${escapeHtml(hint)}</p>
   </div>`;
@@ -1199,16 +1207,21 @@ function clientRowHtml(client) {
   const quotaPill = quota.exhausted ? '<span class="pill bad">quota exhausted</span>' : "";
   const suspendedPill = client.suspended ? '<span class="pill warn">suspended</span>' : "";
   const stateClass = client.suspended ? "warn" : client.state === "connected" ? "ok" : "";
+  // The label and the state pill sit on the second line together with the
+  // device details: the address and the info icon stay alone on the first
+  // line, so a long label never pushes the address out of its column.
+  const tags = [
+    client.label ? `<span class="pill">${escapeHtml(client.label)}</span>` : "",
+    suspendedPill,
+  ].filter(Boolean).join("");
   return `
     <tr>
       <td data-label="Client">
         <div class="client-line">
           <span class="mono break">${escapeHtml(client.address)}</span>
-          ${client.label ? `<span class="pill">${escapeHtml(client.label)}</span>` : ""}
-          ${suspendedPill}
           <button class="icon-btn stats-btn" type="button" data-client-stats="${escapeHtml(client.address)}" title="Traffic details" aria-label="Traffic details">${INFO_ICON}</button>
         </div>
-        ${meta ? `<div class="muted small">${escapeHtml(meta)}</div>` : ""}
+        ${tags || meta ? `<div class="client-meta">${tags}${meta ? `<span class="muted small">${escapeHtml(meta)}</span>` : ""}</div>` : ""}
       </td>
       <td data-label="State"><span class="pill ${stateClass}">${escapeHtml(client.state)}</span></td>
       <td class="right" data-label="TCP">${client.connections || 0}</td>
@@ -1923,11 +1936,11 @@ function settingsHtml() {
         <label class="field"><span>Alfis web password</span><input id="s-dnspass" value="${escapeHtml(dns.webPassword || "")}" placeholder="generated when the server is turned on"></label>
       </div>
       <div class="actions">
-        ${dnsStatus.enabled && dnsStatus.webURL
-          ? `<a class="btn small" href="${escapeHtml(dnsStatus.webURL)}" target="_blank" rel="noopener noreferrer">Open Alfis web UI</a>`
+        ${dnsStatus.enabled && (dnsStatus.proxyPath || dnsStatus.webURL)
+          ? `<a class="btn small" href="${escapeHtml(dnsStatus.proxyPath || dnsStatus.webURL)}" target="_blank" rel="noopener noreferrer">Open Alfis web UI</a>`
           : ""}
       </div>
-      <p class="hint">Alfis answers <span class="mono">.ygg</span> names and forwards ordinary names to the upstream resolvers. The client finds this server on its own: Y-Node lists it under Available servers as "DNS from exit node". The link opens the Alfis admin page in a new tab.</p>
+      <p class="hint">Alfis answers <span class="mono">.ygg</span> names and forwards ordinary names to the upstream resolvers. The client finds this server on its own: Y-Node lists it under Available servers as "DNS from exit node". The link opens the Alfis admin page in a new tab on the same address as this dashboard.</p>
     </form>
 
     <form class="card section settings-card" data-settings="access">
@@ -2362,19 +2375,26 @@ function wireSettings() {
 /* configuration files */
 
 function configHtml() {
+  // The daemon reports the real paths: yggdrasil.conf can live outside /etc
+  // when the installer was pointed at another directory.
+  const files = (state.status && state.status.configFiles) || [
+    { id: "main", path: "/etc/x-node/config.json" },
+    { id: "yggdrasil", path: "/etc/yggdrasil/yggdrasil.conf" },
+    { id: "alfis", path: "/etc/x-node/alfis.conf" },
+  ];
   return `
     <div class="card section config-card">
       <header><h3>Configuration files</h3><span class="muted small" id="config-status"></span></header>
-      <p class="hint">The file is validated before it replaces the current one; a backup is written to /var/backups. Applying the main configuration removes the dashboard overlay, so the file becomes the only source of truth.</p>
+      <p class="hint">The file is validated before it replaces the current one; a backup is written to /var/backups. Applying the main configuration removes the dashboard overlay, so the file becomes the only source of truth. A restart applies a saved file to the running service.</p>
       <div class="config-toolbar">
         <select id="config-file">
-          <option value="main">/etc/x-node/config.json</option>
-          <option value="yggdrasil">yggdrasil.conf</option>
+          ${files.map((file) => `<option value="${escapeHtml(file.id)}">${escapeHtml(file.path)}</option>`).join("")}
         </select>
         <div class="actions">
           <button class="btn primary small" id="config-save" type="button">Validate and save</button>
           <button class="btn small" data-restart="x-node" type="button">Restart x-node</button>
           <button class="btn small" data-restart="yggdrasil" type="button">Restart yggdrasil</button>
+          <button class="btn small" data-restart="x-node-dns" type="button">Restart DNS (Alfis)</button>
         </div>
       </div>
       <div class="muted small mono" id="config-path"></div>
@@ -2412,7 +2432,12 @@ function wireConfig() {
   $$("[data-restart]").forEach((button) => {
     button.addEventListener("click", async () => {
       const service = button.dataset.restart;
-      if (!confirm("Restart " + service + "? Open tunnels will reconnect.")) return;
+      const questions = {
+        "x-node": "Restart x-node? Open tunnels will reconnect.",
+        "yggdrasil": "Restart yggdrasil? Every peering link is rebuilt.",
+        "x-node-dns": "Restart x-node-dns? The resolver is unavailable for a moment.",
+      };
+      if (!confirm(questions[service] || "Restart " + service + "?")) return;
       button.disabled = true;
       try {
         await api("POST", "api/restart", { service });

@@ -21,6 +21,9 @@ type webDNSStatus struct {
 	Listen    string `json:"listen"`
 	WebUI     bool   `json:"webUI"`
 	WebURL    string `json:"webURL"`
+	// ProxyPath is the panel address on the X-Node web server, e.g.
+	// /<random>/dns/. It is the link the dashboard opens.
+	ProxyPath string `json:"proxyPath"`
 	Password  string `json:"password,omitempty"`
 	Error     string `json:"error,omitempty"`
 }
@@ -30,9 +33,11 @@ type webDNSStatus struct {
 // its panel link would lead nowhere.
 func dnsWebFields(status *webDNSStatus, cfg Config) {
 	status.WebURL = ""
+	status.ProxyPath = ""
 	status.Password = ""
 	if status.WebUI {
 		status.WebURL = cfg.dnsWebURL()
+		status.ProxyPath = cfg.dnsWebPath() + "/"
 		status.Password = cfg.DNS.WebPassword
 	}
 }

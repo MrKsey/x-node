@@ -1275,6 +1275,21 @@ if [ "$YGG_PROTO" = "wss" ] && [ "$YGG_PORT" -gt 0 ]; then
         proxy_read_timeout 60s;
         proxy_send_timeout 60s;
     }
+
+    # Alfis web UI: proxied through the same daemon, which forwards it to the
+    # resolver. The panel sits on the sibling of the web path (/<random>/web
+    # becomes /<random>/dns) and keeps its own password. Buffering is off
+    # because the live status arrives as a server-sent event stream.
+    location ${WEB_PATH%/*}/dns {
+        proxy_pass http://127.0.0.1:${WEB_PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$http_host;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_buffering off;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
 EOF
 )"
     fi

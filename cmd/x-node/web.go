@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -18,6 +19,7 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"net/http/httputil"
 	"os"
 	"path/filepath"
 	"sort"
@@ -221,6 +223,17 @@ func (w *webServer) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		http.Redirect(rw, r, prefix+"/", http.StatusMovedPermanently)
 		return
 	}
+	// The Alfis panel is proxied through the dashboard: /<random>/dns is the
+	// sibling of /<random>/web, and /<random>/web/dns is the alias that the
+	// existing nginx location already covers. Both prefixes end up in the same
+	// handler, so the panel works before and after the installer adds the
+	// dedicated nginx location.
+	for _, dnsPrefix := range []string{cfg.dnsWebPath(), prefix + "/dns"} {
+		if r.URL.Path == dnsPrefix || strings.HasPrefix(r.URL.Path, dnsPrefix+"/") {
+			w.serveDNSProxy(rw, r, dnsPrefix)
+			return
+		}
+	}
 	if !strings.HasPrefix(r.URL.Path, prefix+"/") {
 		http.NotFound(rw, r)
 		return
@@ -286,6 +299,98 @@ func (w *webServer) serveHelp(rw http.ResponseWriter, r *http.Request, name stri
 	rw.Header().Set("Content-Type", "text/html; charset=utf-8")
 	rw.Header().Set("Cache-Control", "no-store")
 	_, _ = rw.Write(raw)
+}
+
+// serveDNSProxy forwards the Alfis panel through the X-Node web server. The
+// panel then lives on the same TLS endpoint as the dashboard, so no second
+// public port has to be opened. The Alfis password still gates it: the proxy
+// does not add or bypass authentication.
+func (w *webServer) serveDNSProxy(rw http.ResponseWriter, r *http.Request, base string) {
+	cfg := w.live.get()
+	if !cfg.DNS.Enabled {
+		http.Error(rw, "the DNS server is off", http.StatusNotFound)
+		return
+	}
+	if !alfisWebUISupported(dnsBinaryPath()) {
+		http.Error(rw, "this Alfis build has no web interface", http.StatusNotFound)
+		return
+	}
+	target := cfg.dnsWebTarget()
+	if target == "" {
+		http.Error(rw, "the Alfis web address is not usable", http.StatusBadGateway)
+		return
+	}
+	// The Alfis page uses inline onclick handlers and inline styles, so the
+	// strict policy of the dashboard would leave it dead. Everything is still
+	// same-origin: only the panel below this prefix may use inline code.
+	rw.Header().Set("Content-Security-Policy",
+		"default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "+
+			"script-src 'self' 'unsafe-inline'; connect-src 'self'; base-uri 'none'; "+
+			"form-action 'self'; frame-ancestors 'none'")
+	proxy := &httputil.ReverseProxy{
+		Director: func(request *http.Request) {
+			request.URL.Scheme = "http"
+			request.URL.Host = target
+			request.URL.Path = strings.TrimPrefix(request.URL.Path, base)
+			if request.URL.Path == "" {
+				request.URL.Path = "/"
+			}
+			request.Host = target
+		},
+		ModifyResponse: func(response *http.Response) error {
+			return rewriteAlfisResponse(response, base)
+		},
+		// Server-sent events drive the live status; buffering would hold them
+		// back until the connection closes.
+		FlushInterval: -1,
+		ErrorHandler: func(writer http.ResponseWriter, request *http.Request, err error) {
+			http.Error(writer, "the Alfis web interface is not reachable: "+err.Error(), http.StatusBadGateway)
+		},
+	}
+	proxy.ServeHTTP(rw, r)
+}
+
+// rewriteAlfisResponse points the absolute URLs of the Alfis page at the proxy
+// prefix. Alfis serves the interface from the root (/scripts.js, /api/...), so
+// without this every asset and API call would leave the prefixed path. The
+// assets are a fixed set of files, so three substitutions cover the whole UI.
+func rewriteAlfisResponse(response *http.Response, base string) error {
+	if response.Header.Get("Content-Encoding") != "" {
+		return nil
+	}
+	contentType := strings.ToLower(response.Header.Get("Content-Type"))
+	var replacements [][2]string
+	switch {
+	case strings.HasPrefix(contentType, "text/html"):
+		replacements = [][2]string{
+			{`href="/`, `href="` + base + `/`},
+			{`src="/`, `src="` + base + `/`},
+			{`action="/`, `action="` + base + `/`},
+		}
+	case strings.Contains(contentType, "javascript"):
+		replacements = [][2]string{
+			{`'/api/`, `'` + base + `/api/`},
+			{`"/api/`, `"` + base + `/api/`},
+		}
+	case strings.HasPrefix(contentType, "text/css"):
+		replacements = [][2]string{{`url(/`, `url(` + base + `/`}}
+	default:
+		// JSON, server-sent events and the favicon are passed through as they
+		// are. Reading the body of an event stream would never finish.
+		return nil
+	}
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		return err
+	}
+	_ = response.Body.Close()
+	for _, replacement := range replacements {
+		body = bytes.ReplaceAll(body, []byte(replacement[0]), []byte(replacement[1]))
+	}
+	response.Body = io.NopCloser(bytes.NewReader(body))
+	response.ContentLength = int64(len(body))
+	response.Header.Set("Content-Length", strconv.Itoa(len(body)))
+	return nil
 }
 
 func (w *webServer) serveStatic(rw http.ResponseWriter, r *http.Request, name string) {
@@ -613,6 +718,14 @@ type webStatus struct {
 	LogLevel          string        `json:"logLevel"`
 	StateDir          string        `json:"stateDir"`
 	ConfigPath        string        `json:"configPath"`
+	ConfigFiles       []configFile  `json:"configFiles"`
+}
+
+// configFile is one entry of the Configuration files selector. The editor uses
+// the full path as the option text, so a non-default location is visible.
+type configFile struct {
+	ID   string `json:"id"`
+	Path string `json:"path"`
 }
 
 func (w *webServer) handleStatus(rw http.ResponseWriter, r *http.Request) {
@@ -648,6 +761,11 @@ func (w *webServer) handleStatus(rw http.ResponseWriter, r *http.Request) {
 		LogLevel:          cfg.LogLevel,
 		StateDir:          cfg.StateDir,
 		ConfigPath:        w.configPath,
+		ConfigFiles: []configFile{
+			{ID: "main", Path: w.configPath},
+			{ID: "yggdrasil", Path: yggConfigPath()},
+			{ID: "alfis", Path: helperDNSConfig},
+		},
 	}
 	if w.family != nil {
 		status.IPv6Available, status.IPv6State, status.IPv6Source, status.IPv6Detail, status.IPv6Interface = w.family.status()

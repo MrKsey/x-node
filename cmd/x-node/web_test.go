@@ -12,6 +12,8 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -574,5 +576,155 @@ func TestWebURLsFollowTheListener(t *testing.T) {
 	urls = webURLs(cfg)
 	if len(urls) != 1 || urls[0] != "https://["+cfg.ListenAddress+"]/abc/web" {
 		t.Fatalf("https urls = %v", urls)
+	}
+}
+
+func TestDNSWebPathIsTheSiblingOfTheDashboard(t *testing.T) {
+	cases := map[string]string{
+		"/rdnoytarahru4psv/web": "/rdnoytarahru4psv/dns",
+		"/x-node/web":           "/x-node/dns",
+		"/web":                  "/dns",
+		"":                      "/x-node/dns",
+	}
+	for path, want := range cases {
+		cfg := Config{}
+		cfg.Web.Path = path
+		if got := cfg.dnsWebPath(); got != want {
+			t.Errorf("dnsWebPath(%q) = %q, want %q", path, got, want)
+		}
+	}
+}
+
+func TestDNSWebTargetDialsAWildcardThroughLoopback(t *testing.T) {
+	cases := map[string]string{
+		"0.0.0.0:8082":    "127.0.0.1:8082",
+		"[::]:8082":       "[::1]:8082",
+		"127.0.0.1:8082":  "127.0.0.1:8082",
+		"[200::1:2]:8082": "[200::1:2]:8082",
+	}
+	for listen, want := range cases {
+		cfg := Config{}
+		cfg.DNS.WebListen = listen
+		if got := cfg.dnsWebTarget(); got != want {
+			t.Errorf("dnsWebTarget(%q) = %q, want %q", listen, got, want)
+		}
+	}
+	cfg := Config{}
+	cfg.DNS.WebListen = "not-a-host-port"
+	if got := cfg.dnsWebTarget(); got != "" {
+		t.Fatalf("an unusable listener returned %q", got)
+	}
+}
+
+func TestRewriteAlfisResponsePrefixesAbsoluteURLs(t *testing.T) {
+	html := `<link href="/styles.css"><script src="/scripts.js"></script>`
+	response := &http.Response{
+		Header: http.Header{"Content-Type": {"text/html; charset=utf-8"}},
+		Body:   io.NopCloser(strings.NewReader(html)),
+	}
+	if err := rewriteAlfisResponse(response, "/abc/dns"); err != nil {
+		t.Fatal(err)
+	}
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), `href="/abc/dns/styles.css"`) {
+		t.Fatalf("stylesheet path was not rewritten: %s", body)
+	}
+	if !strings.Contains(string(body), `src="/abc/dns/scripts.js"`) {
+		t.Fatalf("script path was not rewritten: %s", body)
+	}
+	if response.ContentLength != int64(len(body)) {
+		t.Fatalf("content length = %d, want %d", response.ContentLength, len(body))
+	}
+
+	script := `fetch('/api/status'); new EventSource("/api/events");`
+	response = &http.Response{
+		Header: http.Header{"Content-Type": {"application/javascript; charset=utf-8"}},
+		Body:   io.NopCloser(strings.NewReader(script)),
+	}
+	if err := rewriteAlfisResponse(response, "/abc/dns"); err != nil {
+		t.Fatal(err)
+	}
+	body, _ = io.ReadAll(response.Body)
+	if !strings.Contains(string(body), `'/abc/dns/api/status'`) {
+		t.Fatalf("single-quoted API path was not rewritten: %s", body)
+	}
+	if !strings.Contains(string(body), `"/abc/dns/api/events"`) {
+		t.Fatalf("double-quoted API path was not rewritten: %s", body)
+	}
+}
+
+func TestRewriteAlfisResponseLeavesTheEventStreamAlone(t *testing.T) {
+	stream := "data: {\"ok\":true}\n\n"
+	response := &http.Response{
+		Header: http.Header{"Content-Type": {"text/event-stream"}},
+		Body:   io.NopCloser(strings.NewReader(stream)),
+	}
+	if err := rewriteAlfisResponse(response, "/abc/dns"); err != nil {
+		t.Fatal(err)
+	}
+	// The body is not read for an event stream: reading it would block until
+	// the connection closes.
+	body, _ := io.ReadAll(response.Body)
+	if string(body) != stream {
+		t.Fatalf("event stream changed: %q", body)
+	}
+}
+
+func TestDNSProxyServesThePanelUnderBothPrefixes(t *testing.T) {
+	panel := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/":
+			rw.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = rw.Write([]byte(`<link href="/styles.css"><script src="/scripts.js"></script>`))
+		case "/api/status":
+			rw.Header().Set("Content-Type", "application/json")
+			_, _ = rw.Write([]byte(`{"ok":true}`))
+		default:
+			http.NotFound(rw, r)
+		}
+	}))
+	defer panel.Close()
+
+	// The panel is offered only when the installed binary is a webui build.
+	// The probe reads the file, so a marker file is enough for the test.
+	dir := t.TempDir()
+	name := "alfis"
+	if runtime.GOOS == "windows" {
+		// LookPath on Windows only accepts names from PATHEXT.
+		name = "alfis.exe"
+	}
+	binary := filepath.Join(dir, name)
+	if err := os.WriteFile(binary, []byte("alfis_session"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	server, cfg := newTestWebServer(t)
+	cfg.Web.Path = "/abc/web"
+	cfg.DNS.Enabled = true
+	cfg.DNS.WebListen = strings.TrimPrefix(panel.URL, "http://")
+	server.live.set(cfg)
+
+	for _, path := range []string{"/abc/dns/", "/abc/web/dns/"} {
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("%s = %d: %s", path, recorder.Code, recorder.Body.String())
+		}
+		// Assets keep the prefix the browser used, so both paths stay usable.
+		base := strings.TrimSuffix(path, "/")
+		if body := recorder.Body.String(); !strings.Contains(body, `href="`+base+`/styles.css"`) {
+			t.Fatalf("%s was not rewritten: %s", path, body)
+		}
+	}
+
+	// An API call reaches the panel without the prefix.
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/abc/dns/api/status", nil))
+	if recorder.Code != http.StatusOK || recorder.Body.String() != `{"ok":true}` {
+		t.Fatalf("api = %d %s", recorder.Code, recorder.Body.String())
 	}
 }

@@ -176,7 +176,7 @@
 
       <div class="help-card">
         <h3>Конфигурация и журналы</h3>
-        <p><strong>Configuration</strong> показывает <code>config.json</code> и <code>yggdrasil.conf</code>. Редактор проверяет файл перед сохранением и оставляет резервную копию. Изменения слушателей требуют перезапуска; кнопки есть на дашборде.</p>
+        <p><strong>Configuration</strong> показывает <code>config.json</code>, <code>yggdrasil.conf</code> и <code>alfis.conf</code> с полными путями. Редактор проверяет файл перед сохранением и оставляет резервную копию. Изменения слушателей требуют перезапуска; на вкладке есть кнопки для x-node, yggdrasil и DNS-сервера.</p>
         <p><strong>Logs</strong> показывает последние строки службы. <em>Wrap lines</em> включён по умолчанию; выключите его, чтобы читать трассировку без переносов. <em>Auto refresh</em> опрашивает журнал каждые три секунды. Пункт <em>Help</em> в меню слева под Logs открывает это руководство в новой вкладке.</p>
       </div>
     </div>
@@ -227,7 +227,7 @@
         <ol>
           <li>Откройте <strong>Settings → DNS server</strong>, включите тумблер и нажмите <strong>Save</strong>.</li>
           <li>Сервер сгенерирует пароль веб-интерфейса Alfis, если он пуст, запишет <code>/etc/x-node/alfis.conf</code>, установит unit и запустит его. Если Alfis ещё не установлен, X-Node скачает и поставит его сам.</li>
-          <li>Карточка на дашборде переключится в <em>running</em>. Кнопка <strong>Open Alfis web UI</strong> откроет <code>http://ADDRESS:8082/</code> в новой вкладке; войдите с паролем из карточки.</li>
+          <li>Карточка на дашборде переключится в <em>running</em>. Кнопка <strong>Open Alfis web UI</strong> откроет панель через адрес дашборда, по пути <code>/&lt;random&gt;/dns/</code>; войдите с паролем из карточки. Панель также доступна напрямую по <code>http://ADDRESS:8082/</code> через Yggdrasil.</li>
         </ol>
         <p>Тот же переключатель есть в оболочке: <code>sudo x-node dns on</code> и <code>sudo x-node dns off</code>. Выключение останавливает unit, но сохраняет пароль и данные зоны.</p>
         <p>Архивы релизов содержат Alfis со встроенным веб-интерфейсом. Если вместо него установлен <code>nogui</code>-бинарник с upstream, DNS продолжит работать, но unit не передаст <code>--web-ui</code>, и ссылка на панель будет скрыта.</p>

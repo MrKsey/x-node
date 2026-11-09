@@ -564,8 +564,10 @@ func helperConfigTarget(file string) (path, group string, err error) {
 		return helperMainConfig, "x-node", nil
 	case "yggdrasil":
 		return yggConfigPath(), "yggdrasil", nil
+	case "alfis":
+		return helperDNSConfig, "x-node", nil
 	default:
-		return "", "", fmt.Errorf("unknown configuration %q (use main or yggdrasil)", file)
+		return "", "", fmt.Errorf("unknown configuration %q (use main, yggdrasil or alfis)", file)
 	}
 }
 
@@ -585,11 +587,7 @@ func yggConfigPath() string {
 }
 
 func helperValidateConfig(file, content string) error {
-	var document any
-	if err := json.Unmarshal([]byte(content), &document); err != nil {
-		return fmt.Errorf("not valid JSON: %w", err)
-	}
-	tmp, err := os.CreateTemp("", "x-node-config-*.json")
+	tmp, err := os.CreateTemp("", "x-node-config-*")
 	if err != nil {
 		return err
 	}
@@ -604,13 +602,17 @@ func helperValidateConfig(file, content string) error {
 	}
 	switch file {
 	case "main":
+		var document any
+		if err := json.Unmarshal([]byte(content), &document); err != nil {
+			return fmt.Errorf("not valid JSON: %w", err)
+		}
 		if _, err := loadConfig(name); err != nil {
 			return err
 		}
 	case "yggdrasil":
 		var fields map[string]any
 		if err := json.Unmarshal([]byte(content), &fields); err != nil {
-			return err
+			return fmt.Errorf("not valid JSON: %w", err)
 		}
 		for _, key := range []string{"Listen", "Peers"} {
 			if raw, ok := fields[key]; ok {
@@ -632,6 +634,29 @@ func helperValidateConfig(file, content string) error {
 				}
 				return fmt.Errorf("Yggdrasil rejected the configuration: %s", message)
 			}
+		}
+	case "alfis":
+		// Alfis owns the TOML format. "-u" loads the file with its own parser
+		// and prints the upgraded document; an invalid file prints an error
+		// line instead and exits with status 0, so the output is checked too.
+		binary := dnsBinaryPath()
+		if binary == "" {
+			// Nothing can parse the document on this host. The restart button
+			// will report the real error from the unit.
+			return nil
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		out, err := exec.CommandContext(ctx, binary, "-u", name).CombinedOutput()
+		if err != nil {
+			message := strings.TrimSpace(string(out))
+			if message == "" {
+				message = err.Error()
+			}
+			return fmt.Errorf("Alfis rejected the configuration: %s", message)
+		}
+		if strings.Contains(string(out), "Error loading config") {
+			return errors.New("Alfis rejected the configuration: not valid TOML for Alfis")
 		}
 	}
 	return nil
