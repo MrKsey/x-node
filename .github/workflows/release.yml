@@ -9,9 +9,11 @@ permissions:
   contents: write
 
 env:
-  # The Alfis source tag that is built into the release archives. It must match
-  # the default of ALFIS_VERSION in install.sh.
+  # The Alfis source that is built into the release archives. The web UI was
+  # added after the v0.10.0 release, so the build uses a pinned upstream commit;
+  # the Cargo version is still 0.10.0.
   ALFIS_VERSION: "0.10.0"
+  ALFIS_REF: "4427af35fc138a6b05cc9a9ebe11da3631cae15a"
 
 jobs:
   build:
@@ -33,7 +35,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: Revertron/Alfis
-          ref: v${{ env.ALFIS_VERSION }}
+          ref: ${{ env.ALFIS_REF }}
           path: alfis-src
 
       - uses: actions/setup-go@v5
@@ -127,10 +129,10 @@ jobs:
       - name: fetch the bundled Alfis source
         run: |
           set -euo pipefail
-          # The archives bundle an Alfis binary built from this tag. Alfis is
+          # The archives bundle an Alfis binary built from this commit. Alfis is
           # AGPL-3.0, so the corresponding source is published next to it.
-          curl -fsSL -o "dist/alfis-v${ALFIS_VERSION}-source.tar.gz" \
-            "https://github.com/Revertron/Alfis/archive/refs/tags/v${ALFIS_VERSION}.tar.gz"
+          curl -fsSL -o "dist/alfis-${ALFIS_VERSION}-${ALFIS_REF}-source.tar.gz" \
+            "https://github.com/Revertron/Alfis/archive/${ALFIS_REF}.tar.gz"
 
       - name: checksums
         run: |
