@@ -800,12 +800,18 @@ func peerSummary(cfg Config) (managed int, manual int, up int, inbound int) {
 	if state, err := readPeersState(cfg.statePath(peersStateFile)); err == nil && len(state.Managed) > 0 {
 		list = cleanPeerList(state.Managed)
 	}
-	managed = len(list)
 	manualList := cleanPeerList(cfg.ManualPeers)
+	manualKeys := peerKeySet(manualList)
 	manual = len(manualList)
 	wanted := make(map[string]bool, len(list)+len(manualList))
 	for _, uri := range list {
-		wanted[peerKeyOfURI(uri)] = true
+		key := peerKeyOfURI(uri)
+		wanted[key] = true
+		// A manual peer can also be written to the managed list; it must not
+		// inflate the automatic count the status line reports.
+		if !manualKeys[key] {
+			managed++
+		}
 	}
 	for _, uri := range manualList {
 		wanted[peerKeyOfURI(uri)] = true

@@ -77,7 +77,7 @@ NODE_NAME="X-Node"
 NODE_NAME_SET=0
 SOCKS_PORT=1080
 SOCKS_PORT_SET=0
-API_PORT=1081
+API_PORT=0
 API_PORT_SET=0
 YGG_PORT=13338
 YGG_PORT_SET=0
@@ -193,7 +193,7 @@ Options:
                         in the QR code for the direct peer link (default: ask
                         and auto-detect)
   --socks-port N        SOCKS5 port on the Yggdrasil address (default: 1080)
-  --api-port N          registration/status port (default: 1081);
+  --api-port N          registration/status port (default: 0);
                         0 = share the SOCKS5 port and serve /v1/... there
   --allow-all           open mode: every Yggdrasil node may use the exit
   --no-registration     disable the registration endpoint
@@ -865,7 +865,7 @@ fi
 API_PORT_EFFECTIVE="$API_PORT"
 [ "$API_PORT_EFFECTIVE" -ne 0 ] || API_PORT_EFFECTIVE="$SOCKS_PORT"
 API_DESCRIPTION="$API_PORT"
-[ "$API_PORT" -ne 0 ] || API_DESCRIPTION="$API_PORT (shared with SOCKS5, /v1/...)"
+[ "$API_PORT" -ne 0 ] || API_DESCRIPTION="$API_PORT_EFFECTIVE (shared with SOCKS5, /v1/...)"
 
 cat <<EOF
 X-Node node installer

@@ -231,6 +231,44 @@ func TestPeerSupervisorTrimsToCount(t *testing.T) {
 	}
 }
 
+func TestPeerSupervisorDoesNotLetManualPeersFillAutomaticSlots(t *testing.T) {
+	cfg := testPeerConfig(t, 2)
+	// The manual peer is also in the seed list, as an older release wrote it
+	// to both places. It must not count as one of the two automatic peers.
+	cfg.Peers = []string{"tls://manual.example:1", "tls://a.example:2"}
+	cfg.ManualPeers = []string{"tls://manual.example:1"}
+	node := &fakeNode{peers: []adminPeer{
+		{URI: "tls://manual.example:1", Up: true},
+		{URI: "tls://a.example:2", Up: true},
+	}}
+	s := newTestSupervisor(t, cfg, node, []probeResult{{URI: "tls://b.example:3", LatencyMs: 20}})
+	s.step(context.Background())
+
+	if !containsString(node.added, "tls://b.example:3") {
+		t.Fatalf("added = %v, want a second automatic peer", node.added)
+	}
+	if got := s.autoCountLocked(cfg.ManualPeers); got != 2 {
+		t.Fatalf("automatic peers = %d, want 2", got)
+	}
+}
+
+func TestPeerSupervisorKeepsTheLastWorkingLink(t *testing.T) {
+	cfg := testPeerConfig(t, 2)
+	cfg.Peers = []string{"tls://a.example:1", "tls://b.example:2"}
+	node := &fakeNode{peers: []adminPeer{
+		{URI: "tls://a.example:1", Up: true, Latency: 100 * time.Millisecond},
+		{URI: "tls://b.example:2", Up: false},
+	}}
+	// The candidate is much faster, but swapping the only live link would leave
+	// the node without a working peer until the new one finishes its handshake.
+	s := newTestSupervisor(t, cfg, node, []probeResult{{URI: "tls://c.example:3", LatencyMs: 5}})
+	s.step(context.Background())
+
+	if containsString(node.removed, "tls://a.example:1") {
+		t.Fatalf("removed = %v, want the only up peer kept", node.removed)
+	}
+}
+
 func TestPeerSupervisorSwapsInFasterPeer(t *testing.T) {
 	cfg := testPeerConfig(t, 3)
 	cfg.Peers = []string{"tls://a.example:1", "tls://b.example:2", "tls://c.example:3"}

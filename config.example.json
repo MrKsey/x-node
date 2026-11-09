@@ -2,7 +2,7 @@
   "name": "X-Node",
   "listenAddress": "200::1",
   "socksPort": 1080,
-  "apiPort": 1081,
+  "apiPort": 0,
   "allowAll": false,
   "registration": true,
   "inviteTTL": "24h",

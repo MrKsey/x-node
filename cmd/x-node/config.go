@@ -289,7 +289,7 @@ func defaultConfig() Config {
 	return Config{
 		Name:                   "X-Node",
 		SocksPort:              1080,
-		APIPort:                1081,
+		APIPort:                0,
 		Registration:           true,
 		InviteTTL:              "24h",
 		InviteUses:             1,
@@ -409,9 +409,10 @@ func (c *Config) applyDefaults() {
 	if c.SocksPort == 0 {
 		c.SocksPort = d.SocksPort
 	}
-	// APIPort is deliberately not defaulted here: 0 is a valid value that
-	// means "serve /v1/... on the SOCKS5 listener". A missing field keeps the
-	// default from defaultConfig because the file is decoded over it.
+	// APIPort is deliberately not defaulted here: 0 is the default and a
+	// valid value that means "serve /v1/... on the SOCKS5 listener". A missing
+	// field keeps the default from defaultConfig because the file is decoded
+	// over it.
 	if c.InviteTTL == "" {
 		c.InviteTTL = d.InviteTTL
 	}

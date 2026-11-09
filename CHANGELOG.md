@@ -4,6 +4,20 @@ All notable changes to X-Node are documented here. The format is based on [Keep 
 
 The release workflow publishes the section of the tag as the GitHub release body, so every release has a short human-readable summary of what changed. Keep each bullet on a single line: GitHub turns every newline in a release body into a hard break, so a wrapped bullet would render as a narrow column instead of using the full width.
 
+## [1.7.3] — 2026-11-09
+
+### Changed
+
+- The installer now defaults **API port** to `0`: the registration and status API share the SOCKS5 listener under `/v1/...`, so a fresh install opens one port instead of two. The summary, the firewall rules and the example config use the effective port.
+- The **Yggdrasil** card puts the **peer link** last and drops **Public key** and **Routing entries**. The address and the peer link are read-only fields without scrollbars, like the **Listen** field in Settings → DNS server.
+- The **DNS server** card no longer repeats the **Web UI** row: the **Open Alfis web UI** button below the table already opens it.
+- IPv6 addresses on the dashboard are shown without square brackets, and the content width no longer changes when switching tabs.
+
+### Fixed
+
+- **Automatic peers to keep** now counts only automatic peers: a manual peer that is also present in the managed list no longer takes one of the requested slots, so the supervisor tops the list up to the configured number.
+- The peer supervisor keeps the last working link instead of replacing it with a faster candidate, so a node with a single live peer does not drop to zero connected peers during a handshake.
+
 ## [1.7.2] — 2026-11-09
 
 ### Changed

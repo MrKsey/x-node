@@ -10,7 +10,8 @@
 # The installer replaces the two defines with the configured ports.
 
 define socks_port = 1080
-define api_port = 1081
+# apiPort 0 means the API shares the SOCKS5 listener, so the same port.
+define api_port = 1080
 
 table inet x-node {
     chain input {

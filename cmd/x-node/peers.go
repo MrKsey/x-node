@@ -655,7 +655,7 @@ func (s *peerSupervisor) topUpLocked(
 	now time.Time,
 	settings peerSettings,
 ) {
-	for len(s.managed) < settings.Count {
+	for s.autoCountLocked(settings.Manual) < settings.Count {
 		candidate, ok := s.takeCandidateLocked(outbound, now, settings.Manual)
 		if !ok {
 			s.startProbeLocked(ctx, settings)
@@ -678,7 +678,7 @@ func (s *peerSupervisor) trimLocked(
 	now time.Time,
 	settings peerSettings,
 ) {
-	for len(s.managed) > settings.Count {
+	for s.autoCountLocked(settings.Manual) > settings.Count {
 		worst := s.worstLocked(outbound, now, false, settings.Manual)
 		if worst == "" {
 			return
@@ -694,6 +694,39 @@ func (s *peerSupervisor) trimLocked(
 	}
 }
 
+// autoCountLocked counts the managed peers that are not manual. A manual peer
+// can also be present in the managed list, because it is written to
+// yggdrasil.conf as well. It must not take a slot of peerCount: otherwise the
+// supervisor thinks the list is full while the dashboard shows fewer automatic
+// peers than the operator asked for.
+func (s *peerSupervisor) autoCountLocked(manual []string) int {
+	manualKeys := peerKeySet(manual)
+	count := 0
+	for _, uri := range s.managed {
+		if !manualKeys[peerKeyOfURI(uri)] {
+			count++
+		}
+	}
+	return count
+}
+
+// upAutoCountLocked is how many automatic managed peers are connected now.
+// improvement uses it to keep the last working link: swapping it out would drop
+// the node to zero up peers until the new link finishes its handshake.
+func (s *peerSupervisor) upAutoCountLocked(outbound map[string]adminPeer, manual []string) int {
+	manualKeys := peerKeySet(manual)
+	count := 0
+	for _, uri := range s.managed {
+		if manualKeys[peerKeyOfURI(uri)] {
+			continue
+		}
+		if state, ok := outbound[peerKeyOfURI(uri)]; ok && state.Up {
+			count++
+		}
+	}
+	return count
+}
+
 // improveLocked swaps the slowest link for a clearly faster candidate. The
 // margin keeps the supervisor from chasing latency noise.
 func (s *peerSupervisor) improveLocked(
@@ -702,6 +735,12 @@ func (s *peerSupervisor) improveLocked(
 	settings peerSettings,
 ) {
 	if len(s.pool) == 0 {
+		return
+	}
+	// Keep the last working link: a replacement spends at least one handshake
+	// before it can carry traffic, and a node with a single peer would drop to
+	// zero up peers in the meantime.
+	if s.upAutoCountLocked(outbound, settings.Manual) < 2 {
 		return
 	}
 	worst, worstLatency := s.worstUpLocked(outbound, now, settings.Manual)

@@ -135,6 +135,15 @@ function escapeHtml(value) {
     .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
+// bareHostPort drops the brackets an IPv6 literal needs inside a URL, so every
+// address on the dashboard reads the same way. The copy buttons keep the real
+// value; this is only for display.
+function bareHostPort(value) {
+  const text = String(value == null ? "" : value);
+  const match = text.match(/^\[([^\]]+)\](.*)$/);
+  return match ? match[1] + match[2] : text;
+}
+
 function toast(message, bad) {
   const node = $("#toast");
   node.textContent = message;
@@ -495,7 +504,7 @@ function dashboardHtml() {
         <header><h3>X-Node</h3><span class="muted small">${escapeHtml(status.version || "")}</span></header>
         <table class="facts">
           <tr><th>Service</th><td class="right"><span class="pill ok">running</span> · ${duration(status.uptimeSeconds || 0)}</td></tr>
-          <tr><th>SOCKS5</th><td class="right mono">[${escapeHtml(status.address || "")}]:${status.socksPort || ""}</td></tr>
+          <tr><th>SOCKS5</th><td class="right mono">${escapeHtml(status.address || "")}:${status.socksPort || ""}</td></tr>
           <tr><th>API</th><td class="right mono">${apiShared ? "shared with SOCKS5" : "port " + (status.apiPort || "")} · auth ${escapeHtml(status.apiAuth || "")}</td></tr>
           <tr><th>Registration</th><td class="right">${status.registration ? "enabled" : "disabled"}</td></tr>
           <tr><th>Open mode</th><td class="right">${status.allowAll ? '<span class="pill warn">allowAll</span>' : "allowlist"}</td></tr>
@@ -519,19 +528,17 @@ function dashboardHtml() {
             <tr><th>Version</th><td class="right">${escapeHtml(self.build_version || "—")}</td></tr>
             <tr><th>Project</th><td class="right"><a class="link-wrap" href="https://github.com/yggdrasil-network/yggdrasil-go" title="yggdrasil-network/yggdrasil-go" target="_blank" rel="noopener noreferrer">yggdrasil-go</a></td></tr>
             <tr><th>Address</th><td class="right">
-              <div class="scroll-field mono" title="${escapeHtml(self.address || status.address || "")}">${escapeHtml(self.address || status.address || "—")}</div>
+              <input class="scroll-field mono" readonly value="${escapeHtml(self.address || status.address || "—")}" title="${escapeHtml(self.address || status.address || "")}">
             </td></tr>
-            <tr><th>Peer link</th><td class="right">
-              <div class="copy-line">
-                <div class="scroll-field mono" title="${escapeHtml(status.peerURI || "")}">${escapeHtml(status.peerURI || "not advertised")}</div>
-                ${status.peerURI ? `<button class="btn small" data-copy="${escapeHtml(status.peerURI)}">Copy</button>` : ""}
-              </div>
-            </td></tr>
-            <tr><th>Public key</th><td class="right mono ellipsis" title="${escapeHtml(self.key || "")}">${escapeHtml(self.key || "—")}</td></tr>
-            <tr><th>Routing entries</th><td class="right">${self.routing_entries == null ? "—" : self.routing_entries}</td></tr>
             <tr><th>Subnet</th><td class="right mono">${escapeHtml(self.subnet || "—")}</td></tr>
             <tr><th>Peers</th><td class="right">${peers.up || 0} up · ${peers.managed || 0} automatic · ${peers.manualPeers ? peers.manualPeers.length : 0} manual · ${peers.inbound || 0} inbound</td></tr>
             <tr><th>Auto replace</th><td class="right">${peers.autoReplace ? "on" : "off"} · ${peers.peerCount || 0} wanted</td></tr>
+            <tr><th>Peer link</th><td class="right">
+              <div class="copy-line">
+                <input class="scroll-field mono" readonly value="${escapeHtml(status.peerURI || "")}" placeholder="not advertised" title="${escapeHtml(status.peerURI || "")}">
+                ${status.peerURI ? `<button class="btn small" data-copy="${escapeHtml(status.peerURI)}">Copy</button>` : ""}
+              </div>
+            </td></tr>
           </table>
           <p class="hint">Add the peer link in Y-Node → Exit node → Add → Peers, or append it to the <span class="mono">Peers</span> list in yggdrasil.conf.</p>
         </div>
@@ -643,8 +650,7 @@ function dnsCardHtml(dns) {
     <header><h3>DNS server</h3><span class="muted small">Alfis</span></header>
     <table class="facts">
       <tr><th>Service</th><td class="right">${statePill}</td></tr>
-      <tr><th>Listen</th><td class="right mono">${escapeHtml(dns.listen || "—")}</td></tr>
-      <tr><th>Web UI</th><td class="right mono break">${panel ? `<a href="${escapeHtml(panel)}" target="_blank" rel="noopener noreferrer">${escapeHtml(panel)}</a>` : "—"}</td></tr>
+      <tr><th>Listen</th><td class="right mono">${escapeHtml(bareHostPort(dns.listen || "—"))}</td></tr>
       ${enabled && dns.password ? `<tr><th>Web password</th><td class="right mono">${escapeHtml(dns.password)}</td></tr>` : ""}
     </table>
     ${panel
@@ -1932,7 +1938,7 @@ function settingsHtml() {
       </header>
       <div class="form-grid">
         <label class="switch full"><input type="checkbox" id="s-dns" ${dns.enabled ? "checked" : ""}><span>Run the Alfis DNS server for Yggdrasil clients</span></label>
-        <label class="field"><span>Listen</span><input value="${escapeHtml(dns.listen || "")}" disabled></label>
+        <label class="field"><span>Listen</span><input value="${escapeHtml(bareHostPort(dns.listen || ""))}" disabled></label>
         <label class="field"><span>Alfis web password</span><input id="s-dnspass" value="${escapeHtml(dns.webPassword || "")}" placeholder="generated when the server is turned on"></label>
       </div>
       <div class="actions">
