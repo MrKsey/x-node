@@ -502,6 +502,85 @@ func TestAdminTarget(t *testing.T) {
 	}
 }
 
+// A manual peer is often written to the managed list as well. It must be
+// counted once, as a manual peer, so the automatic total the status line
+// reports still matches peerCount.
+func TestSummarizePeersSeparatesManualPeers(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			go func(conn net.Conn) {
+				defer conn.Close()
+				var request adminRequest
+				if err := json.NewDecoder(conn).Decode(&request); err != nil {
+					return
+				}
+				if request.Name != "getPeers" {
+					_ = json.NewEncoder(conn).Encode(map[string]any{"status": "success"})
+					return
+				}
+				_ = json.NewEncoder(conn).Encode(map[string]any{
+					"status": "success",
+					"response": map[string]any{
+						"peers": []map[string]any{
+							{"remote": "tls://auto-a.example:1", "up": true, "inbound": false},
+							{"remote": "tls://auto-b.example:2", "up": true, "inbound": false},
+							{"remote": "tls://manual-a.example:3", "up": true, "inbound": false},
+							{"remote": "tls://manual-b.example:4", "up": false, "inbound": false},
+							{"remote": "ws://127.0.0.1:5000", "up": true, "inbound": true},
+						},
+					},
+				})
+			}(conn)
+		}
+	}()
+
+	dir := t.TempDir()
+	state := peersState{Managed: []string{
+		"tls://auto-a.example:1",
+		"tls://auto-b.example:2",
+		"tls://manual-a.example:3",
+	}}
+	raw, err := json.Marshal(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, peersStateFile), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := Config{
+		StateDir:    dir,
+		AdminSocket: "tcp://" + listener.Addr().String(),
+		PeerCount:   2,
+		ManualPeers: []string{"tls://manual-a.example:3", "tls://manual-b.example:4"},
+	}
+	counts := summarizePeers(cfg)
+	if counts.Automatic != 2 {
+		t.Fatalf("Automatic = %d, want 2", counts.Automatic)
+	}
+	if counts.AutomaticUp != 2 {
+		t.Fatalf("AutomaticUp = %d, want 2", counts.AutomaticUp)
+	}
+	if counts.Manual != 2 {
+		t.Fatalf("Manual = %d, want 2", counts.Manual)
+	}
+	if counts.ManualUp != 1 {
+		t.Fatalf("ManualUp = %d, want 1", counts.ManualUp)
+	}
+	if counts.Inbound != 1 {
+		t.Fatalf("Inbound = %d, want 1", counts.Inbound)
+	}
+}
+
 func TestPeerKeyOfURIDropsQuery(t *testing.T) {
 	got := peerKeyOfURI("wss://160.20.158.195:443/ygg?key=abc")
 	if got != "wss://160.20.158.195:443/ygg" {

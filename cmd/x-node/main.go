@@ -629,16 +629,16 @@ func cmdStatus(args []string) error {
 	} else {
 		line("Peer link", "not configured (no incoming peering)")
 	}
-	managed, manual, up, inbound := peerSummary(cfg)
-	line("Public peers", fmt.Sprintf("%d wanted, %d up, auto replace %s", cfg.PeerCount, up, onOff(cfg.PeerAutoReplace)))
-	if managed > 0 && managed != cfg.PeerCount {
-		line("Managed peers", managed)
+	peers := summarizePeers(cfg)
+	line("Public peers", fmt.Sprintf("%d wanted, %d up, auto replace %s", cfg.PeerCount, peers.AutomaticUp, onOff(cfg.PeerAutoReplace)))
+	if peers.Automatic > 0 && peers.Automatic != cfg.PeerCount {
+		line("Managed peers", peers.Automatic)
 	}
-	if manual > 0 {
-		line("Manual peers", fmt.Sprintf("%d pinned", manual))
+	if peers.Manual > 0 {
+		line("Manual peers", fmt.Sprintf("%d pinned, %d up", peers.Manual, peers.ManualUp))
 	}
-	if inbound > 0 {
-		line("Inbound peers", inbound)
+	if peers.Inbound > 0 {
+		line("Inbound peers", peers.Inbound)
 	}
 
 	section("Access")
@@ -778,7 +778,12 @@ func cmdDoctor(args []string) error {
 	}
 	path := configPath(*configFlag)
 	fmt.Println("Config:      ", path)
-	cfg, err := loadConfig(path)
+	// The daemon runs with the overlay written by the dashboard, so the doctor
+	// has to check the same values. Reading the file alone reported a stale
+	// name, timezone and peer count, and then failed the health check because
+	// the running node answered with the name the operator had set in the web
+	// interface.
+	cfg, err := loadEffectiveConfig(path)
 	if err != nil {
 		fmt.Println("  FAIL:", err)
 		return err
@@ -894,21 +899,17 @@ func cmdDoctor(args []string) error {
 		}
 	}
 
-	if live, err := newAdminSocket(cfg.AdminSocket, 3*time.Second).Peers(); err != nil {
+	if _, err := newAdminSocket(cfg.AdminSocket, 3*time.Second).Peers(); err != nil {
 		check("Yggdrasil admin socket is reachable", false, err.Error())
 	} else {
 		check("Yggdrasil admin socket is reachable", true, "")
-		outbound, inbound := 0, 0
-		for _, peer := range live {
-			if peer.Inbound {
-				inbound++
-				continue
-			}
-			outbound++
-		}
-		fmt.Printf("       public peers: %d, inbound clients: %d\n", outbound, inbound)
-		check("peerCount is filled", outbound >= cfg.PeerCount,
-			fmt.Sprintf("%d of %d public peers", outbound, cfg.PeerCount))
+		// The same counting as the dashboard and "x-node peers": a manual peer
+		// is not a public peer, so it must not stand in for a missing one.
+		counts := summarizePeers(cfg)
+		fmt.Printf("       automatic peers: %d up of %d wanted, manual: %d up, inbound clients: %d\n",
+			counts.AutomaticUp, cfg.PeerCount, counts.ManualUp, counts.Inbound)
+		check("peerCount is filled", counts.Automatic >= cfg.PeerCount,
+			fmt.Sprintf("%d of %d automatic peers", counts.Automatic, cfg.PeerCount))
 	}
 
 	if problems > 0 {

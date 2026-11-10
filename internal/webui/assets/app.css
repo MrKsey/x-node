@@ -283,21 +283,19 @@ tr:last-child td { border-bottom: 0; }
 .action-grid { display: grid; grid-template-columns: repeat(3, auto); gap: 6px; justify-content: end; }
 @media (max-width: 1300px) { .action-grid { display: contents; } }
 
-/* The clients table gives the address column only the width its content needs,
-   so Today, Month and Quota get the space instead. A width of 1% in the auto
-   layout means "as narrow as possible without wrapping". The address column
-   asks for a little more than that, so on a wide window it keeps a gap after
-   the info icon instead of ending right at the state pill, and Quota pays for
-   it: it holds a bar and three short lines, yet it used to take a quarter of
-   the table. TCP, UDP, Today and Month carry one short number each, so they
-   share the free space evenly instead of sizing themselves to their text. */
+/* The clients table follows the order an operator reads it in: the address is
+   the identifier, so its column is the widest and holds the label too; TCP and
+   UDP carry one short number each; Today and Month one value each; Quota owns
+   the bar and its three lines; Last seen and the actions keep the width of
+   their content. A width of 1% in the auto layout means "as narrow as possible
+   without wrapping". */
 .table-wrap table.cards .col-state,
 .table-wrap table.cards .col-seen,
 .table-wrap table.cards .col-actions { width: 1%; }
-.table-wrap table.cards .col-client { width: 6%; }
-.table-wrap table.cards .col-num,
-.table-wrap table.cards .col-traffic { width: 9%; }
-.table-wrap table.cards .col-quota { width: 12%; }
+.table-wrap table.cards .col-client { width: 28%; }
+.table-wrap table.cards .col-num { width: 4%; }
+.table-wrap table.cards .col-traffic { width: 5.5%; }
+.table-wrap table.cards .col-quota { width: 17%; }
 
 .bar { height: 7px; border-radius: 999px; background: var(--bg-soft); overflow: hidden; min-width: 90px; }
 .bar > i { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
@@ -486,13 +484,20 @@ canvas.chart.mini { height: 108px; }
 /* The client row keeps the address and the label on one line. The details open
    in a floating card next to the icon, so the table does not move. */
 .client-line { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; min-width: 0; }
+/* The address and the label wrap inside this box, so a narrow column moves the
+   label to a second line instead of widening the whole table. */
+.client-id { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; flex: 1 1 auto; min-width: 0; }
 /* The address is read character by character: it stays on one line and the
    column takes only the width it needs. The traffic columns then get the rest
    of the table, which is what an operator reads first. */
-.client-line .mono { max-width: 100%; white-space: nowrap; }
+.client-id .mono { max-width: 100%; white-space: nowrap; }
 .client-line .icon-btn { flex: 0 0 auto; }
-/* The label and the state pill share the second line with the device
-   details, so the address on the first line stays alone next to the icon. */
+/* A label next to the address gives way first: it shrinks with an ellipsis,
+   while the address and the icon keep their width. */
+.client-id .client-label { flex: 0 1 auto; min-width: 0; }
+.client-id .client-label > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The device details share the second line, so the address on the first line
+   stays alone next to the icon. */
 .client-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 4px; min-width: 0; }
 .icon-btn {
   display: inline-flex; align-items: center; justify-content: center;

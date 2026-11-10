@@ -1347,21 +1347,26 @@ function clientRowHtml(client) {
   const quotaPill = quota.exhausted ? '<span class="pill bad">quota exhausted</span>' : "";
   const suspendedPill = client.suspended ? '<span class="pill warn">suspended</span>' : "";
   const stateClass = client.suspended ? "warn" : client.state === "connected" ? "ok" : "";
-  // The label and the state pill sit on the second line together with the
-  // device details: the address and the info icon stay alone on the first
-  // line, so a long label never pushes the address out of its column.
+  // The label sits on the first line next to the address: the address column is
+  // wide enough for both, and the second line then carries only the device
+  // details. In a narrow column the label moves to its own line instead of
+  // pushing the info icon out, and a label that is still too long is clipped
+  // with an ellipsis.
   const tags = [
-    client.label ? `<span class="pill">${escapeHtml(client.label)}</span>` : "",
+    client.label ? `<span class="pill client-label"><span>${escapeHtml(client.label)}</span></span>` : "",
     suspendedPill,
   ].filter(Boolean).join("");
   return `
     <tr>
       <td data-label="Client">
         <div class="client-line">
-          <span class="mono break">${escapeHtml(bracketIPv6(client.address))}</span>
+          <div class="client-id">
+            <span class="mono break">${escapeHtml(bracketIPv6(client.address))}</span>
+            ${tags}
+          </div>
           <button class="icon-btn stats-btn" type="button" data-client-stats="${escapeHtml(client.address)}" title="Traffic details" aria-label="Traffic details">${INFO_ICON}</button>
         </div>
-        ${tags || meta ? `<div class="client-meta">${tags}${meta ? `<span class="muted small">${escapeHtml(meta)}</span>` : ""}</div>` : ""}
+        ${meta ? `<div class="client-meta"><span class="muted small">${escapeHtml(meta)}</span></div>` : ""}
       </td>
       <td data-label="State"><span class="pill ${stateClass}">${escapeHtml(client.state)}</span></td>
       <td class="right" data-label="TCP">${client.connections || 0}</td>

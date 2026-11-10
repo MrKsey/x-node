@@ -782,54 +782,69 @@ func (w *webServer) handleStatus(rw http.ResponseWriter, r *http.Request) {
 		status.TotalRx += row.Rx
 		status.TotalTx += row.Tx
 	}
-	managed, manual, up, inbound := peerSummary(cfg)
-	status.PeersManaged = managed
-	status.PeersManual = manual
-	status.PeersUp = up
-	status.PeersInbound = inbound
+	peers := summarizePeers(cfg)
+	status.PeersManaged = peers.Automatic
+	status.PeersManual = peers.Manual
+	status.PeersUp = peers.AutomaticUp + peers.ManualUp
+	status.PeersInbound = peers.Inbound
 	writeJSON(rw, http.StatusOK, status)
 }
 
-// peerSummary reads the managed peer list and asks the admin socket which of
-// them are up. A failure to reach the socket is not an error for the dashboard.
+// peerCounts is what the dashboard and the CLI report about Yggdrasil links.
 // Inbound links are clients of the exit node, not public peers, so they are
-// counted separately and never mixed into the managed total. Manual peers are
-// counted on their own: they are extra links the supervisor never trims.
-func peerSummary(cfg Config) (managed int, manual int, up int, inbound int) {
+// counted separately and never mixed into the automatic total. Manual peers are
+// counted on their own: they are extra links the supervisor never trims, and a
+// manual peer also written to the managed list must not inflate the automatic
+// count.
+type peerCounts struct {
+	Automatic   int // automatic peers in the managed list
+	AutomaticUp int
+	Manual      int
+	ManualUp    int
+	Inbound     int
+}
+
+// summarizePeers reads the managed peer list and asks the admin socket which
+// links are up. A failure to reach the socket is not an error for the
+// dashboard: the counts then describe the wanted peers only.
+func summarizePeers(cfg Config) peerCounts {
 	list := cleanPeerList(cfg.Peers)
 	if state, err := readPeersState(cfg.statePath(peersStateFile)); err == nil && len(state.Managed) > 0 {
 		list = cleanPeerList(state.Managed)
 	}
 	manualList := cleanPeerList(cfg.ManualPeers)
 	manualKeys := peerKeySet(manualList)
-	manual = len(manualList)
-	wanted := make(map[string]bool, len(list)+len(manualList))
+	counts := peerCounts{Manual: len(manualList)}
+	automatic := make(map[string]bool, len(list))
 	for _, uri := range list {
 		key := peerKeyOfURI(uri)
-		wanted[key] = true
-		// A manual peer can also be written to the managed list; it must not
-		// inflate the automatic count the status line reports.
-		if !manualKeys[key] {
-			managed++
+		if manualKeys[key] {
+			continue
 		}
-	}
-	for _, uri := range manualList {
-		wanted[peerKeyOfURI(uri)] = true
+		automatic[key] = true
+		counts.Automatic++
 	}
 	live, err := newAdminSocket(cfg.AdminSocket, 2*time.Second).Peers()
 	if err != nil {
-		return managed, manual, 0, 0
+		return counts
 	}
 	for _, peer := range live {
 		if peer.Inbound {
-			inbound++
+			counts.Inbound++
 			continue
 		}
-		if peer.Up && wanted[peerKeyOfURI(peer.URI)] {
-			up++
+		if !peer.Up {
+			continue
+		}
+		key := peerKeyOfURI(peer.URI)
+		if automatic[key] {
+			counts.AutomaticUp++
+		}
+		if manualKeys[key] {
+			counts.ManualUp++
 		}
 	}
-	return managed, manual, up, inbound
+	return counts
 }
 
 /* ---------- clients ---------- */

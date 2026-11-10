@@ -4,6 +4,15 @@ All notable changes to X-Node are documented here. The format is based on [Keep 
 
 The release workflow publishes the section of the tag as the GitHub release body, so every release has a short human-readable summary of what changed. Keep each bullet on a single line: GitHub turns every newline in a release body into a hard break, so a wrapped bullet would render as a narrow column instead of using the full width.
 
+## [1.7.11] — 2026-11-11
+
+### Fixed
+
+- **Registered clients** gives **Client** the widest column and puts the label on the first line next to the address, then **TCP** and **UDP**, **Today** and **Month**, a wide **Quota**, **Last seen** and the action buttons in two rows of three. In a narrow column the label moves to its own line instead of widening the table.
+- `x-node peers` reports the live peer count instead of the value the node was installed with, lists the pinned manual peers it used to hide, and separates automatic, manual and inbound links. On a node whose dashboard had set two automatic peers and two manual ones it printed **4** and three rows while Yggdrasil had six links.
+- `x-node status`, `x-node dns status` and the dashboard build the Alfis panel link from the public URL in the settings. A `publicURL` that ended with a slash produced `/<random>/web/<random>/dns/` instead of `/<random>/dns/`, and that address answered 404.
+- `x-node doctor` now checks the settings the daemon actually runs with. It read only `config.json`, so it reported a stale name, timezone and peer count, and failed **API /v1/health** with `unexpected name` whenever the name had been changed in the web interface.
+
 ## [1.7.10] — 2026-11-10
 
 ### Changed

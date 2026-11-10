@@ -814,8 +814,12 @@ func (c Config) dnsPanelURL() string {
 	if len(urls) == 0 {
 		return ""
 	}
-	base := urls[0]
-	if path := strings.TrimSpace(c.Web.Path); path != "" {
+	// The public URL in the configuration is typed by the operator and often
+	// ends with a slash, while webURLs builds one without it. Trimming both
+	// sides keeps the dashboard path from being appended twice, which produced
+	// /<random>/web/<random>/dns and a 404.
+	base := strings.TrimSuffix(strings.TrimSpace(urls[0]), "/")
+	if path := strings.TrimSuffix(strings.TrimSpace(c.Web.Path), "/"); path != "" {
 		base = strings.TrimSuffix(base, path)
 	}
 	return strings.TrimSuffix(base, "/") + c.dnsWebPath() + "/"

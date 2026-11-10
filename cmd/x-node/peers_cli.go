@@ -35,6 +35,7 @@ func cmdPeers(args []string) error {
 
 type peerRow struct {
 	URI       string  `json:"uri"`
+	Role      string  `json:"role"`
 	Up        bool    `json:"up"`
 	LatencyMs float64 `json:"latencyMs"`
 }
@@ -46,7 +47,10 @@ func peersStatus(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	cfg, err := loadConfig(configPath(*configFlag))
+	// The daemon runs with the overlay written by the dashboard, so the CLI has
+	// to read the same values: the file alone still holds the peer count the
+	// node was installed with, and it has no manual peers at all.
+	cfg, err := loadEffectiveConfig(configPath(*configFlag))
 	if err != nil {
 		return err
 	}
@@ -55,19 +59,33 @@ func peersStatus(args []string) error {
 	if state, err := readPeersState(cfg.statePath(peersStateFile)); err == nil && len(state.Managed) > 0 {
 		managed = cleanPeerList(state.Managed)
 	}
+	manual := cleanPeerList(cfg.ManualPeers)
+	manualKeys := peerKeySet(manual)
 
-	rows := make([]peerRow, 0, len(managed))
 	live, liveErr := newAdminSocket(cfg.AdminSocket, 3*time.Second).Peers()
 	byKey := make(map[string]adminPeer, len(live))
 	for _, peer := range live {
+		if peer.Inbound {
+			continue
+		}
 		byKey[peer.URI] = peer
 		byKey[peerKeyOfURI(peer.URI)] = peer
 	}
-	for _, uri := range managed {
-		row := peerRow{URI: uri}
+
+	// Both lists are shown: a manual peer is a real link, and leaving it out
+	// made the table disagree with what Yggdrasil actually reports.
+	rows := make([]peerRow, 0, len(managed)+len(manual))
+	seen := make(map[string]bool, len(managed)+len(manual))
+	add := func(uri, role string) {
+		key := peerKeyOfURI(uri)
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		row := peerRow{URI: uri, Role: role}
 		state, ok := byKey[uri]
 		if !ok {
-			state, ok = byKey[peerKeyOfURI(uri)]
+			state, ok = byKey[key]
 		}
 		if ok {
 			row.Up = state.Up
@@ -77,6 +95,17 @@ func peersStatus(args []string) error {
 		}
 		rows = append(rows, row)
 	}
+	for _, uri := range managed {
+		if manualKeys[peerKeyOfURI(uri)] {
+			continue
+		}
+		add(uri, "automatic")
+	}
+	for _, uri := range manual {
+		add(uri, "manual")
+	}
+
+	counts := summarizePeers(cfg)
 
 	if *asJSON {
 		raw, _ := json.MarshalIndent(map[string]any{
@@ -84,17 +113,28 @@ func peersStatus(args []string) error {
 			"peerCount":      cfg.PeerCount,
 			"autoReplace":    cfg.PeerAutoReplace,
 			"managed":        rows,
+			"automatic":      counts.Automatic,
+			"automaticUp":    counts.AutomaticUp,
+			"manual":         counts.Manual,
+			"manualUp":       counts.ManualUp,
+			"inbound":        counts.Inbound,
 			"adminReachable": liveErr == nil,
 		}, "", "  ")
 		fmt.Println(string(raw))
 		return nil
 	}
 
-	fmt.Printf("Peer count:    %d  (public peers managed by x-node)\n", cfg.PeerCount)
+	fmt.Printf("Peer count:    %d  (automatic public peers managed by x-node)\n", cfg.PeerCount)
 	fmt.Printf("Auto replace:  %s\n", onOff(cfg.PeerAutoReplace))
 	fmt.Printf("Timing:        check every %s, replace after %s, refresh every %s\n",
 		cfg.PeerCheckInterval, cfg.PeerDeadTimeout, cfg.PeerRefreshInterval)
-	fmt.Printf("Managed:       %d of %d\n", len(rows), cfg.PeerCount)
+	fmt.Printf("Automatic:     %d up of %d\n", counts.AutomaticUp, counts.Automatic)
+	if counts.Manual > 0 {
+		fmt.Printf("Manual:        %d pinned, %d up\n", counts.Manual, counts.ManualUp)
+	}
+	if counts.Inbound > 0 {
+		fmt.Printf("Inbound:       %d connected client(s)\n", counts.Inbound)
+	}
 	if liveErr != nil {
 		fmt.Printf("Yggdrasil:     admin socket is not reachable: %v\n", liveErr)
 	}
@@ -103,7 +143,7 @@ func peersStatus(args []string) error {
 		return nil
 	}
 	fmt.Println()
-	fmt.Printf("%-46s %-7s %s\n", "URI", "STATE", "LATENCY")
+	fmt.Printf("%-46s %-10s %-7s %s\n", "URI", "ROLE", "STATE", "LATENCY")
 	for _, row := range rows {
 		state := "unknown"
 		if liveErr == nil {
@@ -117,7 +157,7 @@ func peersStatus(args []string) error {
 		if row.LatencyMs > 0 {
 			latency = fmt.Sprintf("%.1f ms", row.LatencyMs)
 		}
-		fmt.Printf("%-46s %-7s %s\n", truncate(row.URI, 46), state, latency)
+		fmt.Printf("%-46s %-10s %-7s %s\n", truncate(row.URI, 46), row.Role, state, latency)
 	}
 	fmt.Println()
 	fmt.Println("Inbound clients are never counted against peerCount and are never replaced.")

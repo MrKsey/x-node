@@ -646,6 +646,21 @@ func TestDNSPanelURLUsesTheDashboardEndpoint(t *testing.T) {
 	if got := cfg.dnsPanelURL(); got != "https://[200::1]/abc/dns/" {
 		t.Fatalf("dnsPanelURL() = %q", got)
 	}
+	// A public URL typed with a trailing slash must not repeat the dashboard
+	// path: /abc/web/ + /abc/dns/ used to become /abc/web/abc/dns/.
+	cfg.Web.PublicURL = "https://example.org/abc/web/"
+	if got := cfg.dnsPanelURL(); got != "https://example.org/abc/dns/" {
+		t.Fatalf("dnsPanelURL() with a trailing slash = %q", got)
+	}
+	cfg.Web.PublicURL = "https://example.org/abc/web"
+	if got := cfg.dnsPanelURL(); got != "https://example.org/abc/dns/" {
+		t.Fatalf("dnsPanelURL() without a trailing slash = %q", got)
+	}
+	// A public URL on a bare origin has no dashboard path to strip.
+	cfg.Web.PublicURL = "https://example.org/"
+	if got := cfg.dnsPanelURL(); got != "https://example.org/abc/dns/" {
+		t.Fatalf("dnsPanelURL() on a bare origin = %q", got)
+	}
 }
 
 func TestRewriteAlfisResponsePrefixesAbsoluteURLs(t *testing.T) {
