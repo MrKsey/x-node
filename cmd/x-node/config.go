@@ -199,9 +199,10 @@ type DNSConfig struct {
 	Listen string `json:"listen,omitempty"`
 	Port   int    `json:"port"`
 
-	// WebListen is the address of the Alfis web interface. It is opened in a
-	// new browser tab from the dashboard; empty means "the Yggdrasil address
-	// on WebPort". Alfis speaks plain HTTP, so the link is http://.
+	// WebListen is the address of the Alfis web interface. The panel is opened
+	// through the dashboard proxy, so the default is loopback on WebPort: the
+	// Yggdrasil address may not be assigned yet when the resolver starts.
+	// Alfis speaks plain HTTP; the proxy adds TLS.
 	WebListen string `json:"webListen,omitempty"`
 	WebPort   int    `json:"webPort"`
 	// WebPassword protects the Alfis web interface. Alfis refuses to start the
@@ -518,8 +519,12 @@ func (c *Config) applyDefaults() {
 	if strings.TrimSpace(c.DNS.Listen) == "" {
 		c.DNS.Listen = net.JoinHostPort(c.ListenAddress, strconv.Itoa(c.DNS.Port))
 	}
-	if strings.TrimSpace(c.DNS.WebListen) == "" {
-		c.DNS.WebListen = net.JoinHostPort(c.ListenAddress, strconv.Itoa(c.DNS.WebPort))
+	if strings.TrimSpace(c.DNS.WebListen) == "" ||
+		c.DNS.WebListen == net.JoinHostPort(c.ListenAddress, strconv.Itoa(c.DNS.WebPort)) {
+		// The old default bound the panel to the Yggdrasil address. The panel
+		// is proxied through the dashboard now, so loopback is enough and does
+		// not depend on the tunnel interface being up at boot.
+		c.DNS.WebListen = net.JoinHostPort("127.0.0.1", strconv.Itoa(c.DNS.WebPort))
 	}
 	if c.Usage.Timezone == "" {
 		c.Usage.Timezone = d.Usage.Timezone
@@ -759,12 +764,15 @@ func (c Config) dnsListen() string {
 	return net.JoinHostPort(c.ListenAddress, strconv.Itoa(c.DNS.Port))
 }
 
-// dnsWebListen is the host:port of the Alfis web interface.
+// dnsWebListen is the host:port of the Alfis web interface. The panel is
+// reached through the dashboard proxy, so the fallback is loopback: binding to
+// the Yggdrasil address would expose the panel directly and fail while the
+// tunnel interface is not up yet.
 func (c Config) dnsWebListen() string {
 	if value := strings.TrimSpace(c.DNS.WebListen); value != "" {
 		return value
 	}
-	return net.JoinHostPort(c.ListenAddress, strconv.Itoa(c.DNS.WebPort))
+	return net.JoinHostPort("127.0.0.1", strconv.Itoa(c.DNS.WebPort))
 }
 
 // dnsWebPath is the URL prefix of the Alfis panel inside the X-Node web
@@ -798,24 +806,24 @@ func (c Config) dnsWebTarget() string {
 	return net.JoinHostPort(host, port)
 }
 
-// dnsWebURL is the address a browser opens for the Alfis interface. A wildcard
-// listener is shown as the Yggdrasil address, because 0.0.0.0 and :: are not
-// useful in a link.
-func (c Config) dnsWebURL() string {
-	host, port, err := net.SplitHostPort(c.dnsWebListen())
-	if err != nil {
+// dnsPanelURL is the address a browser opens for the Alfis panel: the
+// dashboard endpoint with the DNS path. The Alfis listener itself is on
+// loopback and is only reached through this proxy.
+func (c Config) dnsPanelURL() string {
+	urls := webURLs(c)
+	if len(urls) == 0 {
 		return ""
 	}
-	switch strings.TrimSpace(host) {
-	case "", "0.0.0.0", "::":
-		host = c.ListenAddress
+	base := urls[0]
+	if path := strings.TrimSpace(c.Web.Path); path != "" {
+		base = strings.TrimSuffix(base, path)
 	}
-	return "http://" + net.JoinHostPort(host, port) + "/"
+	return strings.TrimSuffix(base, "/") + c.dnsWebPath() + "/"
 }
 
-// dnsServerAddress is the address published to Y-Node in the exit link and in
-// the capabilities block. The client always queries port 53; DNSPort carries a
-// non-default port for a future client that understands it.
+// dnsServerAddress is the address published to Y-Node in the capabilities
+// block. The client always queries port 53; DNSPort carries a non-default port
+// for a client that understands it.
 func (c Config) dnsServerAddress() string {
 	if !c.DNS.Enabled {
 		return ""

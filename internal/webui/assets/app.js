@@ -135,13 +135,23 @@ function escapeHtml(value) {
     .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
-// bareHostPort drops the brackets an IPv6 literal needs inside a URL, so every
-// address on the dashboard reads the same way. The copy buttons keep the real
-// value; this is only for display.
-function bareHostPort(value) {
-  const text = String(value == null ? "" : value);
-  const match = text.match(/^\[([^\]]+)\](.*)$/);
-  return match ? match[1] + match[2] : text;
+// bracketIPv6 wraps a bare IPv6 address in square brackets, the form used in
+// URLs and host:port pairs. Host names, IPv4 addresses and values that already
+// carry brackets are returned unchanged.
+function bracketIPv6(value) {
+  const text = String(value == null ? "" : value).trim();
+  if (!text || text.startsWith("[")) return text;
+  return text.includes(":") ? "[" + text + "]" : text;
+}
+
+// bracketHostPort does the same for a host:port pair: [address]:port.
+function bracketHostPort(value) {
+  const text = String(value == null ? "" : value).trim();
+  if (!text) return text;
+  const match = text.match(/^([^\[\]]+):(\d+)$/);
+  if (!match) return bracketIPv6(text);
+  const host = match[1];
+  return host.includes(":") ? "[" + host + "]:" + match[2] : text;
 }
 
 function toast(message, bad) {
@@ -290,6 +300,11 @@ $("#menu").addEventListener("click", () => $("#app").classList.toggle("menu-open
 // A tap anywhere outside a floating card closes it; a tap on another icon
 // opens that client instead, because its own handler runs first.
 document.addEventListener("click", (event) => {
+  const copyField = event.target.closest("[data-copy-value]");
+  if (copyField) {
+    copy(copyField.dataset.copyValue || "");
+    return;
+  }
   const popover = $("#client-popover");
   if (popover && !popover.classList.contains("hidden") &&
       !event.target.closest("#client-popover") &&
@@ -462,7 +477,7 @@ function dashboardHtml() {
     <div class="grid kpi">
       <a class="card kpi-card link-card" href="#settings" title="Open the Settings tab">
         <div class="label">Yggdrasil address</div>
-        <div class="value mono small-value address-value" title="${escapeHtml(status.address || "")}">${escapeHtml(status.address || "—")}</div>
+        <div class="value mono small-value address-value" title="${escapeHtml(bracketIPv6(status.address || ""))}">${escapeHtml(bracketIPv6(status.address || "—"))}</div>
         <div class="sub">${escapeHtml(status.name || "")}</div>
       </a>
       <a class="card kpi-card link-card" href="#clients" title="Open the Clients tab">
@@ -504,7 +519,9 @@ function dashboardHtml() {
         <header><h3>X-Node</h3><span class="muted small">${escapeHtml(status.version || "")}</span></header>
         <table class="facts">
           <tr><th>Service</th><td class="right"><span class="pill ok">running</span> · ${duration(status.uptimeSeconds || 0)}</td></tr>
-          <tr><th>SOCKS5</th><td class="right mono">${escapeHtml(status.address || "")}:${status.socksPort || ""}</td></tr>
+          <tr><th>SOCKS5</th><td class="right">
+            <input class="scroll-field mono right" readonly value="${escapeHtml(bracketHostPort((status.address || "") + ":" + (status.socksPort || "")))}" title="${escapeHtml(bracketHostPort((status.address || "") + ":" + (status.socksPort || "")))}" data-copy-value="${escapeHtml((status.address || "") + ":" + (status.socksPort || ""))}">
+          </td></tr>
           <tr><th>API</th><td class="right mono">${apiShared ? "shared with SOCKS5" : "port " + (status.apiPort || "")} · auth ${escapeHtml(status.apiAuth || "")}</td></tr>
           <tr><th>Registration</th><td class="right">${status.registration ? "enabled" : "disabled"}</td></tr>
           <tr><th>Open mode</th><td class="right">${status.allowAll ? '<span class="pill warn">allowAll</span>' : "allowlist"}</td></tr>
@@ -512,7 +529,7 @@ function dashboardHtml() {
           <tr><th>Connections</th><td class="right">${status.maxConnsPerClient || 0} per client · ${status.maxConnsTotal || 0} in total</td></tr>
           <tr><th>UDP relay</th><td class="right">${status.udpEnabled ? "enabled · " + (status.maxUdpAssociations || 0) + " association(s)" : "disabled"}</td></tr>
           <tr><th>IPv6 outbound</th><td class="right">${ipv6StatePill(status)}</td></tr>
-          ${status.ipv6Source ? `<tr><th>IPv6 source</th><td class="right mono break">${escapeHtml(status.ipv6Source)}</td></tr>` : ""}
+          ${status.ipv6Source ? `<tr><th>IPv6 source</th><td class="right mono break">${escapeHtml(bracketIPv6(status.ipv6Source))}</td></tr>` : ""}
           <tr><th>Domain names</th><td class="right">${status.domainResolution ? "resolved on the exit" : "client resolves"}</td></tr>
           <tr><th>Log level</th><td class="right">${escapeHtml(status.logLevel || "")}</td></tr>
           <tr><th>Config</th><td class="right mono ellipsis" title="${escapeHtml(status.configPath || "")}">${escapeHtml(status.configPath || "—")}</td></tr>
@@ -528,9 +545,9 @@ function dashboardHtml() {
             <tr><th>Version</th><td class="right">${escapeHtml(self.build_version || "—")}</td></tr>
             <tr><th>Project</th><td class="right"><a class="link-wrap" href="https://github.com/yggdrasil-network/yggdrasil-go" title="yggdrasil-network/yggdrasil-go" target="_blank" rel="noopener noreferrer">yggdrasil-go</a></td></tr>
             <tr><th>Address</th><td class="right">
-              <input class="scroll-field mono" readonly value="${escapeHtml(self.address || status.address || "—")}" title="${escapeHtml(self.address || status.address || "")}">
+              <input class="scroll-field mono right" readonly value="${escapeHtml(bracketIPv6(self.address || status.address || "—"))}" title="${escapeHtml(bracketIPv6(self.address || status.address || ""))}" data-copy-value="${escapeHtml(self.address || status.address || "")}">
             </td></tr>
-            <tr><th>Subnet</th><td class="right mono">${escapeHtml(self.subnet || "—")}</td></tr>
+            <tr><th>Subnet</th><td class="right mono">${escapeHtml(bracketIPv6(self.subnet || "—"))}</td></tr>
             <tr><th>Peers</th><td class="right">${peers.up || 0} up · ${peers.managed || 0} automatic · ${peers.manualPeers ? peers.manualPeers.length : 0} manual · ${peers.inbound || 0} inbound</td></tr>
             <tr><th>Auto replace</th><td class="right">${peers.autoReplace ? "on" : "off"} · ${peers.peerCount || 0} wanted</td></tr>
             <tr><th>Peer link</th><td class="right">
@@ -623,11 +640,17 @@ function systemCardHtml() {
 function dnsCardHtml(dns) {
   const enabled = Boolean(dns.enabled);
   const running = Boolean(dns.running);
+  const syncing = Boolean(dns.syncing);
   let statePill;
   if (!enabled) {
     statePill = '<span class="pill">off</span>';
   } else if (dns.error) {
     statePill = '<span class="pill warn">unknown</span>';
+  } else if (syncing) {
+    const progress = dns.syncHeight > 0
+      ? " " + (dns.syncPercent || 0) + "%"
+      : "";
+    statePill = '<span class="pill warn">syncing' + progress + "</span>";
   } else if (running) {
     statePill = '<span class="pill ok">running</span>';
   } else {
@@ -642,20 +665,33 @@ function dnsCardHtml(dns) {
     hint = "The root helper could not read the DNS state: " + dns.error;
   } else if (dns.webUI === false) {
     hint = "This Alfis build has no web interface. Reinstall X-Node to get the bundled build with the web UI.";
+  } else if (syncing) {
+    hint = "Alfis is downloading the blockchain on its first start. This can take a while and keeps a CPU core busy; the resolver starts answering as soon as the sync finishes.";
   }
   // The panel is proxied through the dashboard address, so it opens on the
-  // same TLS endpoint as the rest of the web interface.
+  // same TLS endpoint as the rest of the web interface. The button waits for
+  // the first successful answer from Alfis: right after a restart the process
+  // still loads the chain and refuses connections for a few minutes.
   const panel = enabled && dns.webUI !== false ? (dns.proxyPath || dns.webURL || "") : "";
+  const panelAction = panel
+    ? (dns.webReady
+      ? `<div class="actions"><a class="btn small" href="${escapeHtml(panel)}" target="_blank" rel="noopener noreferrer">Open Alfis web UI</a></div>`
+      : `<div class="actions"><button class="btn small" type="button" disabled title="The Alfis process is still starting"><span class="spinner"></span>Waiting for the Alfis web UI…</button></div>`)
+    : "";
+  const listen = dns.listen || "";
   return `<div class="card section">
     <header><h3>DNS server</h3><span class="muted small">Alfis</span></header>
     <table class="facts">
       <tr><th>Service</th><td class="right">${statePill}</td></tr>
-      <tr><th>Listen</th><td class="right mono">${escapeHtml(bareHostPort(dns.listen || "—"))}</td></tr>
-      ${enabled && dns.password ? `<tr><th>Web password</th><td class="right mono">${escapeHtml(dns.password)}</td></tr>` : ""}
+      ${syncing && dns.syncHeight > 0 ? `<tr><th>Sync</th><td class="right mono">${dns.syncHave || 0} / ${dns.syncHeight} blocks</td></tr>` : ""}
+      <tr><th>Listen</th><td class="right">
+        <input class="scroll-field mono right" readonly value="${escapeHtml(bracketHostPort(listen || "—"))}" title="Click to copy" data-copy-value="${escapeHtml(listen)}">
+      </td></tr>
+      ${enabled && dns.password ? `<tr><th>Web password</th><td class="right">
+        <input class="scroll-field mono right" readonly value="${escapeHtml(dns.password)}" title="Click to copy" data-copy-value="${escapeHtml(dns.password)}">
+      </td></tr>` : ""}
     </table>
-    ${panel
-      ? `<div class="actions"><a class="btn small" href="${escapeHtml(panel)}" target="_blank" rel="noopener noreferrer">Open Alfis web UI</a></div>`
-      : ""}
+    ${panelAction}
     <p class="hint">${escapeHtml(hint)}</p>
   </div>`;
 }
@@ -734,7 +770,7 @@ function peerTableHtml(peers) {
         <td data-label="Link"><div class="mono break">${escapeHtml(peer.uri)}</div></td>
         <td data-label="Direction">${direction}</td>
         <td data-label="State">${statePill}</td>
-        <td data-label="Address"><span class="mono break">${escapeHtml(peer.address || "—")}</span>${label}</td>
+        <td data-label="Address"><span class="mono break">${escapeHtml(bracketIPv6(peer.address || "—"))}</span>${label}</td>
         <td class="right" data-label="RTT">${peer.latencyMs > 0 ? peer.latencyMs.toFixed(1) + " ms" : "—"}</td>
         <td class="right hide-sm" data-label="Uptime">${peer.uptimeSeconds > 0 ? duration(peer.uptimeSeconds) : "—"}</td>
         <td class="right hide-sm" data-label="Traffic">↑ ${bytes(peer.bytesRecv)} · ↓ ${bytes(peer.bytesSent)}</td>
@@ -1154,6 +1190,12 @@ function clientsHtml() {
         <span class="muted small" id="clients-count">${state.clients.length} total</span>
       </header>
       ${state.clients.length ? `<div class="table-wrap"><table class="cards">
+        <colgroup>
+          <col class="col-client"><col class="col-state">
+          <col class="col-num"><col class="col-num">
+          <col class="col-traffic"><col class="col-traffic">
+          <col class="col-quota"><col class="col-seen"><col class="col-actions">
+        </colgroup>
         <thead><tr>
           <th>Client</th><th>State</th><th class="right">TCP</th><th class="right">UDP</th>
           <th class="right">Today</th><th class="right">Month</th><th>Quota</th>
@@ -1224,7 +1266,7 @@ function clientRowHtml(client) {
     <tr>
       <td data-label="Client">
         <div class="client-line">
-          <span class="mono break">${escapeHtml(client.address)}</span>
+          <span class="mono break">${escapeHtml(bracketIPv6(client.address))}</span>
           <button class="icon-btn stats-btn" type="button" data-client-stats="${escapeHtml(client.address)}" title="Traffic details" aria-label="Traffic details">${INFO_ICON}</button>
         </div>
         ${tags || meta ? `<div class="client-meta">${tags}${meta ? `<span class="muted small">${escapeHtml(meta)}</span>` : ""}</div>` : ""}
@@ -1286,7 +1328,7 @@ function clientDetailsHtml(client) {
     <header>
       <div>
         <h3>${escapeHtml(client.label || client.deviceName || "Client")}</h3>
-        <div class="muted small mono break">${escapeHtml(client.address)}</div>
+        <div class="muted small mono break">${escapeHtml(bracketIPv6(client.address))}</div>
       </div>
       <button class="icon-btn" type="button" data-popover-close aria-label="Close">×</button>
     </header>
@@ -1355,7 +1397,7 @@ function usageHtml(period) {
           <span class="usage-name">${escapeHtml(name)}</span>
           <span class="muted small nowrap">${bytes(used)} · ${share.toFixed(share >= 10 ? 0 : 1)}%</span>
         </div>
-        <div class="usage-address mono small">${escapeHtml(client.address)}</div>
+        <div class="usage-address mono small">${escapeHtml(bracketIPv6(client.address))}</div>
         <div class="bar"><i style="width:${share}%"></i></div>
       </div>`;
   }).join("");
@@ -1552,7 +1594,7 @@ function openClientEditor(address) {
   const editor = $("#client-editor");
   editor.innerHTML = `
     <form class="card section editor" id="client-form">
-      <header><h3>${escapeHtml(client.address)}</h3></header>
+      <header><h3>${escapeHtml(bracketIPv6(client.address))}</h3></header>
       <div class="form-grid">
         <label class="field"><span>Label</span><input id="e-label" value="${escapeHtml(client.label || "")}" placeholder="family phone"></label>
         <label class="field"><span>Monthly cap (MB, 0 = none)</span><input id="e-monthly" type="number" min="0" step="1" value="${Math.round(mb(quota.monthlyBytes))}"></label>
@@ -1608,7 +1650,7 @@ function clientLinkPanel(data) {
     <div class="card section editor">
       <header>
         <h3>${escapeHtml(data.label || "Client")}</h3>
-        <span class="muted small mono break">${escapeHtml(data.address || "")}</span>
+        <span class="muted small mono break">${escapeHtml(bracketIPv6(data.address || ""))}</span>
         <button class="btn small" type="button" data-link-close>Close</button>
       </header>
       <div class="invite-flex">
@@ -1638,16 +1680,11 @@ function wireClientLinkActions(root) {
 
 /* invites */
 
-function invitesHtml() {
-  const settings = state.settings || {};
-  const defaultUses = settings.inviteUses || 1;
-  const defaultTTL = settings.inviteTTL || "24h";
-  const ttlOptions = [
-    ["1h", "1 hour"],
-    ["24h", "24 hours"],
-    ["168h", "7 days"],
-    ["720h", "30 days"],
-  ];
+// invitesTableHtml renders the Active invites table. It is a separate function
+// because creating an invite reloads the list in place: the page used to show
+// the old table until a full refresh.
+function invitesTableHtml() {
+  if (!state.invites.length) return '<div class="empty">No active invites.</div>';
   const rows = state.invites.map((invite) => `
     <tr>
       <td class="mono" data-label="ID">${escapeHtml(invite.hash.slice(0, 12))}…</td>
@@ -1660,6 +1697,22 @@ function invitesHtml() {
         <button class="btn small danger" data-invite="${escapeHtml(invite.hash)}">Delete</button>
       </td>
     </tr>`).join("");
+  return `<div class="table-wrap"><table class="cards">
+    <thead><tr><th>ID</th><th>Note</th><th class="right">Devices</th><th class="right">Expires</th><th></th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>`;
+}
+
+function invitesHtml() {
+  const settings = state.settings || {};
+  const defaultUses = settings.inviteUses || 1;
+  const defaultTTL = settings.inviteTTL || "24h";
+  const ttlOptions = [
+    ["1h", "1 hour"],
+    ["24h", "24 hours"],
+    ["168h", "7 days"],
+    ["720h", "30 days"],
+  ];
 
   return `
     <div class="card section">
@@ -1685,11 +1738,8 @@ function invitesHtml() {
     </div>
 
     <div class="card section">
-      <header><h3>Active invites</h3><span class="muted small">${state.invites.length}</span></header>
-      ${state.invites.length ? `<div class="table-wrap"><table class="cards">
-        <thead><tr><th>ID</th><th>Note</th><th class="right">Devices</th><th class="right">Expires</th><th></th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table></div>` : '<div class="empty">No active invites.</div>'}
+      <header><h3>Active invites</h3><span class="muted small" id="invites-count">${state.invites.length}</span></header>
+      <div id="invites-table">${invitesTableHtml()}</div>
       <div id="invite-view"></div>
     </div>
   `;
@@ -1737,9 +1787,25 @@ function wireInvites() {
       });
       wireInviteActions($("#invite-result"));
       await loadInvites();
+      // The new invite belongs in Active invites at once, not only after a
+      // page reload: the panel above is closed by its own button.
+      const table = $("#invites-table");
+      if (table) {
+        table.innerHTML = invitesTableHtml();
+        wireInviteRows(table);
+      }
+      const count = $("#invites-count");
+      if (count) count.textContent = String(state.invites.length);
     } catch (err) { toast(err.message, true); }
   });
-  $$("[data-invite]").forEach((button) => {
+  wireInviteRows(document);
+  wireInviteActions(document);
+}
+
+// wireInviteRows binds the buttons of the Active invites table. It runs again
+// after the table is re-rendered in place.
+function wireInviteRows(root) {
+  $$("[data-invite]", root).forEach((button) => {
     button.addEventListener("click", async () => {
       if (!confirm("Delete this invite?")) return;
       try {
@@ -1749,7 +1815,7 @@ function wireInvites() {
       } catch (err) { toast(err.message, true); }
     });
   });
-  $$("[data-qr]").forEach((button) => {
+  $$("[data-qr]", root).forEach((button) => {
     button.addEventListener("click", () => {
       const invite = state.invites.find((item) => item.hash === button.dataset.qr);
       const view = $("#invite-view");
@@ -1759,7 +1825,6 @@ function wireInvites() {
       view.scrollIntoView({ behavior: "smooth", block: "nearest" });
     });
   });
-  wireInviteActions(document);
 }
 
 function wireInviteActions(root) {
@@ -1819,7 +1884,7 @@ function ipv6StatusHint(status) {
   }
   switch (state) {
     case "broken":
-      return "The host has " + escapeHtml(source || "a global IPv6 address") +
+      return "The host has " + escapeHtml(bracketIPv6(source || "a global IPv6 address")) +
         ", but no IPv6 destination answered" + detail +
         ". The provider does not route IPv6, so outbound connections use IPv4 and clients are told not to send IPv6 traffic.";
     case "none":
@@ -1838,7 +1903,7 @@ function ipv6StatusHint(status) {
 function ipv6SourceField(status) {
   const value = (status && status.ipv6Source) || "";
   const placeholder = ipv6StateOf(status) === "broken" ? "assigned, but the provider does not route it" : "no global IPv6 address";
-  return `<label class="field"><span>Source address</span><input class="mono" value="${escapeHtml(value)}" placeholder="${placeholder}" readonly></label>`;
+  return `<label class="field"><span>Source address</span><input class="mono" value="${escapeHtml(bracketIPv6(value))}" placeholder="${placeholder}" readonly></label>`;
 }
 
 // ipv6SourceHint explains the source address and the selected mode in one line.
@@ -1853,13 +1918,13 @@ function ipv6SourceHint(status, mode) {
       return "The mode is off, so outbound connections use IPv4 even though this host has a global IPv6 address.";
     }
     if (state === "broken") {
-      return "The mode is off. Note that the host has " + escapeHtml(status.ipv6Source || "a global IPv6 address") +
+      return "The mode is off. Note that the host has " + escapeHtml(bracketIPv6(status.ipv6Source || "a global IPv6 address")) +
         " but the provider does not route IPv6" + detail + ".";
     }
     return "The mode is off, so outbound connections use IPv4 only.";
   }
   if (state === "broken") {
-    return "The host has " + escapeHtml(status.ipv6Source || "a global IPv6 address") +
+    return "The host has " + escapeHtml(bracketIPv6(status.ipv6Source || "a global IPv6 address")) +
       ", but no IPv6 destination answered" + detail +
       ". The provider does not route IPv6: connections fall back to IPv4 and clients are told not to send IPv6 traffic.";
   }
@@ -1938,15 +2003,25 @@ function settingsHtml() {
       </header>
       <div class="form-grid">
         <label class="switch full"><input type="checkbox" id="s-dns" ${dns.enabled ? "checked" : ""}><span>Run the Alfis DNS server for Yggdrasil clients</span></label>
-        <label class="field"><span>Listen</span><input value="${escapeHtml(bareHostPort(dns.listen || ""))}" disabled></label>
-        <label class="field"><span>Alfis web password</span><input id="s-dnspass" value="${escapeHtml(dns.webPassword || "")}" placeholder="generated when the server is turned on"></label>
+        <label class="field"><span>Listen</span>
+          <input class="scroll-field mono right" value="${escapeHtml(bracketHostPort(dns.listen || ""))}" readonly title="Click to copy" data-copy-value="${escapeHtml(dns.listen || "")}">
+        </label>
+        <label class="field"><span>Alfis web password</span>
+          <div class="copy-line">
+            <input class="scroll-field mono right" id="s-dnspass" value="${escapeHtml(dns.webPassword || "")}" readonly title="Click to copy" data-copy-value="${escapeHtml(dns.webPassword || "")}">
+            <button class="btn small" type="button" id="s-dnspass-new" title="Generate a new password and save it with this card">New</button>
+          </div>
+        </label>
       </div>
       <div class="actions">
         ${dnsStatus.enabled && (dnsStatus.proxyPath || dnsStatus.webURL)
-          ? `<a class="btn small" href="${escapeHtml(dnsStatus.proxyPath || dnsStatus.webURL)}" target="_blank" rel="noopener noreferrer">Open Alfis web UI</a>`
+          ? (dnsStatus.webReady
+            ? `<a class="btn small" href="${escapeHtml(dnsStatus.proxyPath || dnsStatus.webURL)}" target="_blank" rel="noopener noreferrer">Open Alfis web UI</a>`
+            : `<button class="btn small" type="button" disabled title="The Alfis process is still starting"><span class="spinner"></span>Waiting for the Alfis web UI…</button>`)
           : ""}
       </div>
       <p class="hint">Alfis answers <span class="mono">.ygg</span> names and forwards ordinary names to the upstream resolvers. The client finds this server on its own: Y-Node lists it under Available servers as "DNS from exit node". The link opens the Alfis admin page in a new tab on the same address as this dashboard.</p>
+      ${dnsStatus.syncing ? '<p class="hint">Alfis is downloading the blockchain on its first start. This can take a while and keeps a CPU core busy; the resolver starts answering as soon as the sync finishes.</p>' : ""}
     </form>
 
     <form class="card section settings-card" data-settings="access">
@@ -2242,9 +2317,14 @@ function wireSettings() {
       }
       if (button) button.disabled = true;
       try {
+        const wasDns = Boolean(state.settings && state.settings.dns && state.settings.dns.enabled);
         const data = await api("PUT", "api/settings", settingsPayload(kind));
-        toast(data.restartRequired ? "Saved · restart x-node to apply the listener change" : "Saved");
         await loadSettings();
+        if (kind === "dns" && !wasDns && state.settings.dns && state.settings.dns.enabled) {
+          toast("DNS server is on · Alfis is synchronizing the blockchain on its first start, this can take a few minutes");
+        } else {
+          toast(data.restartRequired ? "Saved · restart x-node to apply the listener change" : "Saved");
+        }
         await refreshStatus();
         render();
       } catch (err) {
@@ -2293,6 +2373,27 @@ function wireSettings() {
         applyCompact(!enabled);
         toast(err.message, true);
       }
+    });
+  }
+
+  // The Alfis password is shown read-only so a click copies it. A new one is
+  // generated here and saved with the card, like the installer does on the
+  // first start.
+  const newDnsPassword = $("#s-dnspass-new");
+  if (newDnsPassword) {
+    newDnsPassword.addEventListener("click", () => {
+      const field = $("#s-dnspass");
+      if (!field) return;
+      const alphabet = "abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+      const bytes = new Uint8Array(24);
+      crypto.getRandomValues(bytes);
+      let value = "";
+      for (const byte of bytes) value += alphabet[byte % alphabet.length];
+      field.value = value;
+      field.dataset.copyValue = value;
+      const form = field.closest("[data-settings]");
+      const save = form && form.querySelector(".save-btn");
+      if (save) save.classList.remove("hidden");
     });
   }
 

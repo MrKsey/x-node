@@ -4,6 +4,23 @@ All notable changes to X-Node are documented here. The format is based on [Keep 
 
 The release workflow publishes the section of the tag as the GitHub release body, so every release has a short human-readable summary of what changed. Keep each bullet on a single line: GitHub turns every newline in a release body into a hard break, so a wrapped bullet would render as a narrow column instead of using the full width.
 
+## [1.7.4] — 2026-11-10
+
+### Added
+
+- The **DNS server** card shows **syncing N%** with the block counters while Alfis downloads the chain on its first start, plus a hint that the sync keeps a CPU core busy. Turning the DNS server on raises a toast with the same warning.
+- **SOCKS5** and **Listen** in the **DNS server** card are read-only fields that copy their value on click and are right-aligned like the **Address** field. The **Alfis web password** in Settings is read-only, copies on click and has a **New** button that generates a fresh password.
+- **Settings → DNS server** gives the **Listen** and **Alfis web password** fields the same width as the **Source address** field in the IPv6 card.
+
+### Changed
+
+- A newly created invite appears in **Active invites** as soon as it is created, instead of waiting for a page reload.
+- **Registered clients** gives the Client column only the width its address needs: the address and the info icon stay on one line, and **Today**, **Month** and **Quota** get the free space.
+- IPv6 addresses are shown in square brackets throughout the web interface, including the dashboard KPI, the IPv6 source, the subnet, SOCKS5, the DNS listener, client addresses and peer addresses.
+- The **Open Alfis web UI** button waits for the first successful answer from the panel and shows **Waiting for the Alfis web UI…** with a spinner until then. The panel status is cached for 10 seconds, so a starting Alfis does not slow the dashboard poll.
+- The Alfis web interface binds to loopback by default and is reached only through the dashboard at `https://<address>/<random>/dns/`. An existing `webListen` equal to the old Yggdrasil-address default is migrated, so the panel no longer fails while the tunnel interface is not up yet.
+- The `yggnode://` exit link no longer carries `dns` and `dnsport`: Y-Node reads the resolver from the status API, like quotas, so the link stays valid when DNS is turned on later.
+
 ## [1.7.3] — 2026-11-09
 
 ### Changed

@@ -28,15 +28,9 @@ func exitLink(cfg Config, invite string) string {
 	if strings.TrimSpace(invite) != "" {
 		values.Set("i", invite)
 	}
-	// The app adds this resolver to its DNS list with the "exit node" note. The
-	// port is normally 53 and is sent separately, because the app stores DNS
-	// servers as bare Yggdrasil addresses.
-	if address := cfg.dnsServerAddress(); address != "" {
-		values.Set("dns", address)
-		if port := cfg.dnsServerPort(); port > 0 && port != 53 {
-			values.Set("dnsport", strconv.Itoa(port))
-		}
-	}
+	// The resolver is not part of the link: Y-Node reads it from the status
+	// API, the same way it reads the quotas and the other capabilities. The
+	// link then stays valid when the operator turns DNS on or off later.
 	return "yggnode://exit?" + values.Encode()
 }
 

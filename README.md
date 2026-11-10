@@ -136,7 +136,7 @@ X-Node can run [Alfis](https://github.com/Revertron/Alfis) as a DNS resolver for
 
 - `.ygg` names and other Yggdrasil names come from the Alfis zone;
 - ordinary names are forwarded to the upstream resolvers from `dns.forwarders` (two Quad9 addresses by default);
-- the Alfis web interface listens on the Yggdrasil address on port `8082` and is protected by its own password.
+- the Alfis web interface listens on loopback port `8082`, is protected by its own password and is opened through the dashboard proxy.
 
 The installer enables the server by default. It installs the `alfis` binary, writes `/etc/x-node/alfis.conf`, creates `/var/lib/x-node-dns` and enables `x-node-dns.service`. The unit runs as the `x-node` user with `CAP_NET_BIND_SERVICE` and a read-only filesystem except for its state directory.
 
@@ -156,7 +156,7 @@ sudo x-node dns off
 
 The panel is proxied by the daemon under the sibling of the dashboard path: when the interface lives at `/<random>/web`, the panel is at `/<random>/dns/`. It opens on the same TLS endpoint and port as the dashboard, so no second public port is needed; the installer adds the nginx location for it. The proxy does not bypass the Alfis password.
 
-When the server is enabled, the status API reports `capabilities.dns = true` with `dnsAddress` and `dnsPort`, and the `yggnode://` link carries `dns` and `dnsport`. Y-Node reads them and offers the resolver under **Available servers** as **DNS from exit node**; the **DNS exit node** switch in the Y-Node exit settings puts it into **IN USE** with a lock.
+When the server is enabled, the status API reports `capabilities.dns = true` with `dnsAddress` and `dnsPort`. Y-Node reads them and offers the resolver under **Available servers** as **DNS from exit node**; the **DNS exit node** switch in the Y-Node exit settings puts it into **IN USE** with a lock. The `yggnode://` link does not carry the resolver: the app learns it from the status API, like quotas, so the link stays valid when DNS is turned on later.
 
 The configuration lives in the `dns` section of `config.json`:
 
@@ -172,7 +172,7 @@ The configuration lives in the `dns` section of `config.json`:
 }
 ```
 
-`dns.listen` and `dns.webListen` are derived from `listenAddress` and the two ports; set them explicitly only when the resolver must bind another address. `dns.webPassword` is generated when the server is first enabled and is shown on the dashboard and in `/root/x-node-credentials.txt`.
+`dns.listen` is derived from `listenAddress` and the DNS port; `dns.webListen` defaults to loopback and the panel is reached through the dashboard. Set them explicitly only when the resolver must bind another address. `dns.webPassword` is generated when the server is first enabled and is shown on the dashboard and in `/root/x-node-credentials.txt`.
 
 If the archive has no bundled binary and Alfis cannot be downloaded during the installation, the exit still installs and runs; the DNS card shows that Alfis is missing, and `x-node dns on` explains what to do after the binary is installed.
 

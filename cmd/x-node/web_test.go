@@ -616,6 +616,38 @@ func TestDNSWebTargetDialsAWildcardThroughLoopback(t *testing.T) {
 	}
 }
 
+func TestDNSWebListenDefaultsToLoopback(t *testing.T) {
+	cfg := Config{ListenAddress: "200::1", DNS: DNSConfig{WebPort: 8082}}
+	if got := cfg.dnsWebListen(); got != "127.0.0.1:8082" {
+		t.Fatalf("dnsWebListen() = %q", got)
+	}
+	// The old default bound the panel to the Yggdrasil address; an upgrade
+	// moves it to loopback.
+	cfg.DNS.WebListen = "[200::1]:8082"
+	cfg.applyDefaults()
+	if got := cfg.DNS.WebListen; got != "127.0.0.1:8082" {
+		t.Fatalf("migrated webListen = %q", got)
+	}
+	// An explicit listener is kept.
+	cfg.DNS.WebListen = "0.0.0.0:8082"
+	cfg.applyDefaults()
+	if got := cfg.DNS.WebListen; got != "0.0.0.0:8082" {
+		t.Fatalf("explicit webListen = %q", got)
+	}
+}
+
+func TestDNSPanelURLUsesTheDashboardEndpoint(t *testing.T) {
+	cfg := Config{ListenAddress: "200::1"}
+	cfg.Web.Path = "/abc/web"
+	cfg.Web.Port = 443
+	cfg.Web.TLS = webTLSSelf
+	cfg.Web.Listen = webListenYggdrasil
+	cfg.DNS.WebPort = 8082
+	if got := cfg.dnsPanelURL(); got != "https://[200::1]/abc/dns/" {
+		t.Fatalf("dnsPanelURL() = %q", got)
+	}
+}
+
 func TestRewriteAlfisResponsePrefixesAbsoluteURLs(t *testing.T) {
 	html := `<link href="/styles.css"><script src="/scripts.js"></script>`
 	response := &http.Response{

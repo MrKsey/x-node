@@ -694,7 +694,7 @@ func cmdStatus(args []string) error {
 		line("State", "enabled (x-node dns status)")
 		line("Listen", cfg.dnsListen())
 		if alfisWebUISupported(dnsBinaryPath()) {
-			line("Alfis web", cfg.dnsWebURL())
+			line("Alfis web", cfg.dnsPanelURL())
 		} else {
 			line("Alfis web", "not available in this Alfis build")
 		}

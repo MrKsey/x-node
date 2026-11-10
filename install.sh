@@ -1743,7 +1743,13 @@ if [ "$DNS_ENABLED" -eq 1 ]; then
         DNS_WEB_PASSWORD="$(printf '%s\n' "$dns_output" | sed -n 's/^Alfis web password: //p' | head -n 1)"
         echo "    listen: [$ADDRESS]:$DNS_PORT"
         if [ "$ALFIS_WEBUI" -eq 1 ]; then
-            echo "    web:    http://[$ADDRESS]:$DNS_WEB_PORT/"
+            if [ "$WEB_ENABLED" -eq 1 ]; then
+                dns_panel_url="$(web_public_url)"
+                dns_panel_url="${dns_panel_url%"${WEB_PATH}/"}${WEB_PATH%/*}/dns/"
+                echo "    web:    $dns_panel_url"
+            else
+                echo "    web:    through the dashboard, which is disabled"
+            fi
         else
             echo "    web:    not available in this Alfis build"
         fi
