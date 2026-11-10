@@ -193,6 +193,11 @@ func cmdServe(args []string) error {
 	go family.run(ctx)
 	go socks.watchQuotas(ctx)
 	go watchSettings(ctx, base, live, quotas, log)
+	// An upgrade can change a derived default of the Alfis configuration, and
+	// the unit keeps running with the file written by the previous version.
+	// Align it once in the background instead of waiting for the operator to
+	// toggle the DNS switch.
+	go syncInstalledDNSConfig(cfg, log)
 	go func() {
 		ticker := time.NewTicker(time.Hour)
 		defer ticker.Stop()

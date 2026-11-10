@@ -7,6 +7,26 @@ import (
 	"time"
 )
 
+func TestAlfisConfigBindsThePanelToLoopback(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.ListenAddress = "200::1"
+	cfg.DNS.Enabled = true
+	cfg.DNS.WebPort = 8082
+	cfg.DNS.WebListen = ""
+	cfg.applyDefaults()
+	document := cfg.alfisConfig()
+	if !strings.Contains(document, `[webui]`) ||
+		!strings.Contains(document, `listen = "127.0.0.1:8082"`) {
+		t.Fatalf("the panel listener is not loopback:\n%s", document)
+	}
+	// An explicit listener is kept: the proxy dials whatever is configured.
+	cfg.DNS.WebListen = "[200::1]:8082"
+	document = cfg.alfisConfig()
+	if !strings.Contains(document, `listen = "[200::1]:8082"`) {
+		t.Fatalf("an explicit listener was not kept:\n%s", document)
+	}
+}
+
 func TestConfigPeerURI(t *testing.T) {
 	cfg := testConfig(t)
 	cfg.PeerURI = "tls://203.0.113.10:13338?key=0123456789abcdef"

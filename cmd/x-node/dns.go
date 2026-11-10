@@ -272,6 +272,32 @@ func (w *webServer) dnsStatus(cfg Config) webDNSStatus {
 	return status
 }
 
+// syncInstalledDNSConfig rewrites /etc/x-node/alfis.conf when it does not
+// match the file this build generates. The file is derived from the settings,
+// but nothing rewrites it on an upgrade: 1.7.4 moved the Alfis panel from the
+// Yggdrasil address to loopback, and a node updated in place kept the old
+// listener, so the dashboard proxy could not reach the panel and the "Open
+// Alfis web UI" button stayed disabled until the operator toggled the switch.
+// A unit that is off is left alone: the file is written when it starts.
+func syncInstalledDNSConfig(cfg Config, log *logger) {
+	if !cfg.DNS.Enabled {
+		return
+	}
+	raw, err := os.ReadFile(helperDNSConfig)
+	if err != nil {
+		// Missing or unreadable: the helper reports the state and the switch
+		// writes the file.
+		return
+	}
+	if string(raw) == cfg.alfisConfig() {
+		return
+	}
+	log.info("dns: %s does not match the settings, rewriting it", helperDNSConfig)
+	if err := applyDNSConfig(cfg); err != nil {
+		log.warn("dns: cannot apply %s: %v", helperDNSConfig, err)
+	}
+}
+
 // applyDNSConfig asks the root helper to write the Alfis files and start or
 // stop the unit. The CLI can call the same code directly when it runs as root.
 func applyDNSConfig(cfg Config) error {

@@ -4,6 +4,12 @@ All notable changes to X-Node are documented here. The format is based on [Keep 
 
 The release workflow publishes the section of the tag as the GitHub release body, so every release has a short human-readable summary of what changed. Keep each bullet on a single line: GitHub turns every newline in a release body into a hard break, so a wrapped bullet would render as a narrow column instead of using the full width.
 
+## [1.7.5] — 2026-11-10
+
+### Fixed
+
+- An existing node updated to 1.7.4 kept the old `alfis.conf`, where the Alfis panel still listened on the Yggdrasil address while the dashboard proxy dialled loopback. The **Open Alfis web UI** button then stayed on **Waiting for the Alfis web UI…** until the DNS switch was toggled off and on. The daemon now compares the installed `alfis.conf` with the file it generates and rewrites it once at start when they differ, so an upgrade needs no manual step.
+
 ## [1.7.4] — 2026-11-10
 
 ### Added
