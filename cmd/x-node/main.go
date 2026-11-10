@@ -800,7 +800,13 @@ func cmdDoctor(args []string) error {
 		fmt.Printf("  FAIL %s: %s\n", name, detail)
 	}
 
-	check("listenAddress is in 200::/7", isYggAddress(net.ParseIP(cfg.ListenAddress)), cfg.ListenAddress)
+	// Print the address itself: the check name alone made the line look like a
+	// bare prefix and did not say which address had been tested.
+	if isYggAddress(net.ParseIP(cfg.ListenAddress)) {
+		fmt.Printf("  OK   listenAddress is in 200::/7: %s\n", cfg.ListenAddress)
+	} else {
+		check("listenAddress is in 200::/7", false, cfg.ListenAddress)
+	}
 	check("Yggdrasil address is assigned", interfaceHasAddress(cfg.ListenAddress),
 		"is yggdrasil running and is the interface up?")
 

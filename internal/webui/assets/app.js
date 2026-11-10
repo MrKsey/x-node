@@ -1345,17 +1345,19 @@ function clientRowHtml(client) {
     client.registeredAt ? "registered " + when(client.registeredAt) : "",
   ].filter(Boolean).join(" · ");
   const quotaPill = quota.exhausted ? '<span class="pill bad">quota exhausted</span>' : "";
-  const suspendedPill = client.suspended ? '<span class="pill warn">suspended</span>' : "";
   const stateClass = client.suspended ? "warn" : client.state === "connected" ? "ok" : "";
   // The label sits on the first line next to the address: the address column is
   // wide enough for both, and the second line then carries only the device
   // details. In a narrow column the label moves to its own line instead of
   // pushing the info icon out, and a label that is still too long is clipped
   // with an ellipsis.
-  const tags = [
-    client.label ? `<span class="pill client-label"><span>${escapeHtml(client.label)}</span></span>` : "",
-    suspendedPill,
-  ].filter(Boolean).join("");
+  //
+  // A suspended client is marked only in the State column: the API already
+  // answers state "suspended" there, and a second badge next to the address
+  // repeated the same word in two neighbouring columns.
+  const tags = client.label
+    ? `<span class="pill client-label"><span>${escapeHtml(client.label)}</span></span>`
+    : "";
   return `
     <tr>
       <td data-label="Client">

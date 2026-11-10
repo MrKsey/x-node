@@ -4,6 +4,16 @@ All notable changes to X-Node are documented here. The format is based on [Keep 
 
 The release workflow publishes the section of the tag as the GitHub release body, so every release has a short human-readable summary of what changed. Keep each bullet on a single line: GitHub turns every newline in a release body into a hard break, so a wrapped bullet would render as a narrow column instead of using the full width.
 
+## [1.7.12] — 2026-11-11
+
+### Changed
+
+- `x-node doctor` prints the address it tested after **listenAddress is in 200::/7**, so the line names the configured Yggdrasil address instead of looking like a bare prefix.
+
+### Fixed
+
+- **Registered clients** no longer writes **suspended** twice: the badge next to the address is gone and the state remains in the **State** column.
+
 ## [1.7.11] — 2026-11-11
 
 ### Fixed
