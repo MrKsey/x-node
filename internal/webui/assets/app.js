@@ -2096,7 +2096,7 @@ function settingsHtml() {
       <label class="switch"><input type="checkbox" id="s-dns" ${dns.enabled ? "checked" : ""}><span>Run the Alfis DNS server for Yggdrasil clients</span></label>
       <div class="form-grid">
         <label class="field"><span>Listen</span>
-          <input class="scroll-field mono right" value="${escapeHtml(bracketHostPort(dns.listen || ""))}" readonly title="Click to copy" data-copy-value="${escapeHtml(dns.listen || "")}">
+          <input class="scroll-field mono" value="${escapeHtml(bracketHostPort(dns.listen || ""))}" readonly title="Click to copy" data-copy-value="${escapeHtml(dns.listen || "")}">
         </label>
         <label class="field"><span>Alfis web password</span>
           <div class="copy-line">

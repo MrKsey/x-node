@@ -4,6 +4,13 @@ All notable changes to X-Node are documented here. The format is based on [Keep 
 
 The release workflow publishes the section of the tag as the GitHub release body, so every release has a short human-readable summary of what changed. Keep each bullet on a single line: GitHub turns every newline in a release body into a hard break, so a wrapped bullet would render as a narrow column instead of using the full width.
 
+## [1.7.10] — 2026-11-10
+
+### Changed
+
+- **Settings → DNS server** left-aligns the **Listen** field: a host and port are read from the start, and the right-aligned value sat far from its label on a wide card.
+- **Registered clients** shares the free width evenly between **TCP**, **UDP**, **Today** and **Month** instead of sizing the first two to their short numbers. On a window of 1920 px and wider the four columns are now exactly equal; on a narrower one they stay as close as the space allows, because the address and the action buttons cannot shrink further.
+
 ## [1.7.9] — 2026-11-10
 
 ### Changed

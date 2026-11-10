@@ -289,12 +289,13 @@ tr:last-child td { border-bottom: 0; }
    asks for a little more than that, so on a wide window it keeps a gap after
    the info icon instead of ending right at the state pill, and Quota pays for
    it: it holds a bar and three short lines, yet it used to take a quarter of
-   the table. */
+   the table. TCP, UDP, Today and Month carry one short number each, so they
+   share the free space evenly instead of sizing themselves to their text. */
 .table-wrap table.cards .col-state,
-.table-wrap table.cards .col-num,
 .table-wrap table.cards .col-seen,
 .table-wrap table.cards .col-actions { width: 1%; }
 .table-wrap table.cards .col-client { width: 6%; }
+.table-wrap table.cards .col-num,
 .table-wrap table.cards .col-traffic { width: 9%; }
 .table-wrap table.cards .col-quota { width: 12%; }
 
