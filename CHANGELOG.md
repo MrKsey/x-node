@@ -4,6 +4,12 @@ All notable changes to X-Node are documented here. The format is based on [Keep 
 
 The release workflow publishes the section of the tag as the GitHub release body, so every release has a short human-readable summary of what changed. Keep each bullet on a single line: GitHub turns every newline in a release body into a hard break, so a wrapped bullet would render as a narrow column instead of using the full width.
 
+## [1.7.6] — 2026-11-10
+
+### Fixed
+
+- **Logs** with **Wrap lines** off keeps the width of the card and scrolls sideways inside the log box instead of stretching the page to the longest line. On a phone the old behaviour pushed the whole layout past the screen edge.
+
 ## [1.7.5] — 2026-11-10
 
 ### Fixed

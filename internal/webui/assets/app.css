@@ -168,6 +168,10 @@ input[type="checkbox"] { width: auto; accent-color: var(--accent); }
 .topbar-right { display: flex; align-items: center; gap: 12px; }
 #menu { display: none; }
 .view { padding: 24px; display: grid; gap: 20px; align-content: start; }
+/* A grid item refuses to become narrower than its content by default. A log
+   line without wrapping or a wide table then stretched the whole page instead
+   of scrolling inside its own box, so every view card is allowed to shrink. */
+.view > * { min-width: 0; }
 
 .pill {
   display: inline-flex; align-items: center; gap: 6px;
@@ -389,6 +393,10 @@ canvas.chart.mini { height: 108px; }
 .logs-card pre.logs {
   flex: 1 1 auto; height: auto; min-height: 120px;
 }
+/* Without "Wrap lines" a long line stays on one line. The box keeps the width
+   of the card and scrolls sideways: the page itself never widens, which on a
+   phone used to push the whole layout past the screen edge. */
+.logs-card pre.logs { width: 100%; min-width: 0; max-width: 100%; }
 /* The auto refresh switch and the refresh button sit on the same line as the
    title, so they are centred instead of sharing the baseline of the heading. */
 .logs-card > header { align-items: center; }
