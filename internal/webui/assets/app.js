@@ -35,11 +35,23 @@ const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selec
 
 /* ---------- helpers ---------- */
 
-function api(method, path, body) {
+// A request that never answers freezes the view: the browser can reuse a
+// keep-alive connection that a proxy or a NAT has already dropped, and the
+// first request after a long idle then waits for the TCP retransmission
+// timeout. Every call gets a deadline, and a GET is retried once on a fresh
+// connection, which is exactly what a page reload used to do by hand.
+//
+// The first attempt is the short one: a dead pooled connection is the common
+// case, and the retry opens a new socket, so waiting long there only delays
+// the page. The retry gets the full budget for a slow but alive server.
+const apiAttemptTimeouts = [10000, 20000];
+
+function apiFetch(method, path, body, signal) {
   const options = {
     method,
     credentials: "same-origin",
     headers: { "X-Requested-With": "x-node" },
+    signal,
   };
   if (body !== undefined) {
     options.headers["Content-Type"] = "application/json";
@@ -60,6 +72,27 @@ function api(method, path, body) {
     }
     return data;
   });
+}
+
+function api(method, path, body) {
+  const attempt = (index) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), apiAttemptTimeouts[index]);
+    return apiFetch(method, path, body, controller.signal)
+      .catch((err) => {
+        const timedOut = err.name === "AbortError";
+        // Only a transport failure is repeated, and only for a request that is
+        // safe to repeat: a POST may already have been applied on the server.
+        if (index + 1 < apiAttemptTimeouts.length && method === "GET" &&
+            (timedOut || err instanceof TypeError)) {
+          return attempt(index + 1);
+        }
+        if (timedOut) throw new Error("The node did not answer in time");
+        throw err;
+      })
+      .finally(() => clearTimeout(timer));
+  };
+  return attempt(0);
 }
 
 function bytes(value) {
@@ -340,11 +373,37 @@ $$("[data-theme-set]").forEach((button) => {
 
 /* ---------- data ---------- */
 
-async function refreshStatus() {
+// Several renders may ask for the status at once (the five-second timer runs
+// while a navigation starts its own request). Only the newest answer is
+// allowed to paint the health pill, so a stale timeout cannot mark a healthy
+// node offline.
+let statusSeq = 0;
+
+// A request already in flight is reused instead of stacking a second one: a
+// slow node would otherwise collect a new status call every five seconds.
+// A call older than this is considered stuck and replaced, so a navigation
+// never waits behind a request that started before the user clicked.
+const statusReuseMs = 3000;
+let statusPending = null;
+let statusPendingAt = 0;
+
+function refreshStatus() {
+  const now = Date.now();
+  if (statusPending && now - statusPendingAt < statusReuseMs) return statusPending;
+  statusPendingAt = now;
+  statusPending = fetchStatus().finally(() => {
+    if (statusPendingAt === now) statusPending = null;
+  });
+  return statusPending;
+}
+
+async function fetchStatus() {
+  const seq = ++statusSeq;
   let status;
   try {
     status = await api("GET", "api/status");
   } catch (err) {
+    if (seq !== statusSeq) return;
     // Only the status endpoint decides whether the node is online. A broken
     // admin socket or a failed peer/traffic request must not paint it red.
     const health = $("#health");
@@ -353,6 +412,7 @@ async function refreshStatus() {
     return;
   }
   state.status = status;
+  if (seq !== statusSeq) return;
   const health = $("#health");
   health.textContent = "online · " + duration(status.uptimeSeconds);
   health.className = "pill ok";
@@ -418,50 +478,81 @@ async function loadUpdate(refresh) {
 
 /* ---------- rendering ---------- */
 
+// Every render takes a number. A newer render or a navigation bumps it, so a
+// slow response that arrives after the user has moved on cannot paint its
+// view over the one that is on screen: that is what made the menu look stuck.
+let renderSeq = 0;
+
+function superseded(seq) {
+  return seq !== renderSeq;
+}
+
 async function render() {
   const view = $("#view");
+  const seq = ++renderSeq;
+  // A click on the menu must never look ignored. Fast answers paint straight
+  // away; a slow one first replaces the old view with a short placeholder.
+  const placeholder = setTimeout(() => {
+    if (!superseded(seq)) view.innerHTML = '<div class="card empty">Loading…</div>';
+  }, 150);
+  const paint = (html) => {
+    clearTimeout(placeholder);
+    if (superseded(seq)) return false;
+    view.innerHTML = html;
+    return true;
+  };
   try {
     if (state.view === "dashboard") {
       await refreshStatus();
-      try {
-        await loadUpdate(false);
-      } catch (err) {
-        // A failed check must not replace the whole dashboard with an error.
-        state.update = { current: (state.status || {}).version || "", error: err.message };
-      }
-      view.innerHTML = dashboardHtml();
+      if (!paint(dashboardHtml())) return;
       wireDashboard();
       drawChart();
       drawSystemCharts();
       if (state.update && state.update.running) pollUpdateUpgrade();
+      // The update check talks to GitHub and can take its own time. It must
+      // not hold the first paint: the card shows the last known answer and
+      // the dashboard is repainted once a fresh one arrives.
+      loadUpdate(false)
+        .catch((err) => {
+          // A failed check must not replace the whole dashboard with an error.
+          state.update = { current: (state.status || {}).version || "", error: err.message };
+        })
+        .then(() => {
+          if (superseded(seq)) return;
+          renderDashboard();
+          // An upgrade started from another tab keeps running: follow it.
+          if (state.update && state.update.running) pollUpdateUpgrade();
+        });
     } else if (state.view === "clients") {
       await Promise.all([loadClients(), loadSettings()]);
-      view.innerHTML = clientsHtml();
+      if (!paint(clientsHtml())) return;
       wireClients();
       startClientAutoRefresh();
     } else if (state.view === "invites") {
       await Promise.all([loadInvites(), loadSettings()]);
-      view.innerHTML = invitesHtml();
+      if (!paint(invitesHtml())) return;
       wireInvites();
     } else if (state.view === "settings") {
       // The IPv6 card shows the source address and interface from the status,
       // so a direct visit to Settings must fetch it as well.
       await Promise.all([loadSettings(), loadPeers(), refreshStatus()]);
-      view.innerHTML = settingsHtml();
+      if (!paint(settingsHtml())) return;
       wireSettings();
     } else if (state.view === "config") {
       // The file list carries the real paths, so a direct visit to the tab
       // needs the status as well.
       await refreshStatus();
-      view.innerHTML = configHtml();
+      if (!paint(configHtml())) return;
       wireConfig();
     } else if (state.view === "logs") {
       await loadLogs();
-      view.innerHTML = logsHtml();
+      if (!paint(logsHtml())) return;
       wireLogs();
     }
   } catch (err) {
-    view.innerHTML = '<div class="card empty">' + escapeHtml(err.message) + "</div>";
+    if (!paint('<div class="card empty">' + escapeHtml(err.message) + "</div>")) return;
+  } finally {
+    clearTimeout(placeholder);
   }
 }
 

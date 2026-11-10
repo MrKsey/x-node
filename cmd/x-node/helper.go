@@ -338,11 +338,25 @@ func alfisWebUISupported(binary string) bool {
 // service state comes from systemd; a missing unit is "inactive", not an error.
 func helperDNSStatus() (any, error) {
 	binary := dnsBinaryPath()
-	state, _ := systemctlOutput("is-active", "x-node-dns")
+	// is-active and is-enabled answer from systemd's own state; a slow answer
+	// means systemd is stuck, and the dashboard must not wait half a minute for
+	// the card. They are asked in parallel because the status endpoint has a
+	// deadline of its own and two sequential timeouts would blow it.
+	var state, enabled string
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		state, _ = systemctlOutputTimeout(helperSystemctlTimeout, "is-active", "x-node-dns")
+	}()
+	go func() {
+		defer wg.Done()
+		enabled, _ = systemctlOutputTimeout(helperSystemctlTimeout, "is-enabled", "x-node-dns")
+	}()
+	wg.Wait()
 	if state == "" {
 		state = "inactive"
 	}
-	enabled, _ := systemctlOutput("is-enabled", "x-node-dns")
 	config := false
 	if info, err := os.Stat(helperDNSConfig); err == nil && !info.IsDir() {
 		config = true
@@ -359,8 +373,16 @@ func helperDNSStatus() (any, error) {
 	}, nil
 }
 
+// helperSystemctlTimeout bounds a status query. Changing the unit keeps the
+// longer default, because a real start or stop may wait for the service.
+const helperSystemctlTimeout = 4 * time.Second
+
 func systemctlOutput(args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	return systemctlOutputTimeout(30*time.Second, args...)
+}
+
+func systemctlOutputTimeout(timeout time.Duration, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, "systemctl", args...).CombinedOutput()
 	return strings.TrimSpace(string(out)), err

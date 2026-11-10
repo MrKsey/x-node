@@ -244,7 +244,7 @@ func (w *webServer) dnsStatus(cfg Config) webDNSStatus {
 		status.Error = "the root helper is not running"
 		return status
 	}
-	out, err := runHelper(helperRequest{Action: "dns-status"})
+	out, err := runHelperTimeout(helperRequest{Action: "dns-status"}, helperShortTimeout)
 	if err != nil {
 		status.Error = err.Error()
 		return status
@@ -395,7 +395,7 @@ func dnsStatusForCLI(cfg Config) webDNSStatus {
 	}
 	dnsWebFields(&status, cfg)
 	if requestHelperInstalled() {
-		out, err := runHelper(helperRequest{Action: "dns-status"})
+		out, err := runHelperTimeout(helperRequest{Action: "dns-status"}, helperShortTimeout)
 		if err != nil {
 			status.Error = err.Error()
 			return status

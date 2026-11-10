@@ -4,6 +4,14 @@ All notable changes to X-Node are documented here. The format is based on [Keep 
 
 The release workflow publishes the section of the tag as the GitHub release body, so every release has a short human-readable summary of what changed. Keep each bullet on a single line: GitHub turns every newline in a release body into a hard break, so a wrapped bullet would render as a narrow column instead of using the full width.
 
+## [1.7.7] — 2026-11-10
+
+### Fixed
+
+- Switching tabs in the web interface after a long idle now works on the first click. A keep-alive connection that a proxy or a NAT had already dropped left the first request of the page unanswered for minutes, so the old view stayed on screen until the tab was reloaded. Every API call now has a deadline, a `GET` is retried once on a fresh connection, and the view shows a short **Loading…** placeholder instead of the previous tab while it waits.
+- A slow answer that arrives after the user has already moved to another tab no longer paints over the new one: every render carries a generation number and an outdated response is dropped.
+- The status endpoint answers in bounded time: the DNS state from the root helper has an 8-second deadline instead of the 20-minute upgrade one, `systemctl is-active` and `is-enabled` are asked in parallel with a 4-second timeout each, and the GitHub release check gets 15 seconds instead of 45.
+
 ## [1.7.6] — 2026-11-10
 
 ### Fixed

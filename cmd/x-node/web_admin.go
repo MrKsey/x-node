@@ -22,6 +22,19 @@ import (
 // output. The helper listens on a unix socket that belongs to root:x-node, so
 // the daemon needs no root of its own.
 func runHelper(request helperRequest) (string, error) {
+	return runHelperTimeout(request, helperLongTimeout)
+}
+
+// helperLongTimeout covers the upgrade action, which downloads a whole release.
+// The other actions answer in milliseconds; a short deadline keeps a stuck
+// helper from hanging the status endpoint, and through it the dashboard.
+const (
+	helperLongTimeout  = 20 * time.Minute
+	helperShortTimeout = 8 * time.Second
+)
+
+// runHelperTimeout is runHelper with an explicit answer deadline.
+func runHelperTimeout(request helperRequest, timeout time.Duration) (string, error) {
 	payload, err := json.Marshal(request)
 	if err != nil {
 		return "", err
@@ -31,9 +44,7 @@ func runHelper(request helperRequest) (string, error) {
 		return "", fmt.Errorf("the root helper is not running: %w", err)
 	}
 	defer conn.Close()
-	// The upgrade action can download a whole release; the other actions answer
-	// immediately, so the generous limit costs nothing.
-	_ = conn.SetDeadline(time.Now().Add(20 * time.Minute))
+	_ = conn.SetDeadline(time.Now().Add(timeout))
 	if _, err := conn.Write(payload); err != nil {
 		return "", err
 	}
@@ -42,6 +53,9 @@ func runHelper(request helperRequest) (string, error) {
 	}
 	raw, err := io.ReadAll(io.LimitReader(conn, 1<<20))
 	if err != nil {
+		if errors.Is(err, os.ErrDeadlineExceeded) {
+			return "", fmt.Errorf("the root helper did not answer within %s", timeout)
+		}
 		return "", err
 	}
 	var response struct {

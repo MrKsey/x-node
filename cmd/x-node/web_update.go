@@ -10,6 +10,10 @@ import (
 // limit on every reload. "Check again" passes ?refresh=1 to bypass it.
 const updateCacheTTL = 30 * time.Minute
 
+// updateCheckTimeout is shorter than the browser's own deadline (20 s), so the
+// page gets a real answer instead of an aborted request that it has to retry.
+const updateCheckTimeout = 15 * time.Second
+
 // currentUpdate returns the cached release check or asks GitHub. A failed
 // refresh keeps the last successful answer and reports the error next to it,
 // so a temporary network problem does not hide a known update.
@@ -22,7 +26,7 @@ func (w *webServer) currentUpdate(force bool) (*updateInfo, error) {
 	}
 	w.updateMu.Unlock()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), updateCheckTimeout)
 	defer cancel()
 	info, err := checkForUpdate(ctx, daemonVersion)
 	if err != nil {
