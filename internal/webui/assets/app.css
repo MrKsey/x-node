@@ -285,14 +285,18 @@ tr:last-child td { border-bottom: 0; }
 
 /* The clients table gives the address column only the width its content needs,
    so Today, Month and Quota get the space instead. A width of 1% in the auto
-   layout means "as narrow as possible without wrapping". */
-.table-wrap table.cards .col-client,
+   layout means "as narrow as possible without wrapping". The address column
+   asks for a little more than that, so on a wide window it keeps a gap after
+   the info icon instead of ending right at the state pill, and Quota pays for
+   it: it holds a bar and three short lines, yet it used to take a quarter of
+   the table. */
 .table-wrap table.cards .col-state,
 .table-wrap table.cards .col-num,
 .table-wrap table.cards .col-seen,
 .table-wrap table.cards .col-actions { width: 1%; }
+.table-wrap table.cards .col-client { width: 6%; }
 .table-wrap table.cards .col-traffic { width: 9%; }
-.table-wrap table.cards .col-quota { width: 22%; }
+.table-wrap table.cards .col-quota { width: 12%; }
 
 .bar { height: 7px; border-radius: 999px; background: var(--bg-soft); overflow: hidden; min-width: 90px; }
 .bar > i { display: block; height: 100%; background: var(--accent); border-radius: 999px; }

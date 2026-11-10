@@ -646,10 +646,7 @@ function dashboardHtml() {
             <tr><th>Peers</th><td class="right">${peers.up || 0} up · ${peers.managed || 0} automatic · ${peers.manualPeers ? peers.manualPeers.length : 0} manual · ${peers.inbound || 0} inbound</td></tr>
             <tr><th>Auto replace</th><td class="right">${peers.autoReplace ? "on" : "off"} · ${peers.peerCount || 0} wanted</td></tr>
             <tr><th>Peer link</th><td class="right">
-              <div class="copy-line">
-                <input class="scroll-field mono" readonly value="${escapeHtml(status.peerURI || "")}" placeholder="not advertised" title="${escapeHtml(status.peerURI || "")}">
-                ${status.peerURI ? `<button class="btn small" data-copy="${escapeHtml(status.peerURI)}">Copy</button>` : ""}
-              </div>
+              <input class="scroll-field mono" readonly value="${escapeHtml(status.peerURI || "")}" placeholder="not advertised" title="${escapeHtml(status.peerURI || "")}" data-copy-value="${escapeHtml(status.peerURI || "")}">
             </td></tr>
           </table>
           <p class="hint">Add the peer link in Y-Node → Exit node → Add → Peers, or append it to the <span class="mono">Peers</span> list in yggdrasil.conf.</p>
@@ -2096,8 +2093,8 @@ function settingsHtml() {
         <h3>DNS server</h3>
         <button class="btn primary small save-btn hidden" type="submit">Save</button>
       </header>
+      <label class="switch"><input type="checkbox" id="s-dns" ${dns.enabled ? "checked" : ""}><span>Run the Alfis DNS server for Yggdrasil clients</span></label>
       <div class="form-grid">
-        <label class="switch full"><input type="checkbox" id="s-dns" ${dns.enabled ? "checked" : ""}><span>Run the Alfis DNS server for Yggdrasil clients</span></label>
         <label class="field"><span>Listen</span>
           <input class="scroll-field mono right" value="${escapeHtml(bracketHostPort(dns.listen || ""))}" readonly title="Click to copy" data-copy-value="${escapeHtml(dns.listen || "")}">
         </label>

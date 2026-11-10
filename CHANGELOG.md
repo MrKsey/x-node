@@ -4,6 +4,14 @@ All notable changes to X-Node are documented here. The format is based on [Keep 
 
 The release workflow publishes the section of the tag as the GitHub release body, so every release has a short human-readable summary of what changed. Keep each bullet on a single line: GitHub turns every newline in a release body into a hard break, so a wrapped bullet would render as a narrow column instead of using the full width.
 
+## [1.7.9] — 2026-11-10
+
+### Changed
+
+- The **Peer link** row in the **Yggdrasil** card is a read-only field that copies its value on click, left-aligned and without the separate **Copy** button, like **SOCKS5** in the **X-Node** card.
+- **Registered clients** gives the **Client** column about 10% more width on a wide window and takes it from **Quota**, which no longer grows to a quarter of the table while the address column stays at its content width.
+- **Settings → DNS server** puts **Listen** and **Alfis web password** on one line, so **Listen** is as wide as **Source address** in **IPv6 outbound** instead of losing a third of its width to an empty grid track.
+
 ## [1.7.8] — 2026-11-10
 
 ### Changed
