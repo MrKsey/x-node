@@ -620,7 +620,9 @@ function dashboardHtml() {
           <tr><th>Connections</th><td class="right">${status.maxConnsPerClient || 0} per client · ${status.maxConnsTotal || 0} in total</td></tr>
           <tr><th>UDP relay</th><td class="right">${status.udpEnabled ? "enabled · " + (status.maxUdpAssociations || 0) + " association(s)" : "disabled"}</td></tr>
           <tr><th>IPv6 outbound</th><td class="right">${ipv6StatePill(status)}</td></tr>
-          ${status.ipv6Source ? `<tr><th>IPv6 source</th><td class="right mono break">${escapeHtml(bracketIPv6(status.ipv6Source))}</td></tr>` : ""}
+          ${status.ipv6Source ? `<tr><th>IPv6 source</th><td class="right">
+            <input class="scroll-field mono right" readonly value="${escapeHtml(bracketIPv6(status.ipv6Source))}" title="${escapeHtml(bracketIPv6(status.ipv6Source))}" data-copy-value="${escapeHtml(status.ipv6Source)}">
+          </td></tr>` : ""}
           <tr><th>Domain names</th><td class="right">${status.domainResolution ? "resolved on the exit" : "client resolves"}</td></tr>
           <tr><th>Log level</th><td class="right">${escapeHtml(status.logLevel || "")}</td></tr>
           <tr><th>Config</th><td class="right mono ellipsis" title="${escapeHtml(status.configPath || "")}">${escapeHtml(status.configPath || "—")}</td></tr>
@@ -638,7 +640,9 @@ function dashboardHtml() {
             <tr><th>Address</th><td class="right">
               <input class="scroll-field mono right" readonly value="${escapeHtml(bracketIPv6(self.address || status.address || "—"))}" title="${escapeHtml(bracketIPv6(self.address || status.address || ""))}" data-copy-value="${escapeHtml(self.address || status.address || "")}">
             </td></tr>
-            <tr><th>Subnet</th><td class="right mono">${escapeHtml(bracketIPv6(self.subnet || "—"))}</td></tr>
+            <tr><th>Subnet</th><td class="right">
+              <input class="scroll-field mono right" readonly value="${escapeHtml(bracketIPv6(self.subnet || "—"))}" title="${escapeHtml(bracketIPv6(self.subnet || ""))}" data-copy-value="${escapeHtml(self.subnet || "")}">
+            </td></tr>
             <tr><th>Peers</th><td class="right">${peers.up || 0} up · ${peers.managed || 0} automatic · ${peers.manualPeers ? peers.manualPeers.length : 0} manual · ${peers.inbound || 0} inbound</td></tr>
             <tr><th>Auto replace</th><td class="right">${peers.autoReplace ? "on" : "off"} · ${peers.peerCount || 0} wanted</td></tr>
             <tr><th>Peer link</th><td class="right">

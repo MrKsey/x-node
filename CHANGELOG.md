@@ -4,6 +4,12 @@ All notable changes to X-Node are documented here. The format is based on [Keep 
 
 The release workflow publishes the section of the tag as the GitHub release body, so every release has a short human-readable summary of what changed. Keep each bullet on a single line: GitHub turns every newline in a release body into a hard break, so a wrapped bullet would render as a narrow column instead of using the full width.
 
+## [1.7.8] — 2026-11-10
+
+### Changed
+
+- The **IPv6 source** row in the **X-Node** card and the **Subnet** row in the **Yggdrasil** card are read-only fields that copy their value on click, right-aligned like **SOCKS5** and **Address**, instead of a plain text cell that wrapped a long address onto a second line.
+
 ## [1.7.7] — 2026-11-10
 
 ### Fixed
