@@ -4,6 +4,12 @@ All notable changes to X-Node are documented here. The format is based on [Keep 
 
 The release workflow publishes the section of the tag as the GitHub release body, so every release has a short human-readable summary of what changed. Keep each bullet on a single line: GitHub turns every newline in a release body into a hard break, so a wrapped bullet would render as a narrow column instead of using the full width.
 
+## [1.7.17] — 2026-11-11
+
+### Fixed
+
+- A reinstall over a kept state directory serves the web interface on the address the installer prints. The dashboard stores its settings in `/var/lib/x-node/settings.json`, which the daemon applies over `config.json`, so after `uninstall` and a new install the daemon kept the old random path while `config.json` and nginx got a new one and the printed address answered 404. The installer now takes the effective name, web path, port, bind address, TLS mode, IPv6 mode and DNS ports from the overlay first and falls back to `config.json`.
+
 ## [1.7.16] — 2026-11-11
 
 ### Fixed

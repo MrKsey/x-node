@@ -538,59 +538,80 @@ fi
 # A repeated run keeps the web interface, its port, its bind address and its
 # path, and the IPv6 mode: only a flag changes them.
 PREVIOUS_CONFIG="$EXIT_CONFIG"
-if [ -f "$PREVIOUS_CONFIG" ] && command -v python3 >/dev/null 2>&1; then
+PREVIOUS_SETTINGS="$STATE_DIR/settings.json"
+# The dashboard writes settings.json in the state directory and the daemon
+# applies it over config.json. A reinstall that kept the state must read the
+# effective values from there: a new random web path written to config.json
+# and nginx would not match the path the daemon still serves, and the printed
+# address would answer 404.
+previous_get() {
+    local value=""
+    if [ -f "$PREVIOUS_SETTINGS" ]; then
+        value="$(config_get "$PREVIOUS_SETTINGS" "$1")"
+    fi
+    if [ -z "$value" ] && [ -f "$PREVIOUS_CONFIG" ]; then
+        value="$(config_get "$PREVIOUS_CONFIG" "$1")"
+    fi
+    printf '%s\n' "$value"
+}
+if { [ -f "$PREVIOUS_CONFIG" ] || [ -f "$PREVIOUS_SETTINGS" ]; } \
+        && command -v python3 >/dev/null 2>&1; then
+    if [ "$NODE_NAME_SET" -eq 0 ]; then
+        previous_name="$(previous_get name)"
+        [ -z "$previous_name" ] || NODE_NAME="$previous_name"
+    fi
     if [ "$WEB_ENABLED_SET" -eq 0 ]; then
-        case "$(config_get "$PREVIOUS_CONFIG" web.enabled)" in
+        case "$(previous_get web.enabled)" in
             0) WEB_ENABLED=0 ;;
             1) WEB_ENABLED=1 ;;
         esac
     fi
     if [ "$WEB_PORT_SET" -eq 0 ]; then
-        previous_web_port="$(config_get "$PREVIOUS_CONFIG" web.port)"
+        previous_web_port="$(previous_get web.port)"
         case "$previous_web_port" in
             ''|*[!0-9]*) ;;
             *) WEB_PORT="$previous_web_port"; WEB_PORT_SET=1 ;;
         esac
     fi
     if [ "$WEB_BIND_SET" -eq 0 ]; then
-        previous_web_bind="$(config_get "$PREVIOUS_CONFIG" web.listen)"
+        previous_web_bind="$(previous_get web.listen)"
         case "$previous_web_bind" in
             all|yggdrasil|loopback) WEB_BIND="$previous_web_bind"; WEB_BIND_SET=1 ;;
         esac
     fi
     if [ "$WEB_TLS_SET" -eq 0 ]; then
-        previous_web_tls="$(config_get "$PREVIOUS_CONFIG" web.tls)"
+        previous_web_tls="$(previous_get web.tls)"
         case "$previous_web_tls" in
             auto|self|off) WEB_TLS="$previous_web_tls"; WEB_TLS_SET=1 ;;
         esac
     fi
     if [ "$WEB_PATH_SET" -eq 0 ]; then
-        previous_web_path="$(config_get "$PREVIOUS_CONFIG" web.path)"
+        previous_web_path="$(previous_get web.path)"
         if [ -n "$previous_web_path" ] && valid_web_path "$previous_web_path"; then
             WEB_PATH="$previous_web_path"
         fi
     fi
     if [ "$IPV6_MODE_SET" -eq 0 ]; then
-        previous_ipv6="$(config_get "$PREVIOUS_CONFIG" ipv6)"
+        previous_ipv6="$(previous_get ipv6)"
         case "$previous_ipv6" in
             auto|prefer|off) IPV6_MODE="$previous_ipv6" ;;
         esac
     fi
     if [ "$DNS_ENABLED_SET" -eq 0 ]; then
-        case "$(config_get "$PREVIOUS_CONFIG" dns.enabled)" in
+        case "$(previous_get dns.enabled)" in
             0) DNS_ENABLED=0 ;;
             1) DNS_ENABLED=1 ;;
         esac
     fi
     if [ "$DNS_PORT_SET" -eq 0 ]; then
-        previous_dns_port="$(config_get "$PREVIOUS_CONFIG" dns.port)"
+        previous_dns_port="$(previous_get dns.port)"
         case "$previous_dns_port" in
             ''|*[!0-9]*) ;;
             *) DNS_PORT="$previous_dns_port"; DNS_PORT_SET=1 ;;
         esac
     fi
     if [ "$DNS_WEB_PORT_SET" -eq 0 ]; then
-        previous_dns_web_port="$(config_get "$PREVIOUS_CONFIG" dns.webPort)"
+        previous_dns_web_port="$(previous_get dns.webPort)"
         case "$previous_dns_web_port" in
             ''|*[!0-9]*) ;;
             *) DNS_WEB_PORT="$previous_dns_web_port"; DNS_WEB_PORT_SET=1 ;;
