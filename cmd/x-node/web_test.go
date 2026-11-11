@@ -351,6 +351,62 @@ func TestWebClientLink(t *testing.T) {
 	}
 }
 
+// Removing a client must take it out of the allowlist, close what it has open
+// and drop its live row. The row used to survive in the runtime document and
+// the dashboard kept listing the deleted client as an "open" one.
+func TestWebClientRemove(t *testing.T) {
+	server, cfg := newTestWebServer(t)
+	server.conns = newConnectionRegistry()
+	server.tracker = newRuntimeTracker(cfg, newLogger("error"))
+	ts := httptest.NewServer(server)
+	defer ts.Close()
+	client := testClient(t)
+
+	if code, _ := doJSON(t, client, http.MethodPost, ts.URL+"/test/web/api/login",
+		map[string]string{"username": "admin", "password": "correct horse battery staple"}, true); code != http.StatusOK {
+		t.Fatalf("login failed")
+	}
+	address := testAddr(t, 9).String()
+	if code, payload := doJSON(t, client, http.MethodPost, ts.URL+"/test/web/api/clients",
+		map[string]string{"address": address}, true); code != http.StatusOK {
+		t.Fatalf("add client = %d %v", code, payload)
+	}
+	ip := net.ParseIP(address)
+	server.tracker.touch(ip)
+
+	local, remote := net.Pipe()
+	defer remote.Close()
+	server.conns.track(ip, local)
+
+	code, payload := doJSON(t, client, http.MethodDelete,
+		ts.URL+"/test/web/api/clients/"+address, nil, true)
+	if code != http.StatusOK || payload["closed"].(float64) != 1 {
+		t.Fatalf("remove = %d %v", code, payload)
+	}
+	_ = remote.SetReadDeadline(time.Now().Add(time.Second))
+	if _, err := remote.Read(make([]byte, 1)); err == nil {
+		t.Fatal("the connection of a removed client is still open")
+	}
+	if _, ok := server.store.Get(ip); ok {
+		t.Fatal("the client is still in the allowlist")
+	}
+	if live := server.tracker.live(ip); live.Connections != 0 || !live.LastSeenAt.IsZero() {
+		t.Fatalf("the live row survived: %+v", live)
+	}
+
+	// The list is built from the store and the runtime document, so the row
+	// must be gone from the answer even before the next service restart.
+	_, payload = doJSON(t, client, http.MethodGet, ts.URL+"/test/web/api/clients", nil, false)
+	if clients, _ := payload["clients"].([]any); len(clients) != 0 {
+		t.Fatalf("clients after remove = %v", clients)
+	}
+
+	if code, _ := doJSON(t, client, http.MethodDelete,
+		ts.URL+"/test/web/api/clients/"+address, nil, true); code != http.StatusNotFound {
+		t.Fatalf("removing an unknown client = %d, want 404", code)
+	}
+}
+
 func TestWebClientSuspensionAndDisconnect(t *testing.T) {
 	server, _ := newTestWebServer(t)
 	server.conns = newConnectionRegistry()

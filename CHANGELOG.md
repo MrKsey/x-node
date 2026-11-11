@@ -4,6 +4,12 @@ All notable changes to X-Node are documented here. The format is based on [Keep 
 
 The release workflow publishes the section of the tag as the GitHub release body, so every release has a short human-readable summary of what changed. Keep each bullet on a single line: GitHub turns every newline in a release body into a hard break, so a wrapped bullet would render as a narrow column instead of using the full width.
 
+## [1.7.14] — 2026-11-11
+
+### Fixed
+
+- **Remove** in **Registered clients** deletes the client for good. The live counters keep a row after the last connection closes, so the deleted entry came back in the next poll as an **open** client with no registration date; the list now shows a runtime row only when the node runs without an allowlist. Remove also closes the connections the client has open, and `x-node clients` no longer lists such a ghost either.
+
 ## [1.7.13] — 2026-11-11
 
 ### Fixed

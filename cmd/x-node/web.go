@@ -877,7 +877,7 @@ type webClient struct {
 func (w *webServer) handleClients(rw http.ResponseWriter, r *http.Request) {
 	cfg := w.live.get()
 	doc, _ := readRuntime(cfg.statePath(runtimeFileName))
-	rows := mergeClients(w.store.List(), doc, time.Now())
+	rows := mergeClients(w.store.List(), doc, time.Now(), cfg.AllowAll)
 	out := make([]webClient, 0, len(rows))
 	for _, row := range rows {
 		ip := net.ParseIP(row.Address)
@@ -969,6 +969,10 @@ func (w *webServer) handleClientUpdate(rw http.ResponseWriter, r *http.Request, 
 	writeJSON(rw, http.StatusOK, map[string]any{"ok": true, "client": client})
 }
 
+// handleClientRemove deletes one entry from the allowlist and closes the
+// connections it has open. The live counters are dropped as well: the tracker
+// keeps a row after the last connection closes so the last-seen stamp survives,
+// and without this the deleted client came back from that row in the next poll.
 func (w *webServer) handleClientRemove(rw http.ResponseWriter, r *http.Request, address string) {
 	ip := net.ParseIP(strings.TrimSpace(address))
 	if ip == nil {
@@ -984,8 +988,15 @@ func (w *webServer) handleClientRemove(rw http.ResponseWriter, r *http.Request, 
 		writeJSON(rw, http.StatusNotFound, errorResponse{Error: "not_found"})
 		return
 	}
-	w.log.info("web: client %s removed", ip)
-	writeJSON(rw, http.StatusOK, map[string]any{"ok": true})
+	closed := 0
+	if w.conns != nil {
+		closed = w.conns.closeClient(ip)
+	}
+	if w.tracker != nil {
+		w.tracker.forget(ip)
+	}
+	w.log.info("web: client %s removed (%d connection(s) closed)", ip, closed)
+	writeJSON(rw, http.StatusOK, map[string]any{"ok": true, "closed": closed})
 }
 
 // handleClientLink returns the link and the QR code that add this exit to a

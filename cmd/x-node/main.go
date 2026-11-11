@@ -522,7 +522,7 @@ func cmdClients(args []string) error {
 	}
 	now := time.Now()
 	running := runtimeFresh(doc, now)
-	rows := mergeClients(store.List(), doc, now)
+	rows := mergeClients(store.List(), doc, now, cfg.AllowAll)
 
 	if *asJSON {
 		raw, _ := json.MarshalIndent(map[string]any{

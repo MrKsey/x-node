@@ -134,7 +134,7 @@ func TestMergeClientsWithLiveState(t *testing.T) {
 		{Address: third.String(), Label: "laptop", Source: "invite"},
 	}
 
-	rows := mergeClients(clients, doc, now)
+	rows := mergeClients(clients, doc, now, true)
 	if len(rows) != 3 {
 		t.Fatalf("rows = %d, want 3", len(rows))
 	}
@@ -167,8 +167,40 @@ func TestMergeClientsIgnoresStaleRuntime(t *testing.T) {
 	if runtimeFresh(doc, now) {
 		t.Fatal("a two minute old file must be stale")
 	}
-	rows := mergeClients([]Client{{Address: first.String()}}, doc, now)
+	rows := mergeClients([]Client{{Address: first.String()}}, doc, now, false)
 	if len(rows) != 1 || rows[0].State != "registered" || rows[0].Connections != 0 {
 		t.Fatalf("rows = %+v", rows)
+	}
+}
+
+// A client the operator removed is gone from the allowlist but the tracker
+// still holds its last-seen stamp. With an allowlist that row must not come
+// back as an "open" client, which is what made Remove look broken in the
+// dashboard.
+func TestMergeClientsHidesRemovedClientOutsideOpenMode(t *testing.T) {
+	now := time.Now()
+	kept := testAddr(t, 1)
+	removed := testAddr(t, 2)
+	doc := &runtimeFile{
+		UpdatedAt: now,
+		Clients: []runtimeClient{
+			{Address: kept.String(), Connections: 0, LastSeenAt: now},
+			{Address: removed.String(), Connections: 0, LastSeenAt: now},
+		},
+	}
+	clients := []Client{{Address: kept.String(), Label: "phone", Source: "invite"}}
+
+	rows := mergeClients(clients, doc, now, false)
+	if len(rows) != 1 || rows[0].Address != kept.String() {
+		t.Fatalf("rows = %+v, want only the allowlisted client", rows)
+	}
+	if row := rows[0]; row.State != "idle" {
+		t.Fatalf("state = %q, want idle", row.State)
+	}
+
+	// Open mode has no allowlist, so there the same row is a real client.
+	rows = mergeClients(nil, doc, now, true)
+	if len(rows) != 2 {
+		t.Fatalf("open mode rows = %+v, want both", rows)
 	}
 }

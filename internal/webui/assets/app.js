@@ -1547,9 +1547,9 @@ function wireClientRows() {
     button.onclick = async () => {
       if (!confirm("Remove " + button.dataset.remove + " from the allowlist?")) return;
       try {
-        await api("DELETE", "api/clients/" + encodeURIComponent(button.dataset.remove));
-        toast("Client removed");
-        render();
+        const data = await api("DELETE", "api/clients/" + encodeURIComponent(button.dataset.remove));
+        toast("Client removed" + (data.closed ? " · " + data.closed + " connection(s) closed" : ""));
+        await render();
       } catch (err) { toast(err.message, true); }
     };
   });

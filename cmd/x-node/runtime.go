@@ -171,6 +171,30 @@ func (t *runtimeTracker) close(ip net.IP) {
 	t.mu.Unlock()
 }
 
+// forget drops the live row of one address. The tracker keeps a row after the
+// last connection closes so the last-seen stamp survives, which is right for a
+// registered client and wrong for one the operator has just deleted: without
+// this the row stayed in the published state until the service restarted.
+func (t *runtimeTracker) forget(ip net.IP) {
+	if t == nil || ip == nil {
+		return
+	}
+	key := ip.String()
+	t.mu.Lock()
+	if client, ok := t.clients[key]; ok {
+		// The connections are closed by the caller, so their close() calls will
+		// not find the row any more: settle the total here.
+		if t.total >= client.Connections {
+			t.total -= client.Connections
+		} else {
+			t.total = 0
+		}
+		delete(t.clients, key)
+	}
+	t.dirty = true
+	t.mu.Unlock()
+}
+
 // touch records that a registered client is alive even when it has no open
 // connection right now (the status endpoint calls it).
 func (t *runtimeTracker) touch(ip net.IP) {
@@ -407,8 +431,11 @@ type clientRow struct {
 }
 
 // mergeClients combines the allowlist with the runtime document. Entries that
-// only exist in the runtime (open mode) are included as well.
-func mergeClients(clients []Client, doc *runtimeFile, now time.Time) []clientRow {
+// only exist in the runtime are included only in open mode: without an
+// allowlist every address that connects is a client, but with one an address
+// that is not in it was removed by the operator and must not reappear from the
+// counters the tracker still holds.
+func mergeClients(clients []Client, doc *runtimeFile, now time.Time, openMode bool) []clientRow {
 	live := make(map[string]runtimeClient)
 	if runtimeFresh(doc, now) {
 		for _, client := range doc.Clients {
@@ -449,7 +476,7 @@ func mergeClients(clients []Client, doc *runtimeFile, now time.Time) []clientRow
 		rows = append(rows, row)
 	}
 	for address, item := range live {
-		if seen[address] {
+		if seen[address] || !openMode {
 			continue
 		}
 		row := clientRow{
