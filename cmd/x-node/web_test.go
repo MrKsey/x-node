@@ -469,6 +469,74 @@ func TestWebClientSuspensionAndDisconnect(t *testing.T) {
 	}
 }
 
+// The Clients page applies the default quota to a client without its own
+// entry. A stale explicit entry used to override the defaults forever, even
+// after the client was removed and registered again, which is why setting a
+// speed limit in Default quota looked like it did nothing.
+func TestWebDefaultQuotaAndRemoveClearsExplicit(t *testing.T) {
+	server, _ := newTestWebServer(t)
+	ts := httptest.NewServer(server)
+	defer ts.Close()
+	client := testClient(t)
+
+	if code, _ := doJSON(t, client, http.MethodPost, ts.URL+"/test/web/api/login",
+		map[string]string{"username": "admin", "password": "correct horse battery staple"}, true); code != http.StatusOK {
+		t.Fatalf("login failed")
+	}
+	code, payload := doJSON(t, client, http.MethodPut, ts.URL+"/test/web/api/settings",
+		map[string]any{"quotas": map[string]any{
+			"monthlyBytes": 0, "dailyBytes": 0, "downKbps": 20000, "upKbps": 20000,
+		}}, true)
+	if code != http.StatusOK {
+		t.Fatalf("settings = %d %v", code, payload)
+	}
+
+	address := testAddr(t, 31).String()
+	add := func() {
+		t.Helper()
+		if code, payload := doJSON(t, client, http.MethodPost, ts.URL+"/test/web/api/clients",
+			map[string]string{"address": address}, true); code != http.StatusOK {
+			t.Fatalf("add client = %d %v", code, payload)
+		}
+	}
+	quotaOf := func() map[string]any {
+		t.Helper()
+		_, payload := doJSON(t, client, http.MethodGet, ts.URL+"/test/web/api/clients", nil, false)
+		clients, _ := payload["clients"].([]any)
+		if len(clients) != 1 {
+			t.Fatalf("clients = %v", clients)
+		}
+		row := clients[0].(map[string]any)
+		quota, _ := row["quota"].(map[string]any)
+		return quota
+	}
+
+	add()
+	if quota := quotaOf(); quota["downKbps"].(float64) != 20000 || quota["upKbps"].(float64) != 20000 {
+		t.Fatalf("defaults did not reach a new client: %v", quota)
+	}
+
+	// An explicit entry, even an all-zero one, wins over the defaults. This is
+	// what the client editor used to write when only the label was changed.
+	if code, payload := doJSON(t, client, http.MethodPut, ts.URL+"/test/web/api/quotas/"+address,
+		map[string]any{"monthlyBytes": 0, "dailyBytes": 0, "downKbps": 0, "upKbps": 0}, true); code != http.StatusOK {
+		t.Fatalf("quota = %d %v", code, payload)
+	}
+	if quota := quotaOf(); quota["downKbps"].(float64) != 0 {
+		t.Fatalf("an explicit quota must win: %v", quota)
+	}
+
+	// Removing the client drops that entry with it.
+	if code, payload := doJSON(t, client, http.MethodDelete,
+		ts.URL+"/test/web/api/clients/"+address, nil, true); code != http.StatusOK {
+		t.Fatalf("remove = %d %v", code, payload)
+	}
+	add()
+	if quota := quotaOf(); quota["downKbps"].(float64) != 20000 || quota["upKbps"].(float64) != 20000 {
+		t.Fatalf("a re-added client inherited the old explicit quota: %v", quota)
+	}
+}
+
 func TestWebSettingsPatch(t *testing.T) {
 	server, cfg := newTestWebServer(t)
 	ts := httptest.NewServer(server)

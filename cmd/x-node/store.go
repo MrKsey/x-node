@@ -554,12 +554,6 @@ func (s *Store) Register(token string, client Client, maxClients int) (Client, b
 		return Client{}, false, fmt.Errorf("address must be a Yggdrasil node address")
 	}
 	client.Address = ip.String()
-	if client.Label == "" {
-		client.Label = client.DeviceName
-	}
-	if client.Label == "" {
-		client.Label = client.Address
-	}
 
 	release, err := s.beginWrite()
 	if err != nil {
@@ -614,6 +608,7 @@ func (s *Store) Register(token string, client Client, maxClients int) (Client, b
 	client.Source = "invite"
 	client.RegisteredAt = now
 	client.LastSeenAt = now
+	client.Label = inviteClientLabel(invite, client.DeviceName, client.Address)
 	s.clients[client.Address] = client
 
 	invite.Used++
@@ -630,6 +625,25 @@ func (s *Store) Register(token string, client Client, maxClients int) (Client, b
 		s.log.warn("allowlist saved but invites were not: %v", err)
 	}
 	return client, false, nil
+}
+
+// inviteClientLabel is the name a new client gets from the invite it redeemed.
+// The note is what the operator typed when creating the invite, so the client
+// arrives already named instead of showing its raw Yggdrasil address. An invite
+// for several devices numbers them, so "Family" becomes "Family 1", "Family 2"
+// and so on. Without a note the device name is used, as before.
+func inviteClientLabel(invite Invite, deviceName, address string) string {
+	label := strings.TrimSpace(invite.Note)
+	if label != "" && invite.Uses > 1 {
+		label = fmt.Sprintf("%s %d", label, invite.Used+1)
+	}
+	if label != "" {
+		return label
+	}
+	if name := strings.TrimSpace(deviceName); name != "" {
+		return name
+	}
+	return address
 }
 
 // IssueToken replaces the API token of an allowlisted client and returns the

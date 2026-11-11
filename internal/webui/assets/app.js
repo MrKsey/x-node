@@ -1379,7 +1379,7 @@ function clientRowHtml(client) {
         <div class="${barClass}"><i style="width:${used}%"></i></div>
         <div class="muted small">${quota.monthlyBytes > 0 ? bytes(quota.monthUsed) + " of " + bytes(quota.monthlyBytes) : "no cap"}</div>
         <div class="muted small">${quota.dailyBytes > 0 ? "today " + bytes(quota.dayUsed) + " of " + bytes(quota.dailyBytes) : ""}</div>
-        <div class="muted small">${rate(quota.downKbps)} down · ${rate(quota.upKbps)} up</div>
+        <div class="muted small">${rate(quota.downKbps)} down · ${rate(quota.upKbps)} up${quota.explicit ? " · own limits" : ""}</div>
         ${quotaPill}
         ${quota.reason ? `<div class="muted small">${escapeHtml(quota.reason)}</div>` : ""}
       </td>
@@ -1690,18 +1690,32 @@ function openClientEditor(address) {
   if (!client) return;
   state.editing = address;
   const quota = client.quota || {};
+  // The form shows the effective limits, so a client without its own entry
+  // already displays the defaults. Saving the same numbers would turn them into
+  // an explicit entry and freeze them: a later change of the defaults would no
+  // longer reach this client. The quota is therefore written only when one of
+  // its fields really changed.
+  const initialQuota = {
+    monthly: Math.round(mb(quota.monthlyBytes)),
+    daily: Math.round(mb(quota.dailyBytes)),
+    down: (quota.downKbps || 0) / 1000,
+    up: (quota.upKbps || 0) / 1000,
+  };
   const editor = $("#client-editor");
   editor.innerHTML = `
     <form class="card section editor" id="client-form">
       <header><h3>${escapeHtml(bracketIPv6(client.address))}</h3></header>
       <div class="form-grid">
         <label class="field"><span>Label</span><input id="e-label" value="${escapeHtml(client.label || "")}" placeholder="family phone"></label>
-        <label class="field"><span>Monthly cap (MB, 0 = none)</span><input id="e-monthly" type="number" min="0" step="1" value="${Math.round(mb(quota.monthlyBytes))}"></label>
-        <label class="field"><span>Daily cap (MB, 0 = none)</span><input id="e-daily" type="number" min="0" step="1" value="${Math.round(mb(quota.dailyBytes))}"></label>
-        <label class="field"><span>Download (Mbps, 0 = none)</span><input id="e-down" type="number" min="0" step="1" value="${(quota.downKbps || 0) / 1000}"></label>
-        <label class="field"><span>Upload (Mbps, 0 = none)</span><input id="e-up" type="number" min="0" step="1" value="${(quota.upKbps || 0) / 1000}"></label>
+        <label class="field"><span>Monthly cap (MB, 0 = none)</span><input id="e-monthly" type="number" min="0" step="1" value="${initialQuota.monthly}"></label>
+        <label class="field"><span>Daily cap (MB, 0 = none)</span><input id="e-daily" type="number" min="0" step="1" value="${initialQuota.daily}"></label>
+        <label class="field"><span>Download (Mbps, 0 = none)</span><input id="e-down" type="number" min="0" step="1" value="${initialQuota.down}"></label>
+        <label class="field"><span>Upload (Mbps, 0 = none)</span><input id="e-up" type="number" min="0" step="1" value="${initialQuota.up}"></label>
         <div class="field"><span>Traffic</span><div class="muted">Today ${bytes(client.dayUsed || 0)} · month ${bytes(client.monthUsed || 0)}</div></div>
       </div>
+      <p class="hint">${quota.explicit
+        ? "This client has its own limits. Reset traffic returns it to the default limits."
+        : "This client uses the default limits. Changing a value here gives it its own limits."}</p>
       <div class="actions">
         <button class="btn primary" type="submit">Save</button>
         <button class="btn" type="button" id="e-reset">Reset traffic</button>
@@ -1728,12 +1742,19 @@ function openClientEditor(address) {
       await api("PUT", "api/clients/" + encodeURIComponent(client.address), {
         label: $("#e-label").value.trim(),
       });
-      await api("PUT", "api/quotas/" + encodeURIComponent(client.address), {
-        monthlyBytes: Math.round(Number($("#e-monthly").value) * 1000000),
-        dailyBytes: Math.round(Number($("#e-daily").value) * 1000000),
-        downKbps: Math.round(Number($("#e-down").value) * 1000),
-        upKbps: Math.round(Number($("#e-up").value) * 1000),
-      });
+      const monthly = Number($("#e-monthly").value);
+      const daily = Number($("#e-daily").value);
+      const down = Number($("#e-down").value);
+      const up = Number($("#e-up").value);
+      if (monthly !== initialQuota.monthly || daily !== initialQuota.daily ||
+          down !== initialQuota.down || up !== initialQuota.up) {
+        await api("PUT", "api/quotas/" + encodeURIComponent(client.address), {
+          monthlyBytes: Math.round(monthly * 1000000),
+          dailyBytes: Math.round(daily * 1000000),
+          downKbps: Math.round(down * 1000),
+          upKbps: Math.round(up * 1000),
+        });
+      }
       toast("Client saved");
       state.editing = "";
       render();

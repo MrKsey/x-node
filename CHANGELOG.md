@@ -4,6 +4,17 @@ All notable changes to X-Node are documented here. The format is based on [Keep 
 
 The release workflow publishes the section of the tag as the GitHub release body, so every release has a short human-readable summary of what changed. Keep each bullet on a single line: GitHub turns every newline in a release body into a hard break, so a wrapped bullet would render as a narrow column instead of using the full width.
 
+## [1.7.15] — 2026-11-11
+
+### Added
+
+- The **Note** of an invite becomes the label of the client it registers. When the invite allows more than one device, the label gets the client number as a suffix, so three registrations of an invite noted `Home` appear as **Home 1**, **Home 2** and **Home 3** in **Registered clients** and in `x-node clients`.
+
+### Fixed
+
+- **Default quota** reaches new clients again. The client editor sent every field of the quota form on save, which stored an explicit entry with the shown zeros and that entry overrode the defaults for good. The editor now writes the quota only when a limit actually changes, marks the row as **own limits** when the client has its own entry, and says whether the client uses the default limits or its own.
+- The request log says **api token: sent** or **api token: none** instead of the misleading **token yes/no**. A client that registers with an invite authenticates with the invite in the body and receives its token in the answer, so **none** means the request carried no token, not that the client has none.
+
 ## [1.7.14] — 2026-11-11
 
 ### Fixed

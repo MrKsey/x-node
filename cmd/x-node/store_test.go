@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/ed25519"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -53,8 +54,8 @@ func TestStoreInviteRegistration(t *testing.T) {
 	if existed {
 		t.Fatal("first registration must create a new client")
 	}
-	if client.Label != "phone" {
-		t.Fatalf("label = %q, want phone", client.Label)
+	if client.Label != "test 1" {
+		t.Fatalf("label = %q, want test 1 (the note and the use number)", client.Label)
 	}
 	if !store.Allowed(first) {
 		t.Fatal("registered address is not allowed")
@@ -68,6 +69,9 @@ func TestStoreInviteRegistration(t *testing.T) {
 	if _, _, err := store.Register(token, Client{Address: second.String(), DeviceName: "laptop"}, cfg.MaxClients); err != nil {
 		t.Fatalf("second use: %v", err)
 	}
+	if client, _ := store.Get(second); client.Label != "test 2" {
+		t.Fatalf("second label = %q, want test 2", client.Label)
+	}
 	if !store.Allowed(second) {
 		t.Fatal("second registered address is not allowed")
 	}
@@ -75,6 +79,66 @@ func TestStoreInviteRegistration(t *testing.T) {
 	third := testAddr(t, 3)
 	if _, _, err := store.Register(token, Client{Address: third.String()}, cfg.MaxClients); !errors.Is(err, errInviteInvalid) {
 		t.Fatalf("third use error = %v, want errInviteInvalid", err)
+	}
+}
+
+// The note typed when creating an invite names the client that redeems it.
+// A multi-use invite numbers the devices, so an operator who writes "Family"
+// gets "Family 1" and "Family 2" instead of three identical rows.
+func TestStoreInviteNoteBecomesClientLabel(t *testing.T) {
+	cfg := testConfig(t)
+	store, err := openStore(cfg, newLogger("error"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	single, _, err := store.NewInvite("Home router", time.Hour, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, _, err := store.Register(single, Client{
+		Address:    testAddr(t, 40).String(),
+		DeviceName: "phone",
+	}, cfg.MaxClients)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if client.Label != "Home router" {
+		t.Fatalf("single-use label = %q, want the note", client.Label)
+	}
+
+	// Without a note the device name still names the client.
+	plain, _, err := store.NewInvite("", time.Hour, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, _, err = store.Register(plain, Client{
+		Address:    testAddr(t, 41).String(),
+		DeviceName: "laptop",
+	}, cfg.MaxClients)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if client.Label != "laptop" {
+		t.Fatalf("label = %q, want the device name", client.Label)
+	}
+
+	// A multi-use invite numbers every registration.
+	multi, _, err := store.NewInvite("Family", time.Hour, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index < 3; index++ {
+		client, _, err = store.Register(multi, Client{
+			Address: testAddr(t, byte(42+index)).String(),
+		}, cfg.MaxClients)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := fmt.Sprintf("Family %d", index+1)
+		if client.Label != want {
+			t.Fatalf("label %d = %q, want %q", index, client.Label, want)
+		}
 	}
 }
 

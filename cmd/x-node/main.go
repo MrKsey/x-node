@@ -449,6 +449,12 @@ func cmdAllow(args []string) error {
 		if !removed {
 			return fmt.Errorf("%s is not in the allowlist", ip)
 		}
+		// The quota entry belongs to the client: drop it with the allowlist
+		// row, so a later registration of the same address starts from the
+		// defaults instead of inheriting the old limits.
+		if quotas, err := openQuotas(cfg, newLogger("warn")); err == nil {
+			quotas.Reset(ip.String(), false)
+		}
 		fmt.Println("removed", ip)
 		return nil
 	case "token":

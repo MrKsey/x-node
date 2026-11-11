@@ -992,6 +992,12 @@ func (w *webServer) handleClientRemove(rw http.ResponseWriter, r *http.Request, 
 	if w.conns != nil {
 		closed = w.conns.closeClient(ip)
 	}
+	// The explicit quota belongs to the client, not to the address: leaving it
+	// behind made a client that registered again later inherit stale limits and
+	// silently ignore the defaults.
+	if w.quotas != nil {
+		w.quotas.Reset(ip.String(), false)
+	}
 	if w.tracker != nil {
 		w.tracker.forget(ip)
 	}

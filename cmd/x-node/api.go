@@ -17,7 +17,7 @@ import (
 
 // daemonVersion is stamped by build.sh (-ldflags -X main.daemonVersion=...).
 // The default is what a plain "go build" reports.
-var daemonVersion = "1.7.14"
+var daemonVersion = "1.7.15"
 
 type apiServer struct {
 	cfg     Config
@@ -459,11 +459,6 @@ func (a *apiServer) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if existed {
-		a.log.info("registration from %s: already allowed (%s)", source, client.Label)
-	} else {
-		a.log.info("registration from %s: allowed as %q", source, client.Label)
-	}
 	// A token is issued only to a client that has none. The app registers on
 	// every connect to refresh its device name and version, and rotating the
 	// credential there made the token in the profile change on every reconnect
@@ -477,6 +472,13 @@ func (a *apiServer) handleRegister(w http.ResponseWriter, r *http.Request) {
 		} else {
 			token = issued
 		}
+	}
+	if existed {
+		a.log.info("registration from %s: already allowed (%s), api token kept", source, client.Label)
+	} else if token != "" {
+		a.log.info("registration from %s: allowed as %q, api token issued", source, client.Label)
+	} else {
+		a.log.info("registration from %s: allowed as %q", source, client.Label)
 	}
 	writeJSON(w, http.StatusOK, registerResponse{
 		OK:           true,
@@ -551,11 +553,14 @@ func (a *apiServer) guard(next http.HandlerFunc, limiter *rateLimiter) http.Hand
 // polls /v1/status every few seconds, and an info line for each poll would
 // bury everything else. Refusals, registrations and token issues are info.
 func (a *apiServer) audit(r *http.Request, source net.IP, status int, started time.Time) {
-	token := "no"
+	// "api token" is the Authorization header, not the invite in the body:
+	// /v1/register authenticates with the invite and receives its token in the
+	// answer, so "none" there is expected and does not mean a refused request.
+	token := "none"
 	if bearerToken(r) != "" {
-		token = "yes"
+		token = "sent"
 	}
-	line := fmt.Sprintf("%s %s from %s: %d (token %s, %s)",
+	line := fmt.Sprintf("%s %s from %s: %d (api token: %s, %s)",
 		r.Method, r.URL.Path, source, status, token,
 		time.Since(started).Round(time.Millisecond))
 	if status >= http.StatusBadRequest || r.Method != http.MethodGet {

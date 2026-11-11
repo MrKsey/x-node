@@ -48,6 +48,9 @@ func TestAPIRegisterAndStatus(t *testing.T) {
 	if !store.TokenValid(source, registered.Token) {
 		t.Fatal("the returned token is not valid for the registered address")
 	}
+	if registered.Label != "api" {
+		t.Fatalf("label = %q, want the invite note", registered.Label)
+	}
 	if registered.Auth != apiAuthRequired {
 		t.Fatalf("auth mode = %q, want required", registered.Auth)
 	}
