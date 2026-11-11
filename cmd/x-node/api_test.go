@@ -72,6 +72,90 @@ func TestAPIRegisterAndStatus(t *testing.T) {
 	}
 }
 
+// registerAt performs one /v1/register request from the given source and
+// decodes the answer.
+func registerAt(t *testing.T, api *apiServer, source net.IP, invite, device string) registerResponse {
+	t.Helper()
+	body, _ := json.Marshal(registerRequest{
+		Invite:     invite,
+		Address:    source.String(),
+		DeviceName: device,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/register", bytes.NewReader(body))
+	req.RemoteAddr = "[" + source.String() + "]:40000"
+	rec := httptest.NewRecorder()
+	api.handleRegister(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("register status = %d, body %s", rec.Code, rec.Body.String())
+	}
+	var response registerResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode register: %v (body %s)", err, rec.Body.String())
+	}
+	return response
+}
+
+// The app registers on every connect to refresh its device name and version.
+// That call used to rotate the API token, so the credential in the profile
+// changed on every reconnect and a token issued by the operator in the
+// dashboard was overwritten at once.
+func TestAPIRegistrationKeepsTheIssuedToken(t *testing.T) {
+	cfg := testConfig(t)
+	store, err := openStore(cfg, newLogger("error"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	api := newAPIServer(cfg, store, nil, newLogger("error"))
+	source := testAddr(t, 13)
+	invite, _, err := store.NewInvite("", time.Hour, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	first := registerAt(t, api, source, invite, "phone")
+	if first.Token == "" {
+		t.Fatal("the first registration did not issue a token")
+	}
+	if !store.TokenValid(source, first.Token) {
+		t.Fatal("the issued token is not valid")
+	}
+
+	// The operator presses New token in the dashboard.
+	manual, err := store.IssueToken(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The app reconnects and registers again with an empty invite.
+	again := registerAt(t, api, source, "", "phone")
+	if again.Token != "" {
+		t.Fatalf("re-registration returned a token %q, want none", again.Token)
+	}
+	if again.Registered {
+		t.Fatal("re-registration reported a new client")
+	}
+	if !store.TokenValid(source, manual) {
+		t.Fatal("re-registration replaced the token issued by the operator")
+	}
+	if store.TokenValid(source, first.Token) {
+		t.Fatal("the first token survived the manual rotation")
+	}
+
+	// A client added by hand in the dashboard has no token yet, so the next
+	// registration is what gives it one.
+	manualClient := testAddr(t, 14)
+	if _, _, err := store.AddClient(manualClient, "laptop"); err != nil {
+		t.Fatal(err)
+	}
+	issued := registerAt(t, api, manualClient, "", "laptop")
+	if issued.Token == "" {
+		t.Fatal("a client without a token did not get one at registration")
+	}
+	if !store.TokenValid(manualClient, issued.Token) {
+		t.Fatal("the token issued to a client without one is not valid")
+	}
+}
+
 func TestAPIRejectsWrongAddress(t *testing.T) {
 	cfg := testConfig(t)
 	store, err := openStore(cfg, newLogger("error"))

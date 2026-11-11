@@ -17,7 +17,7 @@ import (
 
 // daemonVersion is stamped by build.sh (-ldflags -X main.daemonVersion=...).
 // The default is what a plain "go build" reports.
-var daemonVersion = "1.7.12"
+var daemonVersion = "1.7.13"
 
 type apiServer struct {
 	cfg     Config
@@ -82,7 +82,9 @@ type registerResponse struct {
 	Capabilities capabilities `json:"capabilities"`
 
 	// Token is the API credential of this client. It is shown once, here; the
-	// server keeps only its hash. Empty in open mode, where no token is needed.
+	// server keeps only its hash. Empty in open mode, where no token is needed,
+	// and when the client already has one: a repeat registration must not
+	// replace a working credential.
 	Token string `json:"token,omitempty"`
 }
 
@@ -462,11 +464,19 @@ func (a *apiServer) handleRegister(w http.ResponseWriter, r *http.Request) {
 	} else {
 		a.log.info("registration from %s: allowed as %q", source, client.Label)
 	}
-	// A fresh token on every registration: the response is the only time it is
-	// ever shown, and a client that lost the old one gets a working one back.
-	token, err := a.store.IssueToken(source)
-	if err != nil {
-		a.log.warn("registration from %s: could not issue an API token: %v", source, err)
+	// A token is issued only to a client that has none. The app registers on
+	// every connect to refresh its device name and version, and rotating the
+	// credential there made the token in the profile change on every reconnect
+	// and overwrote one the operator had issued by hand. Rotation stays where
+	// it belongs: POST /v1/token and the dashboard's New token button.
+	var token string
+	if client.TokenHash == "" {
+		issued, err := a.store.IssueToken(source)
+		if err != nil {
+			a.log.warn("registration from %s: could not issue an API token: %v", source, err)
+		} else {
+			token = issued
+		}
 	}
 	writeJSON(w, http.StatusOK, registerResponse{
 		OK:           true,
