@@ -60,7 +60,11 @@ Yggdrasil — децентрализованная IPv6 overlay-сеть. Она
 Поддерживаются Ubuntu 24.04 и Debian 12. Установка выполняется от имени `root`:
 
 ```bash
-sudo bash <(curl -fsSL https://raw.githubusercontent.com/MrKsey/x-node/main/install.sh)
+```bash
+curl -fsSL https://raw.githubusercontent.com/MrKsey/x-node/main/install.sh | sudo bash
+```
+
+Скрипт передаётся в `bash` через конвейер намеренно: `sudo bash <(curl ...)` не работает, потому что `sudo` закрывает дополнительный файловый дескриптор, который создаёт подстановка процесса, и bash завершается с ошибкой `/dev/fd/63: No such file or directory`. Параметры установщика указываются после `-s --`, например `... | sudo bash -s -- --yes`.
 ```
 
 Установщик загрузит актуальный релиз, установит Yggdrasil и компоненты X-Node, настроит сетевые параметры и systemd-сервисы. В процессе можно указать имя узла, внешний адрес, параметры пиринга, настройки веб-интерфейса и необходимость DNS-сервера.
@@ -366,7 +370,7 @@ sudo x-node update upgrade
 Удаление запускается одной командой, как и установка:
 
 ```bash
-sudo bash <(curl -fsSL https://raw.githubusercontent.com/MrKsey/x-node/main/uninstall.sh)
+curl -fsSL https://raw.githubusercontent.com/MrKsey/x-node/main/uninstall.sh | sudo bash
 ```
 
 Скрипт останавливает и удаляет сервисы, конфигурацию и исполняемые файлы X-Node. По умолчанию сохраняются `/var/lib/x-node` (клиенты, приглашения, квоты, счётчики трафика и список пиров) и установленный Yggdrasil, поэтому после повторной установки не нужно заново регистрировать устройства.
@@ -383,13 +387,13 @@ sudo bash <(curl -fsSL https://raw.githubusercontent.com/MrKsey/x-node/main/unin
 Например, полное удаление, включая данные и Yggdrasil:
 
 ```bash
-sudo bash <(curl -fsSL https://raw.githubusercontent.com/MrKsey/x-node/main/uninstall.sh) --purge --yes
+curl -fsSL https://raw.githubusercontent.com/MrKsey/x-node/main/uninstall.sh | sudo bash -s -- --purge --yes
 ```
 
 Чтобы удалить X-Node, но оставить Yggdrasil:
 
 ```bash
-sudo bash <(curl -fsSL https://raw.githubusercontent.com/MrKsey/x-node/main/uninstall.sh) --purge --keep-yggdrasil --yes
+curl -fsSL https://raw.githubusercontent.com/MrKsey/x-node/main/uninstall.sh | sudo bash -s -- --purge --keep-yggdrasil --yes
 ```
 
 Если архив релиза уже распакован, те же действия выполняет локальный скрипт с теми же параметрами:

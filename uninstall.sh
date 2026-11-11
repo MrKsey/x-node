@@ -65,8 +65,9 @@ Examples:
   sudo ./uninstall.sh --purge --keep-yggdrasil --yes
 
 Without a local copy of this script, the same uninstaller runs as a single
-command:
-  sudo bash <(curl -fsSL https://raw.githubusercontent.com/MrKsey/x-node/main/uninstall.sh)
+command (the script is piped into bash, so bash receives the options after
+"-s --"):
+  curl -fsSL https://raw.githubusercontent.com/MrKsey/x-node/main/uninstall.sh | sudo bash -s -- [options]
 EOF
 }
 

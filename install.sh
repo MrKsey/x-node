@@ -24,13 +24,23 @@ set -euo pipefail
 # ss, openssl and nginx by name, so make sure the usual directories are there.
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin${PATH:+:$PATH}"
 
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# With "curl ... | sudo bash" the script arrives on standard input, where
+# BASH_SOURCE is empty: the directory then stays empty and the bootstrap below
+# downloads the release. A local run keeps the directory of the script.
+SCRIPT_PATH="${BASH_SOURCE[0]:-}"
+SCRIPT_DIR=""
+if [ -n "$SCRIPT_PATH" ]; then
+    SCRIPT_DIR="$(cd -- "$(dirname -- "$SCRIPT_PATH")" && pwd)"
+fi
 
 # A standalone copy of this script (curl ... | sudo bash) has no binaries next
 # to it. Download the latest release archive for this machine and continue
 # from there, so installing stays a single command.
-if [ ! -x "$SCRIPT_DIR/bin/x-node" ] && [ ! -f "$SCRIPT_DIR/uninstall.sh" ] \
-        && [ -z "${X_NODE_BOOTSTRAPPED:-}" ]; then
+HAVE_LOCAL=0
+if [ -n "$SCRIPT_DIR" ] && { [ -x "$SCRIPT_DIR/bin/x-node" ] || [ -f "$SCRIPT_DIR/uninstall.sh" ]; }; then
+    HAVE_LOCAL=1
+fi
+if [ "$HAVE_LOCAL" -eq 0 ] && [ -z "${X_NODE_BOOTSTRAPPED:-}" ]; then
     boot_arch="$(uname -m)"
     case "$boot_arch" in
         x86_64|amd64)  boot_arch=amd64 ;;
@@ -62,13 +72,23 @@ if [ ! -x "$SCRIPT_DIR/bin/x-node" ] && [ ! -f "$SCRIPT_DIR/uninstall.sh" ] \
         wget -qO- "$boot_url" | tar -xz -C "$boot_dir"
     fi
     export X_NODE_BOOTSTRAPPED=1
+    # When the script comes through a pipe, the writer (curl) still has the rest
+    # of the file to send. Read it to the end: otherwise the exec below closes
+    # the pipe and curl prints "Failure writing output to destination", which
+    # looks like a broken installation.
+    if [ ! -t 0 ]; then
+        cat >/dev/null 2>&1 || true
+    fi
     # With "curl ... | sudo bash" the standard input is the script itself, so
     # the questions would read the download instead of the keyboard. The
-    # terminal is attached back when it exists; --yes does not need it.
-    if [ -r /dev/tty ]; then
-        exec bash "$boot_dir/$boot_name/install.sh" "$@" </dev/tty
+    # terminal is attached back when it exists; --yes does not need it. A tty
+    # device node can exist without a controlling terminal, so opening it is
+    # the real check.
+    boot_script="$boot_dir/$boot_name/install.sh"
+    if [ -t 0 ] || { [ -c /dev/tty ] && (exec 3</dev/tty) 2>/dev/null; }; then
+        exec bash "$boot_script" "$@" </dev/tty
     fi
-    exec bash "$boot_dir/$boot_name/install.sh" "$@"
+    exec bash "$boot_script" "$@"
 fi
 
 # The node name is NODE_NAME and not NAME: /etc/os-release, which is sourced
@@ -180,6 +200,11 @@ X-Node node installer
 
 Usage:
   sudo ./install.sh [options]
+
+Without a local copy of this script, the same installer runs as a single
+command (the script is piped into bash, so bash receives the options after
+"-s --"):
+  curl -fsSL https://raw.githubusercontent.com/MrKsey/x-node/main/install.sh | sudo bash -s -- [options]
 
 Options:
   --name TEXT           name shown in the app and in the QR code
@@ -1684,6 +1709,13 @@ if [ -f "$SCRIPT_DIR/README.md" ]; then
     install -d -m 0755 /usr/local/share/doc/x-node
     install -m 0644 "$SCRIPT_DIR/README.md" /usr/local/share/doc/x-node/README.md
 fi
+# Keep the uninstaller next to the documentation: a one-line installation has
+# no release directory of its own, and the command printed at the end has to
+# work after the temporary download is gone.
+if [ -f "$SCRIPT_DIR/uninstall.sh" ]; then
+    install -d -m 0755 /usr/local/share/doc/x-node
+    install -m 0755 "$SCRIPT_DIR/uninstall.sh" /usr/local/share/doc/x-node/uninstall.sh
+fi
 systemctl daemon-reload
 
 # The helper serves the restart and configuration buttons of the dashboard. It
@@ -1899,7 +1931,7 @@ Useful commands:
   x-node doctor -config $EXIT_CONFIG
   systemctl status x-node
   journalctl -u x-node -f
-  $SCRIPT_DIR/uninstall.sh --help
+  sudo bash /usr/local/share/doc/x-node/uninstall.sh --help
 
 EOF
 

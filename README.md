@@ -60,7 +60,11 @@ In both cases traffic travels over the Yggdrasil IPv6 tunnel to X-Node and only 
 Ubuntu 24.04 and Debian 12 are supported. Installation is performed as `root`:
 
 ```bash
-sudo bash <(curl -fsSL https://raw.githubusercontent.com/MrKsey/x-node/main/install.sh)
+```bash
+curl -fsSL https://raw.githubusercontent.com/MrKsey/x-node/main/install.sh | sudo bash
+```
+
+The script is piped into `bash` on purpose: `sudo bash <(curl ...)` does not work, because `sudo` closes the extra file descriptor that the process substitution uses, and bash then fails with `/dev/fd/63: No such file or directory`. Add installer options after `-s --`, for example `... | sudo bash -s -- --yes`.
 ```
 
 The installer downloads the current release, installs Yggdrasil and the X-Node components, configures network parameters and systemd services. During the process you can specify the node name, public address, peering parameters, web interface settings and whether the DNS server should run.
@@ -366,7 +370,7 @@ sudo x-node update upgrade
 Removal runs as a single command, just like the installation:
 
 ```bash
-sudo bash <(curl -fsSL https://raw.githubusercontent.com/MrKsey/x-node/main/uninstall.sh)
+curl -fsSL https://raw.githubusercontent.com/MrKsey/x-node/main/uninstall.sh | sudo bash
 ```
 
 The script stops and removes the X-Node services, configuration and binaries. By default it keeps `/var/lib/x-node` (clients, invites, quotas, traffic counters and the peer list) and the installed Yggdrasil, so a reinstall does not require registering the devices again.
@@ -383,13 +387,13 @@ The options are the same as in the local `uninstall.sh`:
 For example, a full removal including the data and Yggdrasil:
 
 ```bash
-sudo bash <(curl -fsSL https://raw.githubusercontent.com/MrKsey/x-node/main/uninstall.sh) --purge --yes
+curl -fsSL https://raw.githubusercontent.com/MrKsey/x-node/main/uninstall.sh | sudo bash -s -- --purge --yes
 ```
 
 To remove X-Node but keep Yggdrasil:
 
 ```bash
-sudo bash <(curl -fsSL https://raw.githubusercontent.com/MrKsey/x-node/main/uninstall.sh) --purge --keep-yggdrasil --yes
+curl -fsSL https://raw.githubusercontent.com/MrKsey/x-node/main/uninstall.sh | sudo bash -s -- --purge --keep-yggdrasil --yes
 ```
 
 When the release archive is already unpacked, the local script does the same with the same options:

@@ -4,6 +4,14 @@ All notable changes to X-Node are documented here. The format is based on [Keep 
 
 The release workflow publishes the section of the tag as the GitHub release body, so every release has a short human-readable summary of what changed. Keep each bullet on a single line: GitHub turns every newline in a release body into a hard break, so a wrapped bullet would render as a narrow column instead of using the full width.
 
+## [1.7.16] — 2026-11-11
+
+### Fixed
+
+- The one-line installation works: `curl -fsSL https://raw.githubusercontent.com/MrKsey/x-node/main/install.sh | sudo bash` downloads the latest release and installs it. A script that arrives on standard input stopped at `BASH_SOURCE[0]: unbound variable`; the bootstrap now keeps the terminal for the questions, drains the pipe so curl no longer reports `Failure writing output to destination`, and downloads the release for `--uninstall` too.
+- The README and `--help` no longer suggest `sudo bash <(curl ...)`. sudo closes the descriptor behind the process substitution, so bash reported `/dev/fd/63: No such file or directory` and curl `(23) Failure writing output to destination`. Installer and uninstaller options follow `-s --`, for example `... | sudo bash -s -- --yes`.
+- The installer copies `uninstall.sh` to `/usr/local/share/doc/x-node/`, so the removal command printed at the end keeps working after the temporary download directory is gone.
+
 ## [1.7.15] — 2026-11-11
 
 ### Added
