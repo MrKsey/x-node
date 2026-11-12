@@ -60,12 +60,10 @@ In both cases traffic travels over the Yggdrasil IPv6 tunnel to X-Node and only 
 Ubuntu 24.04 and Debian 12 are supported. Installation is performed as `root`:
 
 ```bash
-```bash
 curl -fsSL https://raw.githubusercontent.com/MrKsey/x-node/main/install.sh | sudo bash
 ```
 
 The script is piped into `bash` on purpose: `sudo bash <(curl ...)` does not work, because `sudo` closes the extra file descriptor that the process substitution uses, and bash then fails with `/dev/fd/63: No such file or directory`. Add installer options after `-s --`, for example `... | sudo bash -s -- --yes`.
-```
 
 The installer downloads the current release, installs Yggdrasil and the X-Node components, configures network parameters and systemd services. During the process you can specify the node name, public address, peering parameters, web interface settings and whether the DNS server should run.
 
