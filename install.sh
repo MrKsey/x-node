@@ -85,10 +85,17 @@ if [ "$HAVE_LOCAL" -eq 0 ] && [ -z "${X_NODE_BOOTSTRAPPED:-}" ]; then
     # device node can exist without a controlling terminal, so opening it is
     # the real check.
     boot_script="$boot_dir/$boot_name/install.sh"
+    # Run the downloaded copy instead of exec: the temporary directory has to
+    # be removed when the installer finishes, otherwise every one-line run
+    # leaves an unpacked archive behind in /tmp.
+    boot_status=0
     if [ -t 0 ] || { [ -c /dev/tty ] && (exec 3</dev/tty) 2>/dev/null; }; then
-        exec bash "$boot_script" "$@" </dev/tty
+        bash "$boot_script" "$@" </dev/tty || boot_status=$?
+    else
+        bash "$boot_script" "$@" || boot_status=$?
     fi
-    exec bash "$boot_script" "$@"
+    rm -rf "$boot_dir"
+    exit "$boot_status"
 fi
 
 # The node name is NODE_NAME and not NAME: /etc/os-release, which is sourced
@@ -184,6 +191,9 @@ YGG_CONF=""
 BIN_DIR=""
 YGGDRASIL_WAS_INSTALLED=0
 YGG_CONF_BACKUP=""
+# Set when nginx was already on the machine: --purge removes the package only
+# when this installation brought it in, so another site is never taken down.
+NGINX_WAS_INSTALLED=0
 
 YGG_CONF_DEFAULT="/etc/yggdrasil/yggdrasil.conf"
 EXIT_CONFIG="/etc/x-node/config.json"
@@ -957,6 +967,9 @@ fi
 if [ "$YGG_PROTO" = "wss" ] && [ "$YGG_PORT" -gt 0 ]; then
     command -v nginx >/dev/null 2>&1 || need_packages=1
     command -v openssl >/dev/null 2>&1 || need_packages=1
+    if command -v nginx >/dev/null 2>&1; then
+        NGINX_WAS_INSTALLED=1
+    fi
 fi
 if [ "$need_packages" -eq 1 ]; then
     apt-get update -y
@@ -1643,18 +1656,21 @@ if [ -f "$STATE_DIR/install.json" ]; then
     previous_backup="$(manifest_get yggConfBackup)"
     [ -z "$previous_was_installed" ] || YGGDRASIL_WAS_INSTALLED="$previous_was_installed"
     [ -z "$previous_backup" ] || YGG_CONF_BACKUP="$previous_backup"
+    previous_nginx="$(manifest_get nginxWasInstalled)"
+    [ -z "$previous_nginx" ] || NGINX_WAS_INSTALLED="$previous_nginx"
 fi
 python3 - "$STATE_DIR/install.json" "$INSTALLED_YGG_VERSION" "$YGGDRASIL_WAS_INSTALLED" \
     "$YGG_CONF" "$YGG_CONF_BACKUP" "$YGG_PORT" "$YGG_PROTO" "$YGG_WS_PORT" \
     "$SOCKS_PORT" "$API_PORT" "$PEER_URI" "$DNS_ENABLED" "$DNS_PORT" \
-    "$DNS_WEB_PORT" "$ALFIS_VERSION" "$ALFIS_INSTALLED" <<'PY'
+    "$DNS_WEB_PORT" "$ALFIS_VERSION" "$ALFIS_INSTALLED" "$NGINX_WAS_INSTALLED" <<'PY'
 import datetime
 import json
 import sys
 
 (path, version, was_installed, ygg_conf, ygg_backup,
  listen_port, listen_proto, ws_port, socks_port, api_port, peer_uri,
- dns_enabled, dns_port, dns_web_port, alfis_version, alfis_installed) = sys.argv[1:17]
+ dns_enabled, dns_port, dns_web_port, alfis_version, alfis_installed,
+ nginx_was_installed) = sys.argv[1:18]
 manifest = {
     "version": 2,
     "installedAt": datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -1673,6 +1689,7 @@ manifest = {
     "dnsWebPort": int(dns_web_port),
     "alfisVersion": alfis_version,
     "alfisInstalled": alfis_installed == "1",
+    "nginxWasInstalled": nginx_was_installed == "1",
     "serviceUser": "x-node",
     "stateDir": "/var/lib/x-node",
     "dnsStateDir": "/var/lib/x-node-dns",

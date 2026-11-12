@@ -21,6 +21,10 @@ LISTEN_PROTO=""
 WAS_INSTALLED="0"
 DNS_ENABLED="0"
 ALFIS_INSTALLED="0"
+# 1 means "leave the package alone": without a manifest entry the installer
+# that ran before this option existed may or may not have added nginx, and
+# removing a web server that serves other sites is worse than leaving it.
+NGINX_WAS_INSTALLED="1"
 
 ASSUME_YES=0
 PURGE=0
@@ -45,8 +49,10 @@ Usage:
   sudo ./uninstall.sh [options]
 
 Options:
-  --purge             also delete /var/lib/x-node and remove the Yggdrasil
-                      package together with its configuration
+  --purge             also delete /var/lib/x-node and the backups in
+                      /var/backups, remove the Yggdrasil package with its
+                      configuration and user, and remove nginx when this
+                      installer added it and it serves nothing else
   --keep-state        keep /var/lib/x-node (the default without --purge)
   --keep-yggdrasil    never touch the Yggdrasil package or its configuration,
                       even with --purge
@@ -116,6 +122,8 @@ if [ -f "$MANIFEST" ]; then
     WAS_INSTALLED="$(manifest_get yggdrasilWasInstalled)"
     DNS_ENABLED="$(manifest_get dnsEnabled)"
     ALFIS_INSTALLED="$(manifest_get alfisInstalled)"
+    manifest_nginx="$(manifest_get nginxWasInstalled)"
+    [ -z "$manifest_nginx" ] || NGINX_WAS_INSTALLED="$manifest_nginx"
 fi
 [ -n "$YGG_CONF" ] || YGG_CONF="/etc/yggdrasil/yggdrasil.conf"
 [ -n "$LISTEN_PORT" ] || LISTEN_PORT=0
@@ -183,9 +191,28 @@ if [ -f /etc/nginx/sites-enabled/x-node.conf ] || [ -f /etc/nginx/sites-availabl
     log "Removing the nginx sites"
     rm -f /etc/nginx/sites-enabled/x-node.conf /etc/nginx/sites-available/x-node.conf \
           /etc/nginx/sites-enabled/x-node-http.conf /etc/nginx/sites-available/x-node-http.conf
-    rm -rf /var/www/x-node
     if command -v nginx >/dev/null 2>&1 && nginx -t >/dev/null 2>&1; then
         systemctl reload nginx 2>/dev/null || true
+    fi
+fi
+# The stub page belongs to X-Node even when the site file was already gone.
+rm -rf /var/www/x-node
+
+# A full removal also takes the web server this installer added, but only when
+# it did add it and nginx serves nothing else now: an operator who installed
+# nginx before X-Node, or put another site on it, keeps the package.
+if [ "$PURGE" -eq 1 ] && [ "$NGINX_WAS_INSTALLED" = "0" ] && command -v nginx >/dev/null 2>&1; then
+    leftover_sites="$(find /etc/nginx/sites-enabled -mindepth 1 -maxdepth 1 ! -name default 2>/dev/null | head -n 1 || true)"
+    leftover_conf="$(find /etc/nginx/conf.d -mindepth 1 -maxdepth 1 2>/dev/null | head -n 1 || true)"
+    if [ -z "$leftover_sites" ] && [ -z "$leftover_conf" ]; then
+        log "Removing nginx installed by this installer"
+        systemctl disable --now nginx 2>/dev/null || true
+        if ! DEBIAN_FRONTEND=noninteractive apt-get purge -y nginx nginx-common; then
+            warn "apt-get could not remove nginx; remove it manually with: apt-get purge nginx nginx-common"
+        fi
+        rm -rf /etc/nginx
+    else
+        warn "nginx serves other sites; keeping the package"
     fi
 fi
 
@@ -222,6 +249,17 @@ else
     fi
 fi
 
+# A purge leaves nothing behind, including the copies the installer and the
+# dashboard made before rewriting a configuration file. The Yggdrasil backups
+# stay when the package stays: they are the operator's original configuration.
+if [ "$PURGE" -eq 1 ]; then
+    log "Removing the configuration backups"
+    rm -f /var/backups/x-node.config.* /var/backups/alfis.conf.*
+    if [ "$KEEP_YGGDRASIL" -eq 0 ]; then
+        rm -f /var/backups/yggdrasil.conf.*
+    fi
+fi
+
 if id -u "$SERVICE_USER" >/dev/null 2>&1; then
     log "Removing the $SERVICE_USER user"
     userdel "$SERVICE_USER" 2>/dev/null || warn "could not remove the user $SERVICE_USER; stop its processes first"
@@ -237,6 +275,14 @@ if [ "$KEEP_YGGDRASIL" -eq 0 ]; then
         warn "apt-get could not remove yggdrasil; remove it manually with: apt-get purge yggdrasil"
     fi
     rm -rf /etc/yggdrasil /var/lib/yggdrasil
+    # apt-get purge keeps the service account the package created, and a
+    # removed Yggdrasil has no use for it.
+    if getent passwd yggdrasil >/dev/null 2>&1; then
+        userdel yggdrasil 2>/dev/null || warn "could not remove the yggdrasil user"
+    fi
+    if getent group yggdrasil >/dev/null 2>&1; then
+        groupdel yggdrasil 2>/dev/null || warn "could not remove the yggdrasil group"
+    fi
 else
     log "Keeping Yggdrasil"
     if [ "$WAS_INSTALLED" = "1" ] && [ -n "$YGG_BACKUP" ] && [ -f "$YGG_BACKUP" ]; then
@@ -289,9 +335,9 @@ cat <<EOF
   DNS:       $([ "$ALFIS_INSTALLED" = "1" ] && echo "Alfis binary and unit removed" || echo "not installed by this installer")
   State:     $([ "$KEEP_STATE" -eq 0 ] && echo "removed ($STATE_DIR)" || echo "kept ($STATE_DIR)")
   Yggdrasil: $([ "$KEEP_YGGDRASIL" -eq 0 ] && echo "removed" || echo "kept")
+  Backups:   $([ "$PURGE" -eq 1 ] && echo "removed (/var/backups)" || echo "in /var/backups/")
 
-  Backups of the old configurations are in /var/backups/.
-  If Yggdrasil was kept, check that its Listen and Peers lists are what you
-  expect: systemctl restart yggdrasil
+  $([ "$KEEP_YGGDRASIL" -eq 0 ] && echo "Yggdrasil was removed together with its package, user and configuration." || echo "If Yggdrasil was kept, check that its Listen and Peers lists are what you
+  expect: systemctl restart yggdrasil")
 
 EOF

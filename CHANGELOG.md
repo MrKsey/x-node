@@ -4,6 +4,13 @@ All notable changes to X-Node are documented here. The format is based on [Keep 
 
 The release workflow publishes the section of the tag as the GitHub release body, so every release has a short human-readable summary of what changed. Keep each bullet on a single line: GitHub turns every newline in a release body into a hard break, so a wrapped bullet would render as a narrow column instead of using the full width.
 
+## [1.7.18] — 2026-11-12
+
+### Fixed
+
+- `--purge` leaves a clean server. It removes the `yggdrasil` user and group the package purge keeps, the `x-node.config.*`, `alfis.conf.*` and `yggdrasil.conf.*` copies in `/var/backups`, and nginx when this installer added it and it serves nothing else; the installer records the nginx package in the manifest so a web server that was already on the machine stays.
+- The one-line installer removes its unpacked release from `/tmp` when it finishes instead of leaving a `tmp.XXXXXXXXXX` directory behind on every run.
+
 ## [1.7.17] — 2026-11-11
 
 ### Fixed

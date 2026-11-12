@@ -380,7 +380,7 @@ The options are the same as in the local `uninstall.sh`:
 | Option | Purpose |
 | --- | --- |
 | `--yes` | no interactive questions |
-| `--purge` | also remove `/var/lib/x-node` and the Yggdrasil package |
+| `--purge` | also remove `/var/lib/x-node`, the backups in `/var/backups`, the Yggdrasil package with its user, and nginx when this installer added it |
 | `--keep-state` | keep `/var/lib/x-node` (the default) |
 | `--keep-yggdrasil` | never touch Yggdrasil, even with `--purge` |
 

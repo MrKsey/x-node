@@ -380,7 +380,7 @@ curl -fsSL https://raw.githubusercontent.com/MrKsey/x-node/main/uninstall.sh | s
 | Параметр | Назначение |
 | --- | --- |
 | `--yes` | без интерактивных вопросов |
-| `--purge` | удалить также `/var/lib/x-node` и пакет Yggdrasil |
+| `--purge` | удалить также `/var/lib/x-node`, резервные копии в `/var/backups`, пакет Yggdrasil вместе с пользователем и nginx, если его установил этот установщик |
 | `--keep-state` | сохранить `/var/lib/x-node` (по умолчанию) |
 | `--keep-yggdrasil` | не трогать Yggdrasil даже при `--purge` |
 
