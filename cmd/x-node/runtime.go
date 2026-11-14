@@ -27,6 +27,12 @@ type runtimeClient struct {
 	LastSeenAt   time.Time `json:"lastSeenAt"`
 	Destinations []string  `json:"destinations,omitempty"`
 
+	// openTargets counts the open connections per destination. Destinations is
+	// its published projection: a target leaves the list when its last
+	// connection closes, so the popover never shows destinations of
+	// connections that are already gone.
+	openTargets map[string]int
+
 	// Refused counts the connections the limits turned away since the service
 	// started. QuotaRefused is the part caused by a traffic quota and
 	// SuspendedRefused the part caused by the operator's block, so a client can
@@ -116,6 +122,29 @@ func (t *runtimeTracker) shutdown() {
 	_ = os.Remove(t.path)
 }
 
+// runtimeDestinationsMax caps the published destination list. The live file is
+// rewritten every heartbeat, so a client with hundreds of open connections
+// must not make it grow without a bound.
+const runtimeDestinationsMax = 8
+
+// refreshDestinations rebuilds the published list from the open connections.
+// The order is sorted to keep the published file stable between heartbeats.
+func (c *runtimeClient) refreshDestinations() {
+	if len(c.openTargets) == 0 {
+		c.Destinations = nil
+		return
+	}
+	targets := make([]string, 0, len(c.openTargets))
+	for target := range c.openTargets {
+		targets = append(targets, target)
+	}
+	sort.Strings(targets)
+	if len(targets) > runtimeDestinationsMax {
+		targets = targets[:runtimeDestinationsMax]
+	}
+	c.Destinations = targets
+}
+
 func (t *runtimeTracker) open(ip net.IP, target string) {
 	if ip == nil {
 		return
@@ -130,16 +159,15 @@ func (t *runtimeTracker) open(ip net.IP, target string) {
 	}
 	client.Connections++
 	client.LastSeenAt = now
-	if target != "" && len(client.Destinations) < 8 {
-		known := false
-		for _, item := range client.Destinations {
-			if item == target {
-				known = true
-				break
-			}
+	if target != "" {
+		if client.openTargets == nil {
+			client.openTargets = make(map[string]int)
 		}
-		if !known {
-			client.Destinations = append(client.Destinations, target)
+		client.openTargets[target]++
+		// Rebuild only when the set of targets changes, not on every extra
+		// connection to a destination that is already listed.
+		if client.openTargets[target] == 1 {
+			client.refreshDestinations()
 		}
 	}
 	t.total++
@@ -147,7 +175,7 @@ func (t *runtimeTracker) open(ip net.IP, target string) {
 	t.mu.Unlock()
 }
 
-func (t *runtimeTracker) close(ip net.IP) {
+func (t *runtimeTracker) close(ip net.IP, target string) {
 	if ip == nil {
 		return
 	}
@@ -157,8 +185,19 @@ func (t *runtimeTracker) close(ip net.IP) {
 	if client, ok := t.clients[key]; ok {
 		if client.Connections > 1 {
 			client.Connections--
+			if target != "" {
+				switch client.openTargets[target] {
+				case 0:
+				case 1:
+					delete(client.openTargets, target)
+					client.refreshDestinations()
+				default:
+					client.openTargets[target]--
+				}
+			}
 		} else {
 			client.Connections = 0
+			client.openTargets = nil
 			client.Destinations = nil
 			client.Since = time.Time{}
 		}

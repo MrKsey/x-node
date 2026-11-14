@@ -343,7 +343,7 @@ func (s *socksServer) serveConnect(conn net.Conn, source net.IP, request socksRe
 	s.log.debug("client %s -> %s established", name, target)
 	if s.tracker != nil {
 		s.tracker.open(source, target)
-		defer s.tracker.close(source)
+		defer s.tracker.close(source, target)
 	}
 	if s.usage != nil {
 		s.usage.addConnection(source)

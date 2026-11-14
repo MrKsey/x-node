@@ -4,6 +4,12 @@ All notable changes to X-Node are documented here. The format is based on [Keep 
 
 The release workflow publishes the section of the tag as the GitHub release body, so every release has a short human-readable summary of what changed. Keep each bullet on a single line: GitHub turns every newline in a release body into a hard break, so a wrapped bullet would render as a narrow column instead of using the full width.
 
+## [1.7.19] — 2026-11-14
+
+### Fixed
+
+- The **Destinations** list in the client popover shows the destinations of the open connections only. A closed connection used to leave its target in the list until the last connection of that client closed, so the popover could list three destinations while the row said `TCP = 1`. The heading now reads **Open destinations**, and a target disappears as soon as its own connection ends.
+
 ## [1.7.18] — 2026-11-12
 
 ### Fixed

@@ -37,7 +37,7 @@ func TestRuntimeTrackerPublishesConnections(t *testing.T) {
 		t.Fatalf("destinations = %v", got)
 	}
 
-	tracker.close(first)
+	tracker.close(first, "1.1.1.1:443")
 	tracker.flush(true)
 	doc, err = readRuntime(cfg.statePath(runtimeFileName))
 	if err != nil {
@@ -51,6 +51,33 @@ func TestRuntimeTrackerPublishesConnections(t *testing.T) {
 	if doc, err := readRuntime(cfg.statePath(runtimeFileName)); err != nil || doc != nil {
 		t.Fatalf("runtime file must be removed on shutdown: doc=%+v err=%v", doc, err)
 	}
+}
+
+func TestRuntimeTrackerDropsClosedDestinations(t *testing.T) {
+	cfg := testConfig(t)
+	tracker := newRuntimeTracker(cfg, newLogger("error"))
+	client := testAddr(t, 3)
+
+	tracker.open(client, "1.1.1.1:443")
+	tracker.open(client, "example.com:80")
+	tracker.open(client, "example.org:443")
+	tracker.close(client, "1.1.1.1:443")
+	tracker.close(client, "example.com:80")
+
+	live := tracker.live(client)
+	if live.Connections != 1 {
+		t.Fatalf("connections = %d, want 1", live.Connections)
+	}
+	if got := live.Destinations; len(got) != 1 || got[0] != "example.org:443" {
+		t.Fatalf("destinations = %v, want only the open one", got)
+	}
+
+	tracker.close(client, "example.org:443")
+	live = tracker.live(client)
+	if live.Connections != 0 || len(live.Destinations) != 0 {
+		t.Fatalf("a closed client keeps no destinations: %+v", live)
+	}
+	tracker.shutdown()
 }
 
 func TestRuntimeTrackerCountsRefusals(t *testing.T) {

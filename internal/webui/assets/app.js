@@ -1421,7 +1421,7 @@ function clientDetailsHtml(client) {
     ["Suspended", client.suspended ? "yes — the operator blocked this client" : "no"],
   ];
   const destinations = (client.destinations || []).length
-    ? `<div class="popover-dest"><span class="muted">Destinations</span><div class="mono small">${client.destinations.map(escapeHtml).join("<br>")}</div></div>`
+    ? `<div class="popover-dest"><span class="muted">Open destinations</span><div class="mono small">${client.destinations.map(escapeHtml).join("<br>")}</div></div>`
     : "";
   return `
     <header>
