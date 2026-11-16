@@ -1275,12 +1275,17 @@ window.addEventListener("resize", () => {
 function clientsHtml() {
   const rows = state.clients.map((client) => clientRowHtml(client)).join("");
   const defaults = (state.settings && state.settings.quotas) || {};
+  // The switch is on by default: an installation that never touched it keeps
+  // letting the apps name themselves.
+  const labelsAllowed = !state.settings || state.settings.clientLabels !== false;
   return `
     <div class="card section">
       <header>
         <h3>Registered clients</h3>
         <span class="muted small" id="clients-count">${state.clients.length} total</span>
       </header>
+      <label class="switch"><input type="checkbox" id="client-labels" ${labelsAllowed ? "checked" : ""}><span>Allow clients to change labels</span></label>
+      <p class="hint">When this is on, an app can set its own label on this exit node, up to 32 characters. The device name is used when the app does not send one.</p>
       ${state.clients.length ? `<div class="table-wrap"><table class="cards">
         <colgroup>
           <col class="col-client"><col class="col-state">
@@ -1304,7 +1309,7 @@ function clientsHtml() {
       <p class="hint">The address is the Yggdrasil node address of the device. Prefer an invite: it also issues an API token.</p>
       <form id="add-client" class="row">
         <input class="grow" id="add-address" placeholder="201:1ba8:15c:b1be:7555:b3d7:7651:8e2e" required>
-        <input id="add-label" placeholder="label (optional)">
+        <input id="add-label" placeholder="label (optional)" maxlength="32">
         <button class="btn primary" type="submit">Add</button>
       </form>
     </div>
@@ -1653,6 +1658,23 @@ async function refreshClientRows() {
 }
 
 function wireClients() {
+  const labels = $("#client-labels");
+  if (labels) {
+    labels.addEventListener("change", async (event) => {
+      const enabled = event.target.checked;
+      try {
+        await api("PUT", "api/settings", { clientLabels: enabled });
+        if (state.settings) state.settings.clientLabels = enabled;
+        toast(enabled
+          ? "Clients can change their labels"
+          : "Only the operator can change labels");
+      } catch (err) {
+        event.target.checked = !enabled;
+        toast(err.message, true);
+      }
+    });
+  }
+
   $("#add-client").addEventListener("submit", async (event) => {
     event.preventDefault();
     try {
@@ -1706,7 +1728,7 @@ function openClientEditor(address) {
     <form class="card section editor" id="client-form">
       <header><h3>${escapeHtml(bracketIPv6(client.address))}</h3></header>
       <div class="form-grid">
-        <label class="field"><span>Label</span><input id="e-label" value="${escapeHtml(client.label || "")}" placeholder="family phone"></label>
+        <label class="field"><span>Label</span><input id="e-label" value="${escapeHtml(client.label || "")}" placeholder="family phone" maxlength="32"></label>
         <label class="field"><span>Monthly cap (MB, 0 = none)</span><input id="e-monthly" type="number" min="0" step="1" value="${initialQuota.monthly}"></label>
         <label class="field"><span>Daily cap (MB, 0 = none)</span><input id="e-daily" type="number" min="0" step="1" value="${initialQuota.daily}"></label>
         <label class="field"><span>Download (Mbps, 0 = none)</span><input id="e-down" type="number" min="0" step="1" value="${initialQuota.down}"></label>
@@ -2612,7 +2634,7 @@ function configHtml() {
   return `
     <div class="card section config-card">
       <header><h3>Configuration files</h3><span class="muted small" id="config-status"></span></header>
-      <p class="hint">The file is validated before it replaces the current one; a backup is written to /var/backups. Applying the main configuration removes the dashboard overlay, so the file becomes the only source of truth. A restart applies a saved file to the running service.</p>
+      <p class="hint">The file is validated before it replaces the current one; a backup is written to /var/backups. The main configuration is shown with the dashboard overlay already merged in, so the editor contains the values the service is running with. Saving writes them into the file, and a restart applies it: the Settings tab keeps its values.</p>
       <div class="config-toolbar">
         <select id="config-file">
           ${files.map((file) => `<option value="${escapeHtml(file.id)}">${escapeHtml(file.path)}</option>`).join("")}
@@ -2639,7 +2661,9 @@ function wireConfig() {
       const data = await api("GET", "api/config?file=" + encodeURIComponent(file));
       $("#config-content").value = data.content || "";
       $("#config-path").textContent = data.path + " · " + bytes(data.size) + " · modified " + when(data.modified);
-      status.textContent = data.helper ? "" : "root helper missing";
+      status.textContent = data.helper
+        ? (data.effective ? "effective settings" : "")
+        : "root helper missing";
     } catch (err) {
       status.textContent = err.message;
       toast(err.message, true);

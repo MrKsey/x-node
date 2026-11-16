@@ -17,7 +17,7 @@ import (
 
 // daemonVersion is stamped by build.sh (-ldflags -X main.daemonVersion=...).
 // The default is what a plain "go build" reports.
-var daemonVersion = "1.7.19"
+var daemonVersion = "1.7.20"
 
 type apiServer struct {
 	cfg     Config
@@ -68,6 +68,9 @@ type registerRequest struct {
 	PublicKey  string `json:"publicKey"`
 	DeviceName string `json:"deviceName"`
 	AppVersion string `json:"appVersion"`
+	// Label is the name the client wants to show on the exit node. It is
+	// applied only while the operator allows clients to change their labels.
+	Label string `json:"label"`
 }
 
 type registerResponse struct {
@@ -178,6 +181,7 @@ func (a *apiServer) handler() http.Handler {
 	mux.HandleFunc("/v1/register", a.guard(a.handleRegister, a.registerLimit))
 	mux.HandleFunc("/v1/status", a.guard(a.handleStatus, a.generalLimit))
 	mux.HandleFunc("/v1/token", a.guard(a.handleToken, a.tokenLimit))
+	mux.HandleFunc("/v1/label", a.guard(a.handleLabel, a.generalLimit))
 	mux.HandleFunc("/v1/health", a.guard(a.handleHealth, a.generalLimit))
 	return mux
 }
@@ -372,6 +376,60 @@ func (a *apiServer) handleToken(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+type labelRequest struct {
+	Label string `json:"label"`
+}
+
+// handleLabel lets an allowlisted client rename itself. The Yggdrasil source
+// address is the credential: it is derived from the node key and cannot be
+// spoofed, so a client can only change its own label. The operator can turn the
+// feature off in the dashboard; the label is always limited to
+// maxClientLabelLen characters.
+func (a *apiServer) handleLabel(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, errorResponse{Error: "method_not_allowed"})
+		return
+	}
+	source := remoteIP(r)
+	if !isYggAddress(source) {
+		writeJSON(w, http.StatusForbidden, errorResponse{Error: "not_yggdrasil"})
+		return
+	}
+	if !a.config().ClientLabels {
+		writeJSON(w, http.StatusForbidden, errorResponse{Error: "labels_disabled"})
+		return
+	}
+	if a.config().AllowAll {
+		// Open mode keeps no allowlist entries to rename.
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "label": ""})
+		return
+	}
+	if !a.store.Allowed(source) {
+		writeJSON(w, http.StatusForbidden, errorResponse{Error: "not_allowed"})
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 4<<10)
+	var request labelRequest
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "bad_request", Message: err.Error()})
+		return
+	}
+	client, err := a.store.SetClientLabel(source, request.Label)
+	if err != nil {
+		code := http.StatusBadRequest
+		name := "bad_label"
+		if errors.Is(err, errNotAllowed) {
+			code, name = http.StatusForbidden, "not_allowed"
+		}
+		writeJSON(w, code, errorResponse{Error: name, Message: err.Error()})
+		return
+	}
+	a.log.info("label of %s changed to %q", source, client.Label)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "label": client.Label})
+}
+
 func (a *apiServer) handleRegister(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, errorResponse{Error: "method_not_allowed"})
@@ -423,6 +481,20 @@ func (a *apiServer) handleRegister(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// A client may name itself. The request is validated before the invite is
+	// redeemed, so a bad label cannot consume a one-time invite. With the
+	// switch off the field is ignored instead of refusing the registration: an
+	// app that sends a long name must still be able to connect.
+	requestedLabel := ""
+	if a.config().ClientLabels {
+		label, labelErr := cleanClientLabel(req.Label)
+		if labelErr != nil {
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "bad_label", Message: labelErr.Error()})
+			return
+		}
+		requestedLabel = label
+	}
+
 	if a.config().AllowAll {
 		writeJSON(w, http.StatusOK, registerResponse{
 			OK:           true,
@@ -457,6 +529,15 @@ func (a *apiServer) handleRegister(w http.ResponseWriter, r *http.Request) {
 		a.log.warn("registration from %s refused: %s (%s)", source, name, err)
 		writeJSON(w, code, errorResponse{Error: name, Message: err.Error()})
 		return
+	}
+
+	if a.config().ClientLabels && requestedLabel != "" {
+		updated, err := a.store.SetClientLabel(source, requestedLabel)
+		if err != nil {
+			a.log.warn("registration from %s: could not apply the label %q: %v", source, requestedLabel, err)
+		} else {
+			client = updated
+		}
 	}
 
 	// A token is issued only to a client that has none. The app registers on

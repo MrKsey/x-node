@@ -206,14 +206,19 @@ func (w *webServer) handleConfigGet(rw http.ResponseWriter, r *http.Request) {
 			writeJSON(rw, http.StatusInternalServerError, errorResponse{Error: "read_failed", Message: err.Error()})
 			return
 		}
+		content, effective := data.Content, false
+		if file == "main" {
+			content, effective = mergeConfigOverlay(content, w.live.get().statePath(settingsFileName))
+		}
 		writeJSON(rw, http.StatusOK, map[string]any{
-			"ok":       true,
-			"file":     file,
-			"path":     data.Path,
-			"content":  data.Content,
-			"size":     data.Size,
-			"modified": data.Modified,
-			"helper":   true,
+			"ok":        true,
+			"file":      file,
+			"path":      data.Path,
+			"content":   content,
+			"size":      len(content),
+			"modified":  data.Modified,
+			"helper":    true,
+			"effective": effective,
 		})
 		return
 	}
@@ -227,15 +232,54 @@ func (w *webServer) handleConfigGet(rw http.ResponseWriter, r *http.Request) {
 	if info != nil {
 		modified = info.ModTime()
 	}
+	content, effective := string(raw), false
+	if file == "main" {
+		content, effective = mergeConfigOverlay(content, w.live.get().statePath(settingsFileName))
+	}
 	writeJSON(rw, http.StatusOK, map[string]any{
-		"ok":       true,
-		"file":     file,
-		"path":     path,
-		"content":  string(raw),
-		"size":     len(raw),
-		"modified": modified,
-		"helper":   false,
+		"ok":        true,
+		"file":      file,
+		"path":      path,
+		"content":   content,
+		"size":      len(raw),
+		"modified":  modified,
+		"helper":    false,
+		"effective": effective,
 	})
+}
+
+// mergeConfigOverlay shows the main configuration as the service actually runs
+// it: the dashboard overlay in the state directory is merged over the file.
+// Without this the editor showed the bare /etc/x-node/config.json, and saving
+// that document silently dropped every setting changed on the Settings tab.
+//
+// Only top-level keys are merged, which matches how the overlay is written: it
+// stores whole sections such as "web" or "dns". Unknown keys of the file are
+// kept, so a hand-written option the dashboard does not know survives an edit.
+func mergeConfigOverlay(base, overlayPath string) (string, bool) {
+	if strings.TrimSpace(overlayPath) == "" {
+		return base, false
+	}
+	overlay, err := os.ReadFile(overlayPath)
+	if err != nil {
+		return base, false
+	}
+	var document map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(base), &document); err != nil {
+		return base, false
+	}
+	var patch map[string]json.RawMessage
+	if err := json.Unmarshal(overlay, &patch); err != nil {
+		return base, false
+	}
+	for key, value := range patch {
+		document[key] = value
+	}
+	merged, err := json.MarshalIndent(document, "", "  ")
+	if err != nil {
+		return base, false
+	}
+	return string(merged) + "\n", true
 }
 
 type configRequest struct {
@@ -244,8 +288,9 @@ type configRequest struct {
 }
 
 // handleConfigPut validates the document in the helper and replaces the file.
-// For the main configuration the web overlay is removed: after "apply" the
-// file is the only source of truth, so the operator sees exactly what runs.
+// For the main configuration the web overlay is removed: the editor shows the
+// effective document (file + overlay), so the written file already carries every
+// dashboard setting and the overlay would only duplicate it.
 func (w *webServer) handleConfigPut(rw http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
 		writeJSON(rw, http.StatusMethodNotAllowed, errorResponse{Error: "method_not_allowed"})

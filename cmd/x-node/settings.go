@@ -76,6 +76,7 @@ func saveSettingsOverlay(cfg Config) error {
 		"name":                   cfg.Name,
 		"allowAll":               cfg.AllowAll,
 		"registration":           cfg.Registration,
+		"clientLabels":           cfg.ClientLabels,
 		"inviteTTL":              cfg.InviteTTL,
 		"inviteUses":             cfg.InviteUses,
 		"maxClients":             cfg.MaxClients,

@@ -5,6 +5,7 @@
   "apiPort": 0,
   "allowAll": false,
   "registration": true,
+  "clientLabels": true,
   "inviteTTL": "24h",
   "inviteUses": 1,
   "maxClients": 64,

@@ -98,6 +98,94 @@ func registerAt(t *testing.T, api *apiServer, source net.IP, invite, device stri
 	return response
 }
 
+// A client may set its own label while the operator allows it. The label is
+// limited to 32 characters and the source address decides whose label changes.
+func TestAPIClientLabel(t *testing.T) {
+	cfg := testConfig(t)
+	store, err := openStore(cfg, newLogger("error"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	api := newAPIServer(cfg, store, nil, newLogger("error"))
+	source := testAddr(t, 21)
+	invite, _, err := store.NewInvite("", time.Hour, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	body, _ := json.Marshal(registerRequest{
+		Invite:     invite,
+		Address:    source.String(),
+		DeviceName: "phone",
+		Label:      "My phone",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/register", bytes.NewReader(body))
+	req.RemoteAddr = "[" + source.String() + "]:40000"
+	rec := httptest.NewRecorder()
+	api.handleRegister(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("register status = %d, body %s", rec.Code, rec.Body.String())
+	}
+	if client, _ := store.Get(source); client.Label != "My phone" {
+		t.Fatalf("label after registration = %q", client.Label)
+	}
+
+	body, _ = json.Marshal(labelRequest{Label: "Renamed"})
+	req = httptest.NewRequest(http.MethodPost, "/v1/label", bytes.NewReader(body))
+	req.RemoteAddr = "[" + source.String() + "]:40000"
+	rec = httptest.NewRecorder()
+	api.handleLabel(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("label status = %d, body %s", rec.Code, rec.Body.String())
+	}
+	if client, _ := store.Get(source); client.Label != "Renamed" {
+		t.Fatalf("label after /v1/label = %q", client.Label)
+	}
+
+	api.cfg.ClientLabels = false
+	body, _ = json.Marshal(labelRequest{Label: "Blocked"})
+	req = httptest.NewRequest(http.MethodPost, "/v1/label", bytes.NewReader(body))
+	req.RemoteAddr = "[" + source.String() + "]:40000"
+	rec = httptest.NewRecorder()
+	api.handleLabel(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("label with the switch off = %d, want 403", rec.Code)
+	}
+	if client, _ := store.Get(source); client.Label != "Renamed" {
+		t.Fatalf("a disabled switch changed the label to %q", client.Label)
+	}
+}
+
+// A label longer than the limit must be refused before the invite is consumed:
+// a typo in the app must not burn a one-time invite.
+func TestAPIClientLabelTooLong(t *testing.T) {
+	cfg := testConfig(t)
+	store, err := openStore(cfg, newLogger("error"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	api := newAPIServer(cfg, store, nil, newLogger("error"))
+	source := testAddr(t, 22)
+	invite, _, err := store.NewInvite("", time.Hour, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := json.Marshal(registerRequest{
+		Invite: invite,
+		Label:  "123456789012345678901234567890123",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/register", bytes.NewReader(body))
+	req.RemoteAddr = "[" + source.String() + "]:40000"
+	rec := httptest.NewRecorder()
+	api.handleRegister(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("long label status = %d, body %s", rec.Code, rec.Body.String())
+	}
+	if store.Allowed(source) {
+		t.Fatal("a refused label still consumed the invite")
+	}
+}
+
 // The app registers on every connect to refresh its device name and version.
 // That call used to rotate the API token, so the credential in the profile
 // changed on every reconnect and a token issued by the operator in the

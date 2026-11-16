@@ -937,6 +937,10 @@ func (w *webServer) handleClientAdd(rw http.ResponseWriter, r *http.Request) {
 	}
 	client, existed, err := w.store.AddClient(ip, strings.TrimSpace(request.Label))
 	if err != nil {
+		if errors.Is(err, errLabelTooLong) {
+			writeJSON(rw, http.StatusBadRequest, errorResponse{Error: "bad_label", Message: err.Error()})
+			return
+		}
 		writeJSON(rw, http.StatusInternalServerError, errorResponse{Error: "store_failed", Message: err.Error()})
 		return
 	}
@@ -960,6 +964,10 @@ func (w *webServer) handleClientUpdate(rw http.ResponseWriter, r *http.Request, 
 	if err != nil {
 		if errors.Is(err, errNotAllowed) {
 			writeJSON(rw, http.StatusNotFound, errorResponse{Error: "not_found"})
+			return
+		}
+		if errors.Is(err, errLabelTooLong) {
+			writeJSON(rw, http.StatusBadRequest, errorResponse{Error: "bad_label", Message: err.Error()})
 			return
 		}
 		writeJSON(rw, http.StatusInternalServerError, errorResponse{Error: "store_failed", Message: err.Error()})
@@ -1284,6 +1292,7 @@ type webSettingsView struct {
 	APIPort            int           `json:"apiPort"`
 	AllowAll           bool          `json:"allowAll"`
 	Registration       bool          `json:"registration"`
+	ClientLabels       bool          `json:"clientLabels"`
 	InviteTTL          string        `json:"inviteTTL"`
 	InviteUses         int           `json:"inviteUses"`
 	MaxClients         int           `json:"maxClients"`
@@ -1316,6 +1325,7 @@ func (w *webServer) handleSettingsGet(rw http.ResponseWriter, r *http.Request) {
 		APIPort:            cfg.APIPort,
 		AllowAll:           cfg.AllowAll,
 		Registration:       cfg.Registration,
+		ClientLabels:       cfg.ClientLabels,
 		InviteTTL:          cfg.InviteTTL,
 		InviteUses:         cfg.InviteUses,
 		MaxClients:         cfg.MaxClients,
@@ -1346,6 +1356,7 @@ type settingsPatch struct {
 	Name               *string        `json:"name"`
 	AllowAll           *bool          `json:"allowAll"`
 	Registration       *bool          `json:"registration"`
+	ClientLabels       *bool          `json:"clientLabels"`
 	InviteTTL          *string        `json:"inviteTTL"`
 	InviteUses         *int           `json:"inviteUses"`
 	MaxClients         *int           `json:"maxClients"`
@@ -1406,6 +1417,9 @@ func (w *webServer) handleSettingsPut(rw http.ResponseWriter, r *http.Request) {
 	}
 	if patch.Registration != nil {
 		next.Registration = *patch.Registration
+	}
+	if patch.ClientLabels != nil {
+		next.ClientLabels = *patch.ClientLabels
 	}
 	if patch.InviteTTL != nil {
 		next.InviteTTL = strings.TrimSpace(*patch.InviteTTL)

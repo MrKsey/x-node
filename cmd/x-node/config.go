@@ -16,12 +16,16 @@ import (
 // it, the service only reads it. Every duration is a Go duration string so the
 // file stays readable ("24h", "15s").
 type Config struct {
-	Name              string `json:"name"`
-	ListenAddress     string `json:"listenAddress"`
-	SocksPort         int    `json:"socksPort"`
-	APIPort           int    `json:"apiPort"`
-	AllowAll          bool   `json:"allowAll"`
-	Registration      bool   `json:"registration"`
+	Name          string `json:"name"`
+	ListenAddress string `json:"listenAddress"`
+	SocksPort     int    `json:"socksPort"`
+	APIPort       int    `json:"apiPort"`
+	AllowAll      bool   `json:"allowAll"`
+	Registration  bool   `json:"registration"`
+	// ClientLabels lets an allowlisted client change its own label through the
+	// API. The label is limited to maxClientLabelLen characters. When the switch
+	// is off, only the operator can rename a client.
+	ClientLabels      bool   `json:"clientLabels"`
 	InviteTTL         string `json:"inviteTTL"`
 	InviteUses        int    `json:"inviteUses"`
 	MaxClients        int    `json:"maxClients"`
@@ -292,6 +296,7 @@ func defaultConfig() Config {
 		SocksPort:              1080,
 		APIPort:                0,
 		Registration:           true,
+		ClientLabels:           true,
 		InviteTTL:              "24h",
 		InviteUses:             1,
 		MaxClients:             64,

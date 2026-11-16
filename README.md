@@ -183,10 +183,10 @@ If the archive has no bundled binary and Alfis cannot be downloaded during the i
 X-Node provides a web interface and a CLI. The web panel includes the following sections:
 
 - **Dashboard** — server state, traffic statistics, peers, quotas, the DNS server and the main node parameters.
-- **Clients** — the list of registered clients, device details, statistics, access and limit management.
+- **Clients** — the list of registered clients, device details, statistics, access and limit management. The **Allow clients to change labels** switch (on by default) lets an app set its own label, up to 32 characters; the device name is used when the app does not send one.
 - **Invites** — creating and revoking invites, setting the expiry time and the number of registrations, viewing QR codes.
 - **Settings** — node, DNS server, access, limits, UDP, IPv6, public and manual peers, and web interface parameters.
-- **Configuration** — viewing and editing `config.json`, `yggdrasil.conf` and `alfis.conf` with validation before saving, and restart buttons for x-node, yggdrasil and the DNS server.
+- **Configuration** — viewing and editing `config.json`, `yggdrasil.conf` and `alfis.conf` with validation before saving, and restart buttons for x-node, yggdrasil and the DNS server. The main configuration is shown with the dashboard overlay merged in, so saving it keeps the values from the Settings tab.
 - **Logs** — viewing the latest log entries, with a wrap-lines switch and a link to the built-in guide.
 
 Administrative operations such as applying configuration and restarting services from the web interface are handled by a separate `x-node-helper` service. It performs privileged actions over a Unix socket without giving the web process full root access.

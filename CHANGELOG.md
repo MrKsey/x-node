@@ -4,6 +4,13 @@ All notable changes to X-Node are documented here. The format is based on [Keep 
 
 The release workflow publishes the section of the tag as the GitHub release body, so every release has a short human-readable summary of what changed. Keep each bullet on a single line: GitHub turns every newline in a release body into a hard break, so a wrapped bullet would render as a narrow column instead of using the full width.
 
+## [1.7.20] — 2026-11-16
+
+### Added
+
+- Clients can change their own label through the API (`POST /v1/label` and the `label` field of registration), limited to 32 characters. **Clients → Registered clients** has a new **Allow clients to change labels** switch, on by default; with it off only the operator can rename a client.
+- The **Configuration** tab shows the main configuration with the dashboard overlay merged in, so the editor contains the values the service actually runs with. Saving that file no longer resets the settings made on the **Settings** tab: the merged values are written into `config.json` and the overlay is removed only after they are part of the file.
+
 ## [1.7.19] — 2026-11-14
 
 ### Fixed

@@ -1,7 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -25,6 +28,66 @@ func TestAlfisConfigBindsThePanelToLoopback(t *testing.T) {
 	if !strings.Contains(document, `listen = "[200::1]:8082"`) {
 		t.Fatalf("an explicit listener was not kept:\n%s", document)
 	}
+}
+
+func TestMergeConfigOverlay(t *testing.T) {
+	dir := t.TempDir()
+	base := filepath.Join(dir, "config.json")
+	overlay := filepath.Join(dir, "settings.json")
+	if err := os.WriteFile(base, []byte(`{
+  "name": "Exit",
+  "allowAll": false,
+  "registration": true,
+  "customKey": "kept"
+}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(overlay, []byte(`{
+  "allowAll": true,
+  "clientLabels": false,
+  "web": {"path": "/panel"}
+}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	content, effective := mergeConfigOverlay(string(mustReadFile(t, base)), overlay)
+	if !effective {
+		t.Fatal("the overlay was not merged")
+	}
+	var document map[string]any
+	if err := json.Unmarshal([]byte(content), &document); err != nil {
+		t.Fatalf("merged document is not valid JSON: %v", err)
+	}
+	if document["allowAll"] != true {
+		t.Fatalf("allowAll = %v, want true from the overlay", document["allowAll"])
+	}
+	if document["clientLabels"] != false {
+		t.Fatalf("clientLabels = %v, want false from the overlay", document["clientLabels"])
+	}
+	if document["customKey"] != "kept" {
+		t.Fatalf("customKey = %v, want the file value", document["customKey"])
+	}
+	web, ok := document["web"].(map[string]any)
+	if !ok || web["path"] != "/panel" {
+		t.Fatalf("web = %v, want the overlay section", document["web"])
+	}
+
+	// A missing overlay leaves the file untouched.
+	content, effective = mergeConfigOverlay(string(mustReadFile(t, base)), filepath.Join(dir, "missing.json"))
+	if effective {
+		t.Fatal("a missing overlay was reported as merged")
+	}
+	if !strings.Contains(content, `"name": "Exit"`) {
+		t.Fatalf("the file changed without an overlay: %s", content)
+	}
+}
+
+func mustReadFile(t *testing.T, path string) []byte {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
 }
 
 func TestConfigPeerURI(t *testing.T) {
