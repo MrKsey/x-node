@@ -328,6 +328,28 @@ function navigate(view) {
   render();
 }
 
+// A tab that stayed hidden for a long time comes back with frozen timers and
+// possibly a pooled keep-alive connection the network has already dropped. The
+// five-second tick may be up to a minute away, and a status request started
+// before the tab was hidden can still be marked as pending, so the dashboard
+// looked stuck until the page was reloaded. Drop the shared request and repaint
+// the current view from a fresh answer as soon as the tab is visible again.
+function resumeFromBackground() {
+  if (document.hidden) return;
+  statusPending = null;
+  statusPendingAt = 0;
+  if (state.view === "dashboard") {
+    render();
+    return;
+  }
+  refreshStatus();
+}
+
+document.addEventListener("visibilitychange", resumeFromBackground);
+window.addEventListener("pageshow", (event) => {
+  if (event.persisted) resumeFromBackground();
+});
+
 window.addEventListener("hashchange", () => navigate(location.hash.replace("#", "")));
 $("#menu").addEventListener("click", () => $("#app").classList.toggle("menu-open"));
 // A tap anywhere outside a floating card closes it; a tap on another icon

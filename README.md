@@ -4,7 +4,7 @@
 
 **X-Node** is a server-side exit node for the [Yggdrasil](https://yggdrasil-network.github.io/) network. It gives connected nodes access to the regular Internet over SOCKS5, manages client access, meters traffic and lets you set individual quotas.
 
-X-Node is designed to work with the [Y-Node](https://github.com/MrKsey/y-node) Android client, but is not tied to it: any SOCKS5 client with access to the Yggdrasil network can connect.
+X-Node is designed to work with the [Y-Node](https://github.com/MrKsey/y-node) Android client and the [Y-Node Desktop](https://github.com/MrKsey/y-node-desktop) client for Windows, macOS and Linux, but is not tied to them: any SOCKS5 client with access to the Yggdrasil network can connect.
 
 <p align="center">
   <img src="docs/screenshots/dashboard-1.png" width="100%" alt="X-Node dashboard">
@@ -230,6 +230,20 @@ sudo x-node dns off                # stop the DNS server
 4. Activate the exit node in the app.
 
 An invite is intended for one-time registration. After registration the device is added to the client allowlist.
+
+### Y-Node Desktop
+
+1. Install [Y-Node Desktop](https://github.com/MrKsey/y-node-desktop) and connect to the Yggdrasil network. The desktop client works in proxy mode: the system proxy or an application points at `127.0.0.1:7890`.
+2. Create an invite on the server:
+
+   ```bash
+   sudo x-node invite
+   ```
+
+3. In Y-Node Desktop open **Exit node → Add link** and paste the `yggnode://exit` link printed by the command, or add the profile by address.
+4. Activate the exit node in the app and turn on the system proxy if the whole system should use it.
+
+The registration flow is the same as on Android: the invite is redeemed through the tunnel and the device appears in the X-Node client list.
 
 ### Allowing a client without an invite
 
