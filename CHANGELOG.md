@@ -4,6 +4,13 @@ All notable changes to X-Node are documented here. The format is based on [Keep 
 
 The release workflow publishes the section of the tag as the GitHub release body, so every release has a short human-readable summary of what changed. Keep each bullet on a single line: GitHub turns every newline in a release body into a hard break, so a wrapped bullet would render as a narrow column instead of using the full width.
 
+## [1.7.21] — 2026-11-21
+
+### Fixed
+
+- The **Dashboard** loads by itself after the browser tab was hidden for a long time. A status request started before the tab went away could be stuck on a keep-alive connection the network had already dropped, and the five-second tick was up to a minute away; the dashboard now repaints from a fresh request as soon as the tab is visible and when the user returns to it from another tab.
+- The **Clients** page shows the current app version of Y-Node clients. The server already stored the version sent at registration, but the clients only registered once; the updated clients refresh their device name and version on every connect, and a new registration no longer requires a new invite.
+
 ## [1.7.20] — 2026-11-16
 
 ### Added

@@ -322,6 +322,14 @@ function navigate(view) {
   state.clientTimer = null;
   hideClientPopover();
   hideUsagePopover();
+  // A status request started while another tab was open can be stuck on a
+  // keep-alive connection the network has already dropped. Dropping it here
+  // makes the click start a fresh call instead of waiting for the stale one,
+  // which is what left the dashboard on "Loading…" until a page reload.
+  if (view === "dashboard") {
+    statusPending = null;
+    statusPendingAt = 0;
+  }
   $("#view-title").textContent = titles[view];
   $$("#nav a").forEach((link) => link.classList.toggle("active", link.dataset.view === view));
   $("#app").classList.remove("menu-open");
@@ -433,8 +441,8 @@ async function fetchStatus() {
     health.className = "pill bad";
     return;
   }
-  state.status = status;
   if (seq !== statusSeq) return;
+  state.status = status;
   const health = $("#health");
   health.textContent = "online · " + duration(status.uptimeSeconds);
   health.className = "pill ok";
