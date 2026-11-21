@@ -533,11 +533,24 @@ async function render() {
   };
   try {
     if (state.view === "dashboard") {
-      await refreshStatus();
-      if (!paint(dashboardHtml())) return;
-      wireDashboard();
-      drawChart();
-      drawSystemCharts();
+      if (state.status) {
+        // The panel already holds the last answer, so paint it at once and let
+        // the fresh status arrive in the background. Waiting for that request
+        // here is what left the view on "Loading…" when the first call after a
+        // long idle was stuck on a keep-alive connection the network had
+        // already dropped: the tab looked dead until the page was reloaded.
+        if (!paint(dashboardHtml())) return;
+        wireDashboard();
+        drawChart();
+        drawSystemCharts();
+        refreshStatus().catch(() => {});
+      } else {
+        await refreshStatus();
+        if (!paint(dashboardHtml())) return;
+        wireDashboard();
+        drawChart();
+        drawSystemCharts();
+      }
       if (state.update && state.update.running) pollUpdateUpgrade();
       // The update check talks to GitHub and can take its own time. It must
       // not hold the first paint: the card shows the last known answer and

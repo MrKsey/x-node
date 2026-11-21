@@ -4,6 +4,12 @@ All notable changes to X-Node are documented here. The format is based on [Keep 
 
 The release workflow publishes the section of the tag as the GitHub release body, so every release has a short human-readable summary of what changed. Keep each bullet on a single line: GitHub turns every newline in a release body into a hard break, so a wrapped bullet would render as a narrow column instead of using the full width.
 
+## [1.7.22] — 2026-11-21
+
+### Fixed
+
+- The **Dashboard** paints the last known answer at once when the user returns to it and refreshes in the background, so a stuck request can no longer leave the view on "Loading…" until the page is reloaded.
+
 ## [1.7.21] — 2026-11-21
 
 ### Fixed
