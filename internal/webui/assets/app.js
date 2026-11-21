@@ -2227,9 +2227,9 @@ function settingsHtml() {
         <button class="btn primary small save-btn hidden" type="submit">Save</button>
       </header>
       <div class="form-grid">
-        <label class="field"><span>Clients allowed</span><input id="s-maxclients" type="number" min="1" value="${settings.maxClients || 64}"></label>
-        <label class="field"><span>Connections per client</span><input id="s-maxconns" type="number" min="1" value="${settings.maxConnsPerClient || 64}"></label>
-        <label class="field"><span>Connections total</span><input id="s-maxtotal" type="number" min="1" value="${settings.maxConnsTotal || 512}"></label>
+        <label class="field"><span>Clients allowed</span><input id="s-maxclients" type="number" min="1" value="${settings.maxClients || 32}"></label>
+        <label class="field"><span>Connections per client</span><input id="s-maxconns" type="number" min="1" value="${settings.maxConnsPerClient || 256}"></label>
+        <label class="field"><span>Connections total</span><input id="s-maxtotal" type="number" min="1" value="${settings.maxConnsTotal || 8192}"></label>
         <label class="field"><span>Idle timeout</span><input id="s-idle" value="${escapeHtml(settings.idleTimeout || "5m")}"></label>
         <label class="field"><span>Dial timeout</span><input id="s-dial" value="${escapeHtml(settings.dialTimeout || "15s")}"></label>
         <label class="field"><span>Blocked ports (comma separated)</span><input id="s-blocked" value="${(settings.blockedPorts || []).join(", ")}"></label>
@@ -2316,7 +2316,7 @@ function settingsHtml() {
       <div class="form-grid">
         <label class="field full"><span>Public URL (shown on the dashboard and by "x-node web url")</span><input id="s-publicurl" value="${escapeHtml(web.publicURL || "")}" placeholder="https://example.com/abc123/web/" readonly></label>
         <label class="field"><span>URL path</span><input id="s-webpath" value="${escapeHtml(web.path || "")}"></label>
-        <label class="field"><span>Session lifetime</span><input id="s-sessionttl" value="${escapeHtml(web.sessionTTL || "12h")}"></label>
+        <label class="field"><span>Session lifetime</span><input id="s-sessionttl" value="${escapeHtml(web.sessionTTL || "0")}"></label>
         <label class="field"><span>Failed logins before a block</span><input id="s-maxfail" type="number" min="0" value="${web.maxFailedLogins || 5}"></label>
         <label class="field"><span>Block duration</span><input id="s-lockout" value="${escapeHtml(web.lockout || "15m")}"></label>
         <label class="field"><span>Listen</span><input value="${escapeHtml(web.listen || "all")}" disabled></label>

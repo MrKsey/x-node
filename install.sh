@@ -1491,9 +1491,9 @@ import sys
 defaults = {
     "inviteTTL": "24h",
     "inviteUses": 1,
-    "maxClients": 64,
-    "maxConnsPerClient": 64,
-    "maxConnsTotal": 512,
+    "maxClients": 32,
+    "maxConnsPerClient": 256,
+    "maxConnsTotal": 8192,
     "dialTimeout": "15s",
     "idleTimeout": "5m",
     "blockedPorts": [25],
@@ -1566,7 +1566,7 @@ web.setdefault("listen", web_bind)
 web.setdefault("port", int(web_port))
 web.setdefault("path", web_path)
 web.setdefault("tls", web_tls)
-web.setdefault("sessionTTL", "12h")
+web.setdefault("sessionTTL", "0")
 web.setdefault("maxFailedLogins", 5)
 web.setdefault("lockout", "15m")
 web.setdefault("trustedProxies", ["127.0.0.1", "::1"])

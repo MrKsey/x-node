@@ -4,6 +4,12 @@ All notable changes to X-Node are documented here. The format is based on [Keep 
 
 The release workflow publishes the section of the tag as the GitHub release body, so every release has a short human-readable summary of what changed. Keep each bullet on a single line: GitHub turns every newline in a release body into a hard break, so a wrapped bullet would render as a narrow column instead of using the full width.
 
+## [1.7.23] — 2026-11-21
+
+### Changed
+
+- New default limits, tuned for a busier exit: **Clients allowed** is 32, **Connections per client** is 256 and **Connections total** is 8192. The web session lifetime defaults to `0`, so the dashboard session never expires and the password is not asked again. The values apply to a fresh install and to any field missing from `config.json`; an existing configuration keeps the numbers it already stores.
+
 ## [1.7.22] — 2026-11-21
 
 ### Fixed
