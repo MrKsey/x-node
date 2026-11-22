@@ -33,6 +33,7 @@
   "peerCheckInterval": "30s",
   "peerRefreshInterval": "6h",
   "peerImprovementPercent": 25,
+  "peerCountry": "",
   "adminSocket": "unix:///var/run/yggdrasil/yggdrasil.sock",
   "peerProbePath": "/usr/local/bin/x-node-peerprobe",
   "peerURI": "wss://203.0.113.10:443/ygg?key=0000000000000000000000000000000000000000000000000000000000000000",

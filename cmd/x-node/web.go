@@ -1309,6 +1309,7 @@ type webSettingsView struct {
 	DomainResolution   bool          `json:"domainResolution"`
 	PeerCount          int           `json:"peerCount"`
 	PeerAutoReplace    bool          `json:"peerAutoReplace"`
+	PeerCountry        string        `json:"peerCountry"`
 	Quotas             QuotaDefaults `json:"quotas"`
 	Usage              UsageConfig   `json:"usage"`
 	Web                WebConfig     `json:"web"`
@@ -1342,6 +1343,7 @@ func (w *webServer) handleSettingsGet(rw http.ResponseWriter, r *http.Request) {
 		DomainResolution:   cfg.DomainResolution,
 		PeerCount:          cfg.PeerCount,
 		PeerAutoReplace:    cfg.PeerAutoReplace,
+		PeerCountry:        cfg.PeerCountry,
 		Quotas:             cfg.Quotas,
 		Usage:              cfg.Usage,
 		Web:                cfg.Web,
@@ -1373,6 +1375,7 @@ type settingsPatch struct {
 	DomainResolution   *bool          `json:"domainResolution"`
 	PeerCount          *int           `json:"peerCount"`
 	PeerAutoReplace    *bool          `json:"peerAutoReplace"`
+	PeerCountry        *string        `json:"peerCountry"`
 	Quotas             *QuotaDefaults `json:"quotas"`
 	Usage              *UsageConfig   `json:"usage"`
 	Web                *webPatch      `json:"web"`
@@ -1468,6 +1471,14 @@ func (w *webServer) handleSettingsPut(rw http.ResponseWriter, r *http.Request) {
 	}
 	if patch.PeerAutoReplace != nil {
 		next.PeerAutoReplace = *patch.PeerAutoReplace
+	}
+	if patch.PeerCountry != nil {
+		value := strings.TrimSpace(*patch.PeerCountry)
+		if value != "" && !validCountryHint(value) {
+			writeJSON(rw, http.StatusBadRequest, errorResponse{Error: "bad_country", Message: "peerCountry must be a country slug such as united-states or an ISO code such as US"})
+			return
+		}
+		next.PeerCountry = value
 	}
 	if patch.Quotas != nil {
 		next.Quotas = *patch.Quotas

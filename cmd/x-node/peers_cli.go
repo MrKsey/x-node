@@ -112,6 +112,7 @@ func peersStatus(args []string) error {
 			"ok":             liveErr == nil,
 			"peerCount":      cfg.PeerCount,
 			"autoReplace":    cfg.PeerAutoReplace,
+			"peerCountry":    cfg.PeerCountry,
 			"managed":        rows,
 			"automatic":      counts.Automatic,
 			"automaticUp":    counts.AutomaticUp,
@@ -126,6 +127,11 @@ func peersStatus(args []string) error {
 
 	fmt.Printf("Peer count:    %d  (automatic public peers managed by x-node)\n", cfg.PeerCount)
 	fmt.Printf("Auto replace:  %s\n", onOff(cfg.PeerAutoReplace))
+	country := strings.TrimSpace(cfg.PeerCountry)
+	if country == "" {
+		country = "auto (GeoIP)"
+	}
+	fmt.Printf("Country:       %s  (prior for Find peers)\n", country)
 	fmt.Printf("Timing:        check every %s, replace after %s, refresh every %s\n",
 		cfg.PeerCheckInterval, cfg.PeerDeadTimeout, cfg.PeerRefreshInterval)
 	fmt.Printf("Automatic:     %d up of %d\n", counts.AutomaticUp, counts.Automatic)

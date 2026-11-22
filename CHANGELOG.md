@@ -4,6 +4,13 @@ All notable changes to X-Node are documented here. The format is based on [Keep 
 
 The release workflow publishes the section of the tag as the GitHub release body, so every release has a short human-readable summary of what changed. Keep each bullet on a single line: GitHub turns every newline in a release body into a hard break, so a wrapped bullet would render as a narrow column instead of using the full width.
 
+## [1.7.24] — 2026-11-22
+
+### Changed
+
+- **Find peers starts with the servers of this node's own country.** The probe sorted the whole catalogue by a plain TCP connect and spent its window on whatever answered first, so a country with a hundred servers could take the whole round while the local ones were never asked, and a server that geolocated abroad tested the wrong neighbourhood. The round now keeps the local country as a prior: three quarters of the window go to its servers, the rest to the closest foreign countries, so a faster neighbour across the border is still found, and the candidate list itself stays ordered by the measured Yggdrasil time.
+- **The country of the search can be pinned.** A new `peerCountry` setting takes a catalogue slug such as `united-states` or an ISO code such as `US`; it is editable in **Settings → Public peers**, saved by the dashboard overlay and shown by `x-node peers status`. Empty, which is the default, asks GeoIP. The progress line above **Find peers** now names the country the round is ranked around.
+
 ## [1.7.23] — 2026-11-21
 
 ### Changed

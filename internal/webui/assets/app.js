@@ -2283,8 +2283,9 @@ function settingsHtml() {
       <div class="form-grid">
         <label class="field"><span>Automatic peers to keep</span><input id="s-peercount" type="number" min="1" max="50" value="${settings.peerCount || 3}"></label>
         <label class="switch"><input type="checkbox" id="s-peerauto" ${settings.peerAutoReplace ? "checked" : ""}><span>Replace dead or slow peers</span></label>
+        <label class="field"><span>Country for the peer search</span><input id="s-peercountry" value="${escapeHtml(settings.peerCountry || "")}" placeholder="auto (GeoIP) — or united-states / US"></label>
       </div>
-      <p class="hint">The supervisor keeps this many public peers connected and swaps a dead or slow one for a better candidate.</p>
+      <p class="hint">The supervisor keeps this many public peers connected and swaps a dead or slow one for a better candidate. <strong>Find peers</strong> starts with the servers of this country and always keeps room for the closest foreign ones; the list stays ordered by the measured Yggdrasil time. Leave the country empty to detect it with GeoIP.</p>
     </form>
 
     <div class="card section">
@@ -2374,7 +2375,7 @@ function settingsPayload(kind) {
     case "ipv6":
       return { ipv6: $("#s-ipv6").value };
     case "peers":
-      return { peerCount: Number($("#s-peercount").value), peerAutoReplace: $("#s-peerauto").checked };
+      return { peerCount: Number($("#s-peercount").value), peerAutoReplace: $("#s-peerauto").checked, peerCountry: $("#s-peercountry").value.trim() };
     case "dns":
       return {
         dns: {
@@ -2423,7 +2424,10 @@ function peerProgressText(probe, probing) {
     checked + " checked",
     alive + " alive",
   ];
-  return (probing ? "Searching: " : "Last search: ") + parts.join(" · ");
+  const place = (probe && (probe.countryName || probe.country)) || "";
+  return (probing ? "Searching" : "Last search")
+    + (place ? " near " + place : "")
+    + ": " + parts.join(" · ");
 }
 
 // updatePeerProgress refreshes only the progress line while the poll loop runs;

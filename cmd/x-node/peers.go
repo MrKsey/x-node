@@ -224,12 +224,14 @@ type probeResult struct {
 // catalogue. The dashboard shows it next to "Find peers", so a search that
 // takes minutes explains itself instead of looking stuck.
 type peerProbeProgress struct {
-	Stage     string    `json:"stage"`
-	Total     int       `json:"total"`
-	Pool      int       `json:"pool,omitempty"`
-	Checked   int       `json:"checked"`
-	Alive     int       `json:"alive"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	Stage       string    `json:"stage"`
+	Total       int       `json:"total"`
+	Pool        int       `json:"pool,omitempty"`
+	Checked     int       `json:"checked"`
+	Alive       int       `json:"alive"`
+	Country     string    `json:"country,omitempty"`
+	CountryName string    `json:"countryName,omitempty"`
+	UpdatedAt   time.Time `json:"updatedAt"`
 }
 
 // peerSettings is the part of the config the supervisor applies. It is
@@ -246,6 +248,9 @@ type peerSettings struct {
 	// Manual is the operator's own list. It is kept connected on top of
 	// Count and is never trimmed or replaced by the supervisor.
 	Manual []string
+	// Country is the country the search is ranked around: a catalogue slug or
+	// an ISO code. Empty means the probe asks GeoIP.
+	Country string
 }
 
 type peersState struct {
@@ -262,7 +267,7 @@ type peerSupervisor struct {
 	statePath string
 	log       *logger
 	node      peerNode
-	probe     func(context.Context, int) ([]probeResult, error)
+	probe     func(context.Context, int, string) ([]probeResult, error)
 
 	mu        sync.Mutex
 	settings  peerSettings
@@ -331,6 +336,7 @@ func peerSettingsFrom(cfg Config) peerSettings {
 		ImprovementPercent: cfg.PeerImprovementPercent,
 		Seed:               cleanPeerList(cfg.Peers),
 		Manual:             cleanPeerList(cfg.ManualPeers),
+		Country:            strings.TrimSpace(cfg.PeerCountry),
 	}
 }
 
@@ -945,7 +951,7 @@ func (s *peerSupervisor) startProbeLocked(ctx context.Context, settings peerSett
 		count = 60
 	}
 	go func() {
-		results, err := s.probe(ctx, count)
+		results, err := s.probe(ctx, count, settings.Country)
 		s.mu.Lock()
 		s.probing = false
 		s.lastProbe = time.Now()
@@ -1171,10 +1177,11 @@ func (w *probeStderr) handle(line string) {
 
 // newPeerProbe runs x-node-peerprobe, which downloads the public peer list and
 // completes a real Yggdrasil handshake with every candidate it reports. The
-// probe prints "progress {json}" lines to stderr; they are forwarded to report
-// while the search is running.
-func newPeerProbe(path string, report func(peerProbeProgress)) func(context.Context, int) ([]probeResult, error) {
-	return func(ctx context.Context, count int) ([]probeResult, error) {
+// country is passed through when the operator pinned one; otherwise the probe
+// asks GeoIP. The probe prints "progress {json}" lines to stderr; they are
+// forwarded to report while the search is running.
+func newPeerProbe(path string, report func(peerProbeProgress)) func(context.Context, int, string) ([]probeResult, error) {
+	return func(ctx context.Context, count int, country string) ([]probeResult, error) {
 		binary := strings.TrimSpace(path)
 		// A configuration written by an older version may point at a binary the
 		// installer no longer places there; the default is always present.
@@ -1185,7 +1192,11 @@ func newPeerProbe(path string, report func(peerProbeProgress)) func(context.Cont
 		}
 		runCtx, cancel := context.WithTimeout(ctx, peerProbeTimeout)
 		defer cancel()
-		cmd := exec.CommandContext(runCtx, binary, "-count", strconv.Itoa(count), "-progress")
+		args := []string{"-count", strconv.Itoa(count), "-progress"}
+		if value := strings.TrimSpace(country); value != "" {
+			args = append(args, "-country", value)
+		}
+		cmd := exec.CommandContext(runCtx, binary, args...)
 		var stdout bytes.Buffer
 		cmd.Stdout = &stdout
 		stderr := &probeStderr{report: report}

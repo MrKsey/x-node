@@ -231,7 +231,13 @@ replaced or dropped by the supervisor.
 
 Peers added by hand (the "manualPeers" list in the configuration, or the Manual
 peers editor in the web interface) are always kept and never replaced by the
-supervisor. The web interface shows them with a "manual" badge.`,
+supervisor. The web interface shows them with a "manual" badge.
+
+Find peers ranks the catalogue around the country of this server: peerCountry
+pins it (a slug such as united-states or an ISO code such as US), and an empty
+value asks GeoIP. The country is only a prior — the round starts with its peers
+and keeps room for the closest foreign ones, while the candidates stay ordered
+by the measured Yggdrasil time.`,
 		Flags: []flagHelp{
 			{Flag: "-config PATH", Default: "/etc/x-node/config.json", Env: "X_NODE_CONFIG", Text: "configuration file to read"},
 			{Flag: "-json", Default: "off", Text: "machine-readable output (status)"},

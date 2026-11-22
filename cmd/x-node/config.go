@@ -106,6 +106,14 @@ type Config struct {
 	AdminSocket string `json:"adminSocket"`
 	// PeerProbePath is the x-node-peerprobe binary used to find live peers.
 	PeerProbePath string `json:"peerProbePath"`
+	// PeerCountry is the country the peer search is ranked around: a catalogue
+	// slug such as "united-states" or an ISO code such as "US". The country is
+	// only a prior — the round starts with its peers and keeps room for the
+	// closest foreign ones, while the candidates stay ordered by the measured
+	// Yggdrasil time. Empty means the probe asks a public GeoIP service, which
+	// is right for most servers; set it when the address geolocates to another
+	// country than the one the node really sits in.
+	PeerCountry string `json:"peerCountry,omitempty"`
 
 	// PeerURI is the public peering address of this node, e.g.
 	// tls://203.0.113.10:13338?key=<public key>. It is printed in the invite
@@ -534,6 +542,7 @@ func (c *Config) applyDefaults() {
 	if c.Usage.Timezone == "" {
 		c.Usage.Timezone = d.Usage.Timezone
 	}
+	c.PeerCountry = strings.TrimSpace(c.PeerCountry)
 	c.Web.Path = normalizeWebPath(c.Web.Path)
 }
 
@@ -588,6 +597,9 @@ func (c *Config) validate() error {
 	}
 	if c.PeerImprovementPercent < 0 || c.PeerImprovementPercent > 90 {
 		return fmt.Errorf("peerImprovementPercent %d is out of range (0..90)", c.PeerImprovementPercent)
+	}
+	if value := strings.TrimSpace(c.PeerCountry); value != "" && !validCountryHint(value) {
+		return fmt.Errorf("peerCountry %q must be a country slug such as united-states or an ISO code such as US", value)
 	}
 	if _, _, err := adminTarget(c.AdminSocket); err != nil {
 		return err
@@ -694,6 +706,25 @@ func (c *Config) validateDNS() error {
 		return fmt.Errorf("dns.cacheMemoryLimitMB must not be negative")
 	}
 	return nil
+}
+
+// validCountryHint checks the shape of peerCountry: a catalogue slug such as
+// "united-states" or an ISO code such as "US". The table of known countries
+// lives in the probe binary, so the daemon rejects only values that cannot be
+// a country at all; an unknown slug makes the probe fall back to GeoIP.
+func validCountryHint(value string) bool {
+	value = strings.TrimSpace(value)
+	if len(value) < 2 || len(value) > 64 {
+		return false
+	}
+	for _, r := range value {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // normalizeWebPath makes a hand-written path usable: a leading slash is added

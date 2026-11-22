@@ -93,6 +93,7 @@ func saveSettingsOverlay(cfg Config) error {
 		"domainResolution":       cfg.DomainResolution,
 		"peerCount":              cfg.PeerCount,
 		"peerAutoReplace":        cfg.PeerAutoReplace,
+		"peerCountry":            cfg.PeerCountry,
 		"manualPeers":            cfg.ManualPeers,
 		"peerDeadTimeout":        cfg.PeerDeadTimeout,
 		"peerCheckInterval":      cfg.PeerCheckInterval,

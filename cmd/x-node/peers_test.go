@@ -56,7 +56,7 @@ func newTestSupervisor(t *testing.T, cfg Config, node peerNode, pool []probeResu
 	}
 	s := newPeerSupervisor(cfg, path, newLogger("error"))
 	s.node = node
-	s.probe = func(context.Context, int) ([]probeResult, error) { return nil, nil }
+	s.probe = func(context.Context, int, string) ([]probeResult, error) { return nil, nil }
 	s.pool = pool
 	s.lastProbe = time.Now()
 	return s

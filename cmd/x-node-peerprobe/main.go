@@ -65,11 +65,13 @@ type probedPeer struct {
 // these numbers to the web interface, so a search that takes minutes shows how
 // many peers were checked instead of looking stuck.
 type progressReport struct {
-	Stage   string `json:"stage"`
-	Total   int    `json:"total"`
-	Pool    int    `json:"pool,omitempty"`
-	Checked int    `json:"checked"`
-	Alive   int    `json:"alive"`
+	Stage       string `json:"stage"`
+	Total       int    `json:"total"`
+	Pool        int    `json:"pool,omitempty"`
+	Checked     int    `json:"checked"`
+	Alive       int    `json:"alive"`
+	Country     string `json:"country,omitempty"`
+	CountryName string `json:"countryName,omitempty"`
 }
 
 var progressEnabled bool
@@ -77,6 +79,10 @@ var progressEnabled bool
 func reportProgress(report progressReport) {
 	if !progressEnabled {
 		return
+	}
+	if probeCountry.Slug != "" {
+		report.Country = probeCountry.Slug
+		report.CountryName = probeCountry.Name
 	}
 	raw, err := json.Marshal(report)
 	if err != nil {
@@ -105,6 +111,7 @@ func main() {
 	pool := flag.Int("pool", 160, "how many candidates get the protocol probe")
 	batch := flag.Int("batch", 5, "peers probed at once")
 	source := flag.String("source", defaultPeersURL, "public peer list archive")
+	country := flag.String("country", "", "country of this server: a catalogue slug or ISO code (default: GeoIP)")
 	plain := flag.Bool("plain", false, "print one URI per line instead of JSON")
 	progress := flag.Bool("progress", false, "print progress lines to stderr")
 	flag.Parse()
@@ -124,11 +131,29 @@ func main() {
 		}
 		peers = seeds()
 	}
+	// The country of this server is a prior for the round, not the answer: the
+	// round starts with the local peers and always keeps room for the closest
+	// foreign ones, and the printed order follows the measured Yggdrasil time.
+	probeCountry, _ = resolveCountry(*country)
 	reportProgress(progressReport{Stage: "catalogue", Total: len(peers)})
 
-	ranked := rankByTCP(peers, *pool)
-	reportProgress(progressReport{Stage: "ranked", Total: len(peers), Pool: len(ranked)})
+	targets := peers
+	if probeCountry.Slug != "" {
+		targets = discoveryTargets(
+			rankCatalog(peers, probeCountry.Slug, probeCountry.Lat, probeCountry.Lon),
+			probeCountry.Slug, *pool,
+		)
+	}
+	reportProgress(progressReport{Stage: "ranked", Total: len(peers), Pool: len(targets)})
+
+	ranked := rankByTCP(targets, *pool)
 	alive, checked := probeUntil(ranked, *count, *batch, *timeout, len(peers))
+	// The country only decides what was checked. What is printed is ordered by
+	// the measured Yggdrasil time, so a faster peer across the border wins over
+	// a slower local one.
+	sort.SliceStable(alive, func(i, j int) bool {
+		return alive[i].LatencyMs < alive[j].LatencyMs
+	})
 	if len(alive) == 0 {
 		// The network may block the probe itself; the seeds are still better
 		// than an empty Peers list in the Yggdrasil config.
