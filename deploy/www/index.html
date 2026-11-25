@@ -3,67 +3,305 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
 <title>{{host}}</title>
 <style>
-  html, body { height: 100%; margin: 0; }
+  :root {
+    --bg: {{bg}};
+    --panel: {{panel}};
+    --border: {{border}};
+    --fg: {{fg}};
+    --muted: {{muted}};
+    --accent: {{accent}};
+    --accent-soft: {{accent_soft}};
+    --accent-line: {{accent_line}};
+    --ok: {{ok}};
+    --ok-soft: {{ok_soft}};
+    --ok-line: {{ok_line}};
+    --grid: {{grid}};
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
   body {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: #f7f8fa;
-    color: #222;
-    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+    min-height: 100vh;
+    background: var(--bg);
+    color: var(--fg);
+    font: 14px/1.5 {{font}};
+    -webkit-font-smoothing: antialiased;
   }
-  main {
-    width: 100%;
-    max-width: 520px;
-    margin: 24px;
-    padding: 24px 28px;
-    background: #fff;
-    border: 1px solid #e3e6ea;
-    border-radius: 10px;
+  .wrap { max-width: 940px; margin: 0 auto; padding: 38px 24px 52px; }
+  header { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 24px; }
+  .mark {
+    width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center;
+    background: var(--accent-soft); color: var(--accent);
+    border: 1px solid var(--accent-line);
+    font: 600 12px/1 {{mono}};
   }
-  h1 { margin: 0 0 2px; font-size: 19px; font-weight: 600; }
-  .state { margin: 0 0 18px; color: #1f7a3d; font-size: 13px; }
-  .state::before {
-    content: "";
-    display: inline-block;
-    width: 8px;
-    height: 8px;
-    margin-right: 7px;
-    border-radius: 50%;
-    background: #2eaa5b;
-    vertical-align: 1px;
+  .title { flex: 1; min-width: 180px; }
+  h1 { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: .01em; }
+  .sub { margin: 2px 0 0; font-size: 12px; color: var(--muted); }
+  .pill {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 4px 11px; border-radius: 999px; font-size: 12px;
+    color: var(--ok); background: var(--ok-soft); border: 1px solid var(--ok-line);
   }
-  table { width: 100%; border-collapse: collapse; }
-  th, td { padding: 6px 0; text-align: left; font-weight: 400; }
-  th { color: #6b7280; width: 46%; }
-  td {
-    text-align: right;
-    font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
-    font-size: 13px;
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
+  .grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 12px; padding: 15px 17px;
   }
-  tr + tr th, tr + tr td { border-top: 1px solid #eef0f3; }
-  footer { margin-top: 18px; color: #9aa1ab; font-size: 12px; }
+  .k {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .07em;
+    color: var(--muted);
+  }
+  .v {
+    margin-top: 7px; font: 600 24px/1.15 {{mono}}; letter-spacing: -.02em;
+    white-space: nowrap;
+  }
+  .v small { font-size: 13px; font-weight: 500; color: var(--muted); margin-left: 3px; letter-spacing: 0; }
+  .s { margin-top: 5px; font-size: 12px; color: var(--muted); }
+  .s b { font-weight: 500; color: var(--fg); }
+  .s .up { color: var(--ok); }
+  .panel { margin-top: 12px; }
+  .head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 12px; }
+  .head .k { flex: 1; }
+  .meta { font-size: 12px; color: var(--muted); font-family: {{mono}}; }
+  canvas { display: block; width: 100%; height: 132px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th {
+    text-align: left; font-weight: 500; font-size: 11px; text-transform: uppercase;
+    letter-spacing: .07em; color: var(--muted); padding: 0 0 9px;
+  }
+  td { padding: 9px 0; border-top: 1px solid var(--border); }
+  td.name { font-family: {{mono}}; font-size: 12.5px; }
+  td.num, th.num { text-align: right; }
+  td.num { font-family: {{mono}}; color: var(--muted); }
+  .tag {
+    display: inline-block; padding: 1px 9px; border-radius: 999px; font-size: 11.5px;
+    color: var(--ok); background: var(--ok-soft); border: 1px solid var(--ok-line);
+  }
+  footer {
+    margin-top: 24px; display: flex; flex-wrap: wrap; gap: 6px 20px;
+    font-size: 12px; color: var(--muted);
+  }
+  footer code { font-family: {{mono}}; color: var(--fg); }
+  .v-compact .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .v-compact .v { font-size: 26px; }
+  .v-compact canvas { height: 110px; }
+  @media (max-width: 720px) {
+    .wrap { padding: 26px 16px 40px; }
+    .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .v { font-size: 21px; }
+  }
 </style>
 </head>
-<body>
-<main>
-  <h1>{{host}}</h1>
-  <p class="state">operational</p>
-  <table>
-    <tr><th>Node</th><td>{{node}}</td></tr>
-    <tr><th>Uptime</th><td>{{uptime}}</td></tr>
-    <tr><th>Load average</th><td>{{load}}</td></tr>
-    <tr><th>Memory</th><td>{{memory}}</td></tr>
-    <tr><th>Workers</th><td>{{workers}}</td></tr>
-    <tr><th>Connections</th><td>{{connections}}</td></tr>
-    <tr><th>Requests (24 h)</th><td>{{requests}}</td></tr>
-    <tr><th>Cache hit</th><td>{{cache}}</td></tr>
-    <tr><th>Build</th><td>{{build}}</td></tr>
-    <tr><th>Deployed</th><td>{{deployed}}</td></tr>
-  </table>
-  <footer>Status is refreshed by the monitoring agent every 60 seconds.</footer>
-</main>
+<body class="{{body_class}}">
+<div class="wrap">
+  <header>
+    <div class="mark">{{mark}}</div>
+    <div class="title">
+      <h1>{{host}}</h1>
+      <p class="sub">{{subtitle}}</p>
+    </div>
+    <span class="pill"><span class="dot"></span>operational</span>
+  </header>
+
+  <section class="grid">
+    <div class="card">
+      <div class="k">Requests / s</div>
+      <div class="v" id="rps">{{rps}}</div>
+      <div class="s"><span class="up" id="rps-delta">{{rps_delta}}</span> vs 1 h ago</div>
+    </div>
+    <div class="card">
+      <div class="k">Connections</div>
+      <div class="v" id="conns">{{conns}}</div>
+      <div class="s">keep-alive <b id="keepalive">{{keepalive}}</b></div>
+    </div>
+    <div class="card">
+      <div class="k">Load average</div>
+      <div class="v" id="load">{{load}}</div>
+      <div class="s"><b>{{workers}}</b> workers</div>
+    </div>
+    <div class="card">
+      <div class="k">Memory</div>
+      <div class="v"><span id="mem">{{mem}}</span><small>%</small></div>
+      <div class="s">of <b>{{mem_total}} GB</b></div>
+    </div>
+  </section>
+
+  <section class="card panel">
+    <div class="head">
+      <span class="k">Throughput, last 15 min</span>
+      <span class="meta" id="peak">peak {{peak}} req/s</span>
+    </div>
+    <canvas id="spark"></canvas>
+  </section>
+
+  <section class="grid" style="margin-top:12px">
+    <div class="card">
+      <div class="k">Latency</div>
+      <div class="v"><span id="p50">{{p50}}</span><small>ms p50</small></div>
+      <div class="s">p95 <b><span id="p95">{{p95}}</span> ms</b> &middot; p99 <b>{{p99}} ms</b></div>
+    </div>
+    <div class="card">
+      <div class="k">Cache</div>
+      <div class="v"><span id="cache">{{cache}}</span><small>% hit</small></div>
+      <div class="s">miss <b id="miss">{{miss}}</b> / s</div>
+    </div>
+    <div class="card">
+      <div class="k">Traffic</div>
+      <div class="v"><span id="mbit">{{mbit}}</span><small>Mbit/s</small></div>
+      <div class="s">out <b id="mbit-out">{{mbit_out}}</b> &middot; in <b id="mbit-in">{{mbit_in}}</b></div>
+    </div>
+    <div class="card">
+      <div class="k">Uptime</div>
+      <div class="v" id="uptime">{{uptime}}</div>
+      <div class="s">since <b>{{booted}}</b></div>
+    </div>
+  </section>
+
+  <section class="card panel">
+    <table>
+      <thead>
+        <tr><th>Service</th><th>State</th><th class="num">30 d uptime</th><th class="num">p50</th></tr>
+      </thead>
+      <tbody>{{services}}</tbody>
+    </table>
+  </section>
+
+  <footer>
+    <span>build <code>{{build}}</code></span>
+    <span>deployed <code>{{deployed}}</code></span>
+    <span>node <code>{{node}}</code></span>
+    <span>tls expires in <code>{{cert_days}} d</code></span>
+  </footer>
+</div>
+<script>
+(function () {
+  "use strict";
+  var seed = {{seed}};
+  var $ = function (id) { return document.getElementById(id); };
+  var N = 120;
+  var rps = seed.rps;
+  var conns = seed.conns;
+  var load = seed.load;
+  var mem = seed.mem;
+  var cache = seed.cache;
+  var p50 = seed.p50;
+  var p95 = seed.p95;
+  var mbit = seed.mbit;
+  var uptime = seed.uptime;
+  var hist = [];
+  var i;
+  var v = rps;
+  for (i = 0; i < N; i++) {
+    v += (rps - v) * 0.25 + (Math.random() - 0.5) * rps * 0.12;
+    v = clamp(v, rps * 0.45, rps * 1.75);
+    hist.push(v);
+  }
+  hist[N - 1] = rps;
+
+  function clamp(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
+  function drift(v, pct, lo, hi) {
+    return clamp(v + (Math.random() - 0.5) * v * pct, lo, hi);
+  }
+  function uptimeText(sec) {
+    var d = Math.floor(sec / 86400);
+    var h = Math.floor((sec % 86400) / 3600);
+    var m = Math.floor((sec % 3600) / 60);
+    return d + "d " + h + "h " + (m < 10 ? "0" : "") + m + "m";
+  }
+
+  var canvas = $("spark");
+  var ctx = canvas.getContext("2d");
+
+  function draw() {
+    var dpr = window.devicePixelRatio || 1;
+    var w = canvas.clientWidth;
+    var h = canvas.clientHeight;
+    if (!w || !h) return;
+    if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
+      canvas.width = Math.round(w * dpr);
+      canvas.height = Math.round(h * dpr);
+    }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    var max = Math.max.apply(null, hist) * 1.18;
+    var step = w / (N - 1);
+    var g, x, y;
+    ctx.strokeStyle = seed.grid;
+    ctx.lineWidth = 1;
+    for (g = 1; g < 4; g++) {
+      y = Math.round(h - (h * g) / 4) + 0.5;
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(w, y);
+      ctx.stroke();
+    }
+    var grad = ctx.createLinearGradient(0, 0, 0, h);
+    grad.addColorStop(0, seed.accentSoft);
+    grad.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.beginPath();
+    ctx.moveTo(0, h);
+    for (i = 0; i < hist.length; i++) {
+      x = i * step;
+      y = h - (hist[i] / max) * (h - 8) - 4;
+      ctx.lineTo(x, y);
+    }
+    ctx.lineTo(w, h);
+    ctx.closePath();
+    ctx.fillStyle = grad;
+    ctx.fill();
+    ctx.beginPath();
+    for (i = 0; i < hist.length; i++) {
+      x = i * step;
+      y = h - (hist[i] / max) * (h - 8) - 4;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.strokeStyle = seed.accent;
+    ctx.lineWidth = 1.6;
+    ctx.stroke();
+  }
+
+  function tick() {
+    rps = drift(rps, 0.035, seed.rps * 0.5, seed.rps * 1.9);
+    hist.push(rps);
+    if (hist.length > N) hist.shift();
+    conns = Math.round(drift(conns, 0.02, seed.conns * 0.6, seed.conns * 1.6));
+    load = drift(load, 0.03, 0.03, 4.2);
+    mem = clamp(mem + (Math.random() - 0.5) * 0.35, 19, 91);
+    cache = clamp(cache + (Math.random() - 0.5) * 0.25, 58, 98.6);
+    p50 = Math.round(drift(p50, 0.06, 1, 38));
+    p95 = Math.round(Math.max(p50 + 2, drift(p95, 0.05, 3, 88)));
+    mbit = drift(mbit, 0.03, 0.4, 880);
+    uptime += 1;
+    $("rps").textContent = rps.toFixed(0);
+    $("conns").textContent = conns;
+    $("keepalive").textContent = Math.round(conns * 0.72);
+    $("load").textContent = load.toFixed(2) + " " +
+      (load * 0.82 + 0.04).toFixed(2) + " " + (load * 0.61 + 0.02).toFixed(2);
+    $("mem").textContent = mem.toFixed(1);
+    $("cache").textContent = cache.toFixed(1);
+    $("p50").textContent = p50;
+    $("p95").textContent = p95;
+    $("miss").textContent = (rps * (100 - cache) / 100).toFixed(0);
+    $("mbit").textContent = mbit.toFixed(1);
+    $("mbit-out").textContent = (mbit * 0.63).toFixed(1);
+    $("mbit-in").textContent = (mbit * 0.37).toFixed(1);
+    $("uptime").textContent = uptimeText(uptime);
+    var delta = ((rps - seed.rps) / seed.rps) * 100;
+    var el = $("rps-delta");
+    el.textContent = (delta >= 0 ? "+" : "") + delta.toFixed(1) + "%";
+    el.className = delta >= 0 ? "up" : "";
+    $("peak").textContent = "peak " + Math.max.apply(null, hist).toFixed(0) + " req/s";
+    draw();
+  }
+
+  window.addEventListener("resize", draw);
+  draw();
+  setInterval(tick, 1000);
+})();
+</script>
 </body>
 </html>

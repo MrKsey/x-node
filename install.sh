@@ -1336,11 +1336,14 @@ if [ "$YGG_PROTO" = "wss" ] && [ "$YGG_PORT" -gt 0 ]; then
     # deliberately configured server, not like a fresh nginx installation.
     [ -f "$SCRIPT_DIR/deploy/www/index.html" ] || die "missing $SCRIPT_DIR/deploy/www/index.html"
     install -d -m 0755 "$STUB_DIR"
-    # Every installation gets its own status page: the host name, the node id,
-    # the uptime and the counters are generated here, so two X-Node hosts do
-    # not serve byte-identical pages. The template holds the layout only.
+    # Every installation gets its own status page: the palette, the layout, the
+    # host name, the node id and the counters are generated here, so two X-Node
+    # hosts do not serve byte-identical pages. The template holds the layout
+    # only; the live numbers are drawn by a small script, because a page whose
+    # counters never move looks like a mock-up rather than a server.
     python3 - "$SCRIPT_DIR/deploy/www/index.html" "$STUB_DIR/index.html" <<'PY'
 import datetime
+import json
 import random
 import sys
 
@@ -1351,34 +1354,155 @@ def hexs(count):
     return "".join(rnd.choice("0123456789abcdef") for _ in range(count))
 
 
+def rgba(color, alpha):
+    color = color.lstrip("#")
+    return "rgba(%d,%d,%d,%.2f)" % (
+        int(color[0:2], 16),
+        int(color[2:4], 16),
+        int(color[4:6], 16),
+        alpha,
+    )
+
+
+DARK = [
+    ("#0d1117", "#151b23", "#232c38", "#e6edf3", "#8b949e", "#58a6ff", "#3fb950"),
+    ("#0f1115", "#161a21", "#252b36", "#e8eaf0", "#8a90a0", "#34d399", "#3fb950"),
+    ("#101014", "#17171d", "#27272f", "#ececf1", "#9494a3", "#a78bfa", "#4ade80"),
+    ("#0b0f14", "#121820", "#1f2833", "#dbe4ee", "#7d8b9c", "#22d3ee", "#34d399"),
+]
+LIGHT = [
+    ("#f6f7f9", "#ffffff", "#e3e6ea", "#1f2328", "#6b7280", "#0969da", "#1a7f37"),
+    ("#f7f8f6", "#ffffff", "#e2e6e0", "#1d211f", "#6c7570", "#0f766e", "#15803d"),
+    ("#f8f7f4", "#ffffff", "#e7e3dc", "#221f1a", "#77716a", "#b45309", "#15803d"),
+    ("#f5f7fb", "#ffffff", "#e0e6ef", "#1b2430", "#697586", "#4f46e5", "#15803d"),
+]
+FONTS = [
+    'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
+    '"Segoe UI", system-ui, -apple-system, sans-serif',
+    'system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif',
+]
+MONOS = [
+    'ui-monospace, "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace',
+    '"SFMono-Regular", ui-monospace, Menlo, Consolas, monospace',
+]
+KERNELS = [
+    "linux 6.8.0-45-generic",
+    "linux 6.1.0-26-amd64",
+    "linux 5.15.0-122-generic",
+    "linux 6.6.31-lts",
+]
+SERVICES = ["web", "api", "static", "cache", "queue", "worker", "storage", "proxy"]
+
+dark = rnd.random() < 0.6
+bg, panel, border, fg, muted, accent, ok = rnd.choice(DARK if dark else LIGHT)
+accent_soft = rgba(accent, 0.10 if not dark else 0.14)
+accent_line = rgba(accent, 0.30 if not dark else 0.38)
+ok_soft = rgba(ok, 0.10 if not dark else 0.14)
+ok_line = rgba(ok, 0.30 if not dark else 0.38)
+grid = "rgba(255,255,255,0.07)" if dark else "rgba(15,23,42,0.07)"
+
+rps = rnd.randint(90, 460)
+cache = rnd.uniform(78.0, 96.5)
+p50 = rnd.randint(3, 19)
+p95 = int(p50 * rnd.uniform(2.0, 3.2)) + rnd.randint(1, 5)
+p99 = int(p95 * rnd.uniform(1.3, 1.9))
+uptime_sec = (
+    rnd.randint(2, 260) * 86400
+    + rnd.randint(0, 23) * 3600
+    + rnd.randint(0, 59) * 60
+)
+booted = (datetime.datetime.now() - datetime.timedelta(seconds=uptime_sec)).strftime(
+    "%Y-%m-%d"
+)
+mbit = max(0.6, rps * rnd.uniform(0.004, 0.012))
+load = min(3.4, max(0.08, rps / rnd.uniform(150.0, 320.0)))
+mem = rnd.uniform(24.0, 71.0)
+conns = rnd.randint(35, 280)
+host = rnd.choice(["srv", "node", "edge", "host", "vm"]) + "-" + hexs(rnd.choice([4, 5]))
+
+names = rnd.sample(SERVICES, rnd.randint(3, 5))
+rows = []
+for name in names:
+    uptime_pct = rnd.uniform(99.86, 100.0)
+    latency = rnd.randint(1, 12)
+    rows.append(
+        '<tr><td class="name">%s</td><td><span class="tag">up</span></td>'
+        '<td class="num">%.2f%%</td><td class="num">%d ms</td></tr>'
+        % (name, uptime_pct, latency)
+    )
+
 values = {
-    "host": "srv-" + hexs(5),
+    "host": host,
+    "mark": host[0:2].upper(),
+    "subtitle": rnd.choice(KERNELS),
+    "body_class": rnd.choice(["v-wide", "v-compact"]),
+    "font": rnd.choice(FONTS),
+    "mono": rnd.choice(MONOS),
+    "bg": bg,
+    "panel": panel,
+    "border": border,
+    "fg": fg,
+    "muted": muted,
+    "accent": accent,
+    "accent_soft": accent_soft,
+    "accent_line": accent_line,
+    "ok": ok,
+    "ok_soft": ok_soft,
+    "ok_line": ok_line,
+    "grid": grid,
     "node": hexs(12),
-    "uptime": "%dd %dh %02dm" % (
-        rnd.randint(3, 240),
-        rnd.randint(0, 23),
-        rnd.randint(0, 59),
-    ),
-    "load": "%.2f %.2f %.2f" % (
-        rnd.uniform(0.05, 1.4),
-        rnd.uniform(0.05, 1.4),
-        rnd.uniform(0.05, 1.4),
-    ),
-    "memory": "%d%% of %d GB" % (rnd.randint(18, 74), rnd.choice([2, 4, 8, 16])),
-    "workers": str(rnd.choice([4, 8, 12, 16, 24, 32])),
-    "connections": str(rnd.randint(3, 180)),
-    "requests": "{:,}".format(rnd.randint(20000, 900000)),
-    "cache": "%d%%" % rnd.randint(62, 97),
-    "build": hexs(8),
+    "build": hexs(7),
     "deployed": (
-        datetime.date.today() - datetime.timedelta(days=rnd.randint(1, 40))
+        datetime.date.today() - datetime.timedelta(days=rnd.randint(1, 60))
     ).strftime("%Y-%m-%d"),
+    "cert_days": str(rnd.randint(38, 340)),
+    "rps": str(rps),
+    "rps_delta": "%+.1f%%" % rnd.uniform(-9.0, 13.0),
+    "conns": str(conns),
+    "keepalive": str(int(conns * 0.72)),
+    "load": "%.2f %.2f %.2f"
+    % (load, load * 0.82 + 0.04, load * 0.61 + 0.02),
+    "workers": str(rnd.choice([4, 8, 12, 16, 24, 32])),
+    "mem": "%.1f" % mem,
+    "mem_total": str(rnd.choice([2, 4, 8, 16])),
+    "peak": str(int(rps * rnd.uniform(1.15, 1.6))),
+    "p50": str(p50),
+    "p95": str(p95),
+    "p99": str(p99),
+    "cache": "%.1f" % cache,
+    "miss": str(int(rps * (100 - cache) / 100)),
+    "mbit": "%.1f" % mbit,
+    "mbit_out": "%.1f" % (mbit * 0.63),
+    "mbit_in": "%.1f" % (mbit * 0.37),
+    "uptime": "%dd %dh %02dm"
+    % (uptime_sec // 86400, uptime_sec % 86400 // 3600, uptime_sec % 3600 // 60),
+    "booted": booted,
+    "services": "".join(rows),
+    "seed": json.dumps(
+        {
+            "rps": rps,
+            "conns": conns,
+            "load": round(load, 2),
+            "mem": round(mem, 1),
+            "cache": round(cache, 1),
+            "p50": p50,
+            "p95": p95,
+            "mbit": round(mbit, 1),
+            "uptime": uptime_sec,
+            "accent": accent,
+            "accentSoft": accent_soft,
+            "grid": grid,
+        },
+        separators=(",", ":"),
+    ),
 }
 
 with open(sys.argv[1], "r", encoding="utf-8") as handle:
     page = handle.read()
 for key, value in values.items():
     page = page.replace("{{%s}}" % key, value)
+if "{{" in page:
+    sys.exit("the status page template has an unfilled placeholder")
 with open(sys.argv[2], "w", encoding="utf-8") as handle:
     handle.write(page)
 PY

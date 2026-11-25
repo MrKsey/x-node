@@ -4,6 +4,13 @@ All notable changes to X-Node are documented here. The format is based on [Keep 
 
 The release workflow publishes the section of the tag as the GitHub release body, so every release has a short human-readable summary of what changed. Keep each bullet on a single line: GitHub turns every newline in a release body into a hard break, so a wrapped bullet would render as a narrow column instead of using the full width.
 
+## [1.7.27] — 2026-11-25
+
+### Changed
+
+- **The stub page is a dashboard that looks alive.** The status page now shows requests per second, connections, load average, memory, latency percentiles, cache hits, traffic and uptime as cards over a throughput chart and a service table, and the numbers move every second in the browser instead of sitting still as one frozen snapshot.
+- **Every installation gets its own design.** The palette (dark or light), the layout (wide or compact), the fonts, the host name, the node id, the build id, the deploy date and every counter are drawn at install time from a random seed, so two X-Node hosts never serve the same page, and the installer fails instead of shipping a page with an unfilled placeholder.
+
 ## [1.7.26] — 2026-11-25
 
 ### Changed
