@@ -4,6 +4,17 @@ All notable changes to X-Node are documented here. The format is based on [Keep 
 
 The release workflow publishes the section of the tag as the GitHub release body, so every release has a short human-readable summary of what changed. Keep each bullet on a single line: GitHub turns every newline in a release body into a hard break, so a wrapped bullet would render as a narrow column instead of using the full width.
 
+## [1.7.26] — 2026-11-25
+
+### Changed
+
+- **The QR code of the first invite is a third smaller.** The code is drawn with the low recovery level and a one-module quiet zone: 59x30 terminal characters instead of 69x35, which is 27% fewer cells for the same link. The link itself is printed below the code, so a camera that refuses the smaller code still has the text.
+- **The confirmation prompt defaults to yes.** Enter continues the installation; only an explicit `n` aborts it, so the one-liner no longer needs a typed `y`.
+- **The facts block moved below the QR code.** The invite and its code are what the installer is for, so they come first and the reference list of addresses, ports and paths follows as a separate block at the very end. The "Useful commands" list is gone: `x-node --help` covers it and the block was the longest part of the output.
+- **The DNS line points at the dashboard path.** A server with the Alfis panel shows `https://<host>/<random>/dns/` instead of the bare `http://[address]:8082/`, the same URL that goes into the credentials file, so the panel is reached the way the rest of the node is.
+- **The installer opens its own ports in a running firewall.** ufw and firewalld are updated with the peering port, the stub page on 80, the resolver on TCP and UDP, and the SOCKS5/API ports, so the paragraph that asked the user to open TCP by hand is gone. A firewall that is not running is left alone.
+- **Every installation serves its own status page.** The default page of the stub site is rendered at install time from a template with a random host name, node id, uptime, load average, memory, workers, connections, requests, cache hit ratio, build id and deploy date, so two X-Node hosts no longer answer with the same "Service is running" page.
+
 ## [1.7.25] — 2026-11-25
 
 ### Fixed

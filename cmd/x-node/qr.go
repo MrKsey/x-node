@@ -36,21 +36,39 @@ func exitLink(cfg Config, invite string) string {
 
 // renderQR draws the payload with ANSI colours. Two module rows share one text
 // row through the upper/lower half-block characters, so the code is twice as
-// narrow and twice as short as a plain two-spaces-per-module bitmap. The quiet
-// zone is part of the bitmap.
+// narrow and twice as short as a plain two-spaces-per-module bitmap.
+//
+// The code is drawn with the low recovery level and a one-module quiet zone:
+// the invite link carries a 64-character key, and at the medium level the same
+// payload needs a version that renders 69x35 characters instead of 59x30, so
+// the block took a third of the screen more than it had to. A screen is a clean
+// medium, and the link is printed below the code as a fallback, so the lower
+// level costs nothing here.
 func renderQR(payload string) (string, error) {
-	code, err := qrcode.New(payload, qrcode.Medium)
+	code, err := qrcode.New(payload, qrcode.Low)
 	if err != nil {
 		return "", err
 	}
-	code.DisableBorder = false
+	// The bitmap carries the four-module quiet zone of the specification.
+	// Dropping it and drawing a single module of padding keeps the code
+	// readable on a terminal while removing eight columns and four rows.
+	code.DisableBorder = true
 	bitmap := code.Bitmap()
+	const quiet = 1
+	size := len(bitmap) + quiet*2
+	padded := make([][]bool, size)
+	for y := range padded {
+		padded[y] = make([]bool, size)
+	}
+	for y := range bitmap {
+		copy(padded[y+quiet][quiet:], bitmap[y])
+	}
 	var out strings.Builder
-	for y := 0; y < len(bitmap); y += 2 {
-		top := bitmap[y]
+	for y := 0; y < len(padded); y += 2 {
+		top := padded[y]
 		var bottom []bool
-		if y+1 < len(bitmap) {
-			bottom = bitmap[y+1]
+		if y+1 < len(padded) {
+			bottom = padded[y+1]
 		}
 		for x, upper := range top {
 			lower := x < len(bottom) && bottom[x]

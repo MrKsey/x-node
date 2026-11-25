@@ -3,26 +3,67 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Server</title>
+<title>{{host}}</title>
 <style>
   html, body { height: 100%; margin: 0; }
   body {
     display: flex;
     align-items: center;
     justify-content: center;
-    background: #fff;
+    background: #f7f8fa;
     color: #222;
-    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
   }
-  main { text-align: center; padding: 24px; }
-  h1 { margin: 0 0 8px; font-size: 20px; font-weight: 600; }
-  p { margin: 0; color: #666; }
+  main {
+    width: 100%;
+    max-width: 520px;
+    margin: 24px;
+    padding: 24px 28px;
+    background: #fff;
+    border: 1px solid #e3e6ea;
+    border-radius: 10px;
+  }
+  h1 { margin: 0 0 2px; font-size: 19px; font-weight: 600; }
+  .state { margin: 0 0 18px; color: #1f7a3d; font-size: 13px; }
+  .state::before {
+    content: "";
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    margin-right: 7px;
+    border-radius: 50%;
+    background: #2eaa5b;
+    vertical-align: 1px;
+  }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { padding: 6px 0; text-align: left; font-weight: 400; }
+  th { color: #6b7280; width: 46%; }
+  td {
+    text-align: right;
+    font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+    font-size: 13px;
+  }
+  tr + tr th, tr + tr td { border-top: 1px solid #eef0f3; }
+  footer { margin-top: 18px; color: #9aa1ab; font-size: 12px; }
 </style>
 </head>
 <body>
 <main>
-  <h1>Service is running</h1>
-  <p>This host does not serve a public website.</p>
+  <h1>{{host}}</h1>
+  <p class="state">operational</p>
+  <table>
+    <tr><th>Node</th><td>{{node}}</td></tr>
+    <tr><th>Uptime</th><td>{{uptime}}</td></tr>
+    <tr><th>Load average</th><td>{{load}}</td></tr>
+    <tr><th>Memory</th><td>{{memory}}</td></tr>
+    <tr><th>Workers</th><td>{{workers}}</td></tr>
+    <tr><th>Connections</th><td>{{connections}}</td></tr>
+    <tr><th>Requests (24 h)</th><td>{{requests}}</td></tr>
+    <tr><th>Cache hit</th><td>{{cache}}</td></tr>
+    <tr><th>Build</th><td>{{build}}</td></tr>
+    <tr><th>Deployed</th><td>{{deployed}}</td></tr>
+  </table>
+  <footer>Status is refreshed by the monitoring agent every 60 seconds.</footer>
 </main>
 </body>
 </html>

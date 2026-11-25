@@ -163,6 +163,9 @@ ALFIS_INSTALLED=0
 # archive bundles such a build; an upstream nogui binary has no panel.
 ALFIS_WEBUI=0
 DNS_WEB_PASSWORD=""
+# The URL of the Alfis panel behind the dashboard path (/<random>/dns/). Set
+# once the DNS server is started; empty when the dashboard is disabled.
+DNS_PANEL_URL=""
 UPGRADE=0
 PUBLIC_HOST=""
 PUBLIC_HOST_SET=0
@@ -287,6 +290,41 @@ EOF
 
 need_value() {
     [ "$#" -ge 2 ] || die "option $1 needs a value"
+}
+
+# open_firewall_ports opens the ports this node listens on in a host firewall
+# that is already running. A disabled ufw or firewalld has no rules to update
+# and is left alone: installing a firewall is not the job of this installer.
+open_firewall_ports() {
+    local tcp="$1" udp="$2" port
+    [ -n "$tcp$udp" ] || return 0
+    if command -v ufw >/dev/null 2>&1 \
+        && LC_ALL=C ufw status 2>/dev/null | grep -q '^Status: active'; then
+        log "Opening the X-Node ports in ufw"
+        for port in $tcp; do
+            ufw allow "$port/tcp" >/dev/null 2>&1 \
+                || warn "ufw did not accept the rule for $port/tcp; open it by hand"
+        done
+        for port in $udp; do
+            ufw allow "$port/udp" >/dev/null 2>&1 \
+                || warn "ufw did not accept the rule for $port/udp; open it by hand"
+        done
+        return 0
+    fi
+    if command -v firewall-cmd >/dev/null 2>&1 \
+        && firewall-cmd --state >/dev/null 2>&1; then
+        log "Opening the X-Node ports in firewalld"
+        for port in $tcp; do
+            firewall-cmd --permanent --add-port="$port/tcp" >/dev/null 2>&1 \
+                || warn "firewalld did not accept the rule for $port/tcp; open it by hand"
+        done
+        for port in $udp; do
+            firewall-cmd --permanent --add-port="$port/udp" >/dev/null 2>&1 \
+                || warn "firewalld did not accept the rule for $port/udp; open it by hand"
+        done
+        firewall-cmd --reload >/dev/null 2>&1 \
+            || warn "firewalld could not reload the rules; run: firewall-cmd --reload"
+    fi
 }
 
 # True when something already listens on the TCP port, IPv4 or IPv6.
@@ -948,10 +986,9 @@ The installer will install packages, rewrite the Yggdrasil configuration
 EOF
 
 if [ "$ASSUME_YES" -eq 0 ]; then
-    read -r -p "Continue? [y/N] " answer
+    read -r -p "Continue? [Y/n] " answer
     case "$answer" in
-        y|Y|yes|YES) ;;
-        *) echo "Aborted."; exit 1 ;;
+        n|N|no|NO) echo "Aborted."; exit 1 ;;
     esac
 fi
 
@@ -1299,7 +1336,54 @@ if [ "$YGG_PROTO" = "wss" ] && [ "$YGG_PORT" -gt 0 ]; then
     # deliberately configured server, not like a fresh nginx installation.
     [ -f "$SCRIPT_DIR/deploy/www/index.html" ] || die "missing $SCRIPT_DIR/deploy/www/index.html"
     install -d -m 0755 "$STUB_DIR"
-    install -m 0644 -o root -g root "$SCRIPT_DIR/deploy/www/index.html" "$STUB_DIR/index.html"
+    # Every installation gets its own status page: the host name, the node id,
+    # the uptime and the counters are generated here, so two X-Node hosts do
+    # not serve byte-identical pages. The template holds the layout only.
+    python3 - "$SCRIPT_DIR/deploy/www/index.html" "$STUB_DIR/index.html" <<'PY'
+import datetime
+import random
+import sys
+
+rnd = random.SystemRandom()
+
+
+def hexs(count):
+    return "".join(rnd.choice("0123456789abcdef") for _ in range(count))
+
+
+values = {
+    "host": "srv-" + hexs(5),
+    "node": hexs(12),
+    "uptime": "%dd %dh %02dm" % (
+        rnd.randint(3, 240),
+        rnd.randint(0, 23),
+        rnd.randint(0, 59),
+    ),
+    "load": "%.2f %.2f %.2f" % (
+        rnd.uniform(0.05, 1.4),
+        rnd.uniform(0.05, 1.4),
+        rnd.uniform(0.05, 1.4),
+    ),
+    "memory": "%d%% of %d GB" % (rnd.randint(18, 74), rnd.choice([2, 4, 8, 16])),
+    "workers": str(rnd.choice([4, 8, 12, 16, 24, 32])),
+    "connections": str(rnd.randint(3, 180)),
+    "requests": "{:,}".format(rnd.randint(20000, 900000)),
+    "cache": "%d%%" % rnd.randint(62, 97),
+    "build": hexs(8),
+    "deployed": (
+        datetime.date.today() - datetime.timedelta(days=rnd.randint(1, 40))
+    ).strftime("%Y-%m-%d"),
+}
+
+with open(sys.argv[1], "r", encoding="utf-8") as handle:
+    page = handle.read()
+for key, value in values.items():
+    page = page.replace("{{%s}}" % key, value)
+with open(sys.argv[2], "w", encoding="utf-8") as handle:
+    handle.write(page)
+PY
+    chown root:root "$STUB_DIR/index.html"
+    chmod 0644 "$STUB_DIR/index.html"
     if [ ! -s "$TLS_CERT" ] || [ ! -s "$TLS_KEY" ]; then
         cert_cn="${PUBLIC_HOST:-$(hostname -f 2>/dev/null || hostname)}"
         # Yggdrasil pins the node key and does not verify the CA chain, so a
@@ -1816,6 +1900,7 @@ if [ "$DNS_ENABLED" -eq 1 ]; then
             if [ "$WEB_ENABLED" -eq 1 ]; then
                 dns_panel_url="$(web_public_url)"
                 dns_panel_url="${dns_panel_url%"${WEB_PATH}/"}${WEB_PATH%/*}/dns/"
+                DNS_PANEL_URL="$dns_panel_url"
                 echo "    web:    $dns_panel_url"
             else
                 echo "    web:    through the dashboard, which is disabled"
@@ -1904,13 +1989,14 @@ fi
 if [ "$DNS_ENABLED" -eq 1 ] && [ -n "$DNS_WEB_PASSWORD" ] \
     && ! grep -q "DNS server (Alfis)" "$CREDENTIALS_FILE" 2>/dev/null; then
     umask 077
+    dns_credentials_url="${DNS_PANEL_URL:-http://[$ADDRESS]:$DNS_WEB_PORT/}"
     {
         [ -f "$CREDENTIALS_FILE" ] || printf 'X-Node DNS server\n=================\n'
         cat <<EOF
 
 DNS server (Alfis)
 ==================
-URL:      http://[$ADDRESS]:$DNS_WEB_PORT/
+URL:      $dns_credentials_url
 Password: $DNS_WEB_PASSWORD
 
 The password is stored in dns.webPassword and shown on the dashboard.
@@ -1923,55 +2009,45 @@ EOF
 fi
 
 if [ "$DNS_ENABLED" -eq 1 ]; then
-    if [ "$ALFIS_WEBUI" -eq 1 ]; then
-        DNS_SUMMARY="[$ADDRESS]:$DNS_PORT, web http://[$ADDRESS]:$DNS_WEB_PORT/ (Alfis)"
+    if [ "$ALFIS_WEBUI" -eq 1 ] && [ -n "$DNS_PANEL_URL" ]; then
+        # The panel is reached through the dashboard path, so the DNS line
+        # carries one https:// URL like every other public endpoint.
+        DNS_SUMMARY="[$ADDRESS]:$DNS_PORT, web $DNS_PANEL_URL"
+    elif [ "$ALFIS_WEBUI" -eq 1 ]; then
+        DNS_SUMMARY="[$ADDRESS]:$DNS_PORT, web http://[$ADDRESS]:$DNS_WEB_PORT/"
     else
-        DNS_SUMMARY="[$ADDRESS]:$DNS_PORT (Alfis, no web UI)"
+        DNS_SUMMARY="[$ADDRESS]:$DNS_PORT (no web UI)"
     fi
 else
     DNS_SUMMARY="disabled"
 fi
 
-echo
-log "The exit node is running"
-cat <<EOF
-
-  Name:        $NODE_NAME
-  Address:     $ADDRESS
-  Yggdrasil:   $([ "$YGG_PORT" -gt 0 ] && echo "TCP/$YGG_PORT, $YGG_PROTO" || echo "outbound only")
-  Peer link:   ${PEER_URI:-not advertised}
-  Public peers: $PEER_COUNT, automatic replacement $([ "$PEER_AUTO_REPLACE" -eq 1 ] && echo "on" || echo "off")
-  SOCKS5:      [$ADDRESS]:$SOCKS_PORT
-  API:         [$ADDRESS]:$API_PORT_EFFECTIVE$([ "$API_PORT" -eq 0 ] && echo " (shared with SOCKS5, /v1/...)" || echo "")
-  IPv6:        $IPV6_MODE
-  Web:         $([ "$WEB_ENABLED" -eq 1 ] && echo "$WEB_URL (login $WEB_LOGIN)" || echo "disabled")
-  DNS:         $DNS_SUMMARY
-  Config:      $EXIT_CONFIG
-  State:       $STATE_DIR
-  Allowlist:   $(x-node allow list -config "$EXIT_CONFIG" 2>/dev/null | tail -n +2 | wc -l) client(s)
-
-Useful commands:
-  x-node invite -config $EXIT_CONFIG
-  x-node clients -config $EXIT_CONFIG
-  x-node usage -config $EXIT_CONFIG
-  x-node quota show -config $EXIT_CONFIG
-  x-node allow list -config $EXIT_CONFIG
-  x-node allow add 200:... -config $EXIT_CONFIG
-  x-node web url -config $EXIT_CONFIG
-  x-node web password -config $EXIT_CONFIG
-  x-node dns status -config $EXIT_CONFIG
-  x-node dns on -config $EXIT_CONFIG
-  x-node dns off -config $EXIT_CONFIG
-  x-node peers status -config $EXIT_CONFIG
-  x-node peers count 5 -config $EXIT_CONFIG
-  x-node peers auto off -config $EXIT_CONFIG
-  x-node peers refresh -config $EXIT_CONFIG
-  x-node doctor -config $EXIT_CONFIG
-  systemctl status x-node
-  journalctl -u x-node -f
-  sudo bash /usr/local/share/doc/x-node/uninstall.sh --help
-
-EOF
+# The ports a running firewall has to let through: the peering listener, the
+# stub page on 80 when nginx serves it, the resolver, and the SOCKS5/API pair the
+# clients use over the tunnel. The list is built without duplicates because the
+# API often shares the SOCKS5 port.
+FIREWALL_TCP=""
+FIREWALL_UDP=""
+add_firewall_port() {
+    local list="$1" port="$2"
+    case " $list " in
+        *" $port "*) printf '%s' "$list" ;;
+        *) printf '%s %s' "$list" "$port" ;;
+    esac
+}
+if [ "$YGG_PORT" -gt 0 ]; then
+    FIREWALL_TCP="$(add_firewall_port "$FIREWALL_TCP" "$YGG_PORT")"
+fi
+if [ -f "$NGINX_HTTP_SITE" ]; then
+    FIREWALL_TCP="$(add_firewall_port "$FIREWALL_TCP" 80)"
+fi
+if [ "$DNS_ENABLED" -eq 1 ]; then
+    FIREWALL_TCP="$(add_firewall_port "$FIREWALL_TCP" "$DNS_PORT")"
+    FIREWALL_UDP="$(add_firewall_port "$FIREWALL_UDP" "$DNS_PORT")"
+fi
+FIREWALL_TCP="$(add_firewall_port "$FIREWALL_TCP" "$SOCKS_PORT")"
+FIREWALL_TCP="$(add_firewall_port "$FIREWALL_TCP" "$API_PORT_EFFECTIVE")"
+open_firewall_ports "$FIREWALL_TCP" "$FIREWALL_UDP"
 
 if [ "$WEB_ENABLED" -eq 1 ] && [ "$WEB_TLS" != "off" ]; then
     echo "The web interface uses a self-signed certificate, so the browser warns"
@@ -1979,17 +2055,8 @@ if [ "$WEB_ENABLED" -eq 1 ] && [ "$WEB_TLS" != "off" ]; then
     echo
 fi
 
-if [ "$YGG_PORT" -gt 0 ]; then
-    if [ "$YGG_PROTO" = "wss" ]; then
-        echo "Open TCP/$YGG_PORT in the provider firewall: nginx terminates TLS there"
-        echo "and forwards the WebSocket to Yggdrasil on 127.0.0.1:$YGG_WS_PORT."
-    else
-        echo "Open TCP/$YGG_PORT in the provider firewall so the phone can peer directly."
-    fi
-    echo "The optional nftables table only guards the SOCKS5 and API ports."
-    echo
-fi
-
+# The invite goes first: the QR code is what the user came for, and the facts
+# block below it is a reference that can be read after the phone is set up.
 if [ "$MAKE_INVITE" -eq 1 ]; then
     log "Creating the first invite"
     echo
@@ -2008,4 +2075,24 @@ if [ "$MAKE_INVITE" -eq 1 ]; then
     echo
     echo "In the app: Exit node -> + -> scan the QR, then connect the tunnel."
     echo "Registration goes over Yggdrasil, so the tunnel must be up first."
+    echo
 fi
+
+log "The exit node is running"
+cat <<EOF
+
+  Name:        $NODE_NAME
+  Address:     $ADDRESS
+  Yggdrasil:   $([ "$YGG_PORT" -gt 0 ] && echo "TCP/$YGG_PORT, $YGG_PROTO" || echo "outbound only")
+  Peer link:   ${PEER_URI:-not advertised}
+  Public peers: $PEER_COUNT, automatic replacement $([ "$PEER_AUTO_REPLACE" -eq 1 ] && echo "on" || echo "off")
+  SOCKS5:      [$ADDRESS]:$SOCKS_PORT
+  API:         [$ADDRESS]:$API_PORT_EFFECTIVE$([ "$API_PORT" -eq 0 ] && echo " (shared with SOCKS5, /v1/...)" || echo "")
+  IPv6:        $IPV6_MODE
+  Web:         $([ "$WEB_ENABLED" -eq 1 ] && echo "$WEB_URL (login $WEB_LOGIN)" || echo "disabled")
+  DNS:         $DNS_SUMMARY
+  Config:      $EXIT_CONFIG
+  State:       $STATE_DIR
+  Allowlist:   $(x-node allow list -config "$EXIT_CONFIG" 2>/dev/null | tail -n +2 | wc -l) client(s)
+
+EOF
