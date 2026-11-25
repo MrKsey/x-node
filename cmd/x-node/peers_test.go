@@ -592,6 +592,65 @@ func TestPeerKeyOfURIDropsQuery(t *testing.T) {
 	}
 }
 
+// A fresh install has no peers.json: the first search must run at startup, not
+// after the six-hour refresh interval, otherwise the seed peers are never
+// replaced by faster ones.
+func TestPeerSupervisorProbesOnFreshInstall(t *testing.T) {
+	cfg := testPeerConfig(t, 3)
+	cfg.Peers = []string{"tls://seed1.example:1", "tls://seed2.example:2", "tls://seed3.example:3"}
+	path := filepath.Join(t.TempDir(), "config.json")
+	raw, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	node := &fakeNode{peers: []adminPeer{
+		{URI: "tls://seed1.example:1", Up: true},
+		{URI: "tls://seed2.example:2", Up: true},
+		{URI: "tls://seed3.example:3", Up: true},
+	}}
+	s := newPeerSupervisor(cfg, path, newLogger("error"))
+	s.node = node
+	probed := make(chan struct{}, 1)
+	s.probe = func(context.Context, int, string) ([]probeResult, error) {
+		select {
+		case probed <- struct{}{}:
+		default:
+		}
+		return nil, nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go s.run(ctx)
+
+	select {
+	case <-probed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the supervisor did not search the catalogue on a fresh install")
+	}
+}
+
+// The search time survives a restart: a complete list with a recent probe must
+// not download the catalogue again before the refresh interval.
+func TestPeerSupervisorKeepsLastProbeAcrossRestart(t *testing.T) {
+	cfg := testPeerConfig(t, 3)
+	cfg.Peers = []string{"tls://seed1.example:1", "tls://seed2.example:2", "tls://seed3.example:3"}
+	state := peersState{
+		Seed:      cfg.Peers,
+		Managed:   cfg.Peers,
+		LastProbe: time.Now().Add(-time.Hour),
+	}
+	if err := writePeersState(cfg.statePath(peersStateFile), state); err != nil {
+		t.Fatal(err)
+	}
+	s := newPeerSupervisor(cfg, cfg.statePath("config.json"), newLogger("error"))
+	if s.probeDue() {
+		t.Fatal("a recent probe must not run again after a restart")
+	}
+}
+
 func TestConfigPeerDefaults(t *testing.T) {
 	cfg := defaultConfig()
 	cfg.applyDefaults()

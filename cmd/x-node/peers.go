@@ -256,6 +256,10 @@ type peerSettings struct {
 type peersState struct {
 	Seed    []string `json:"seed"`
 	Managed []string `json:"managed"`
+	// LastProbe is when the public catalogue was last searched. It is stored so
+	// a restart does not probe again before the refresh interval, while a fresh
+	// install (no state file) probes right away and can replace the seed peers.
+	LastProbe time.Time `json:"lastProbe,omitempty"`
 }
 
 // peerSupervisor keeps the configured number of public peers alive.
@@ -347,6 +351,9 @@ func (s *peerSupervisor) loadState(seed []string) {
 		if len(s.seed) == 0 {
 			s.seed = append([]string(nil), s.managed...)
 		}
+		// A state from an older release has no LastProbe: the first search then
+		// runs once at startup and the result is stored from that point on.
+		s.lastProbe = state.LastProbe
 		return
 	}
 	s.managed = cleanPeerList(seed)
@@ -364,13 +371,6 @@ func (s *peerSupervisor) run(ctx context.Context) {
 	// Write the starting list once, so peers.json exists even before the first
 	// replacement and "peers status" always reads the live list.
 	s.saveState()
-	s.mu.Lock()
-	// A full list at startup does not need an immediate download of the public
-	// catalogue; the first probe happens after the refresh interval.
-	if len(s.managed) >= s.settings.Count {
-		s.lastProbe = time.Now()
-	}
-	s.mu.Unlock()
 	s.log.info("peer supervisor: %d public peer(s), auto replace %s",
 		s.settings.Count, onOff(s.settings.AutoReplace))
 
@@ -955,6 +955,11 @@ func (s *peerSupervisor) startProbeLocked(ctx context.Context, settings peerSett
 		s.mu.Lock()
 		s.probing = false
 		s.lastProbe = time.Now()
+		s.changed = true
+		// The search time survives a restart: otherwise every restart would
+		// download the catalogue again, and a fresh install would still wait a
+		// full refresh interval before it could replace the seed peers.
+		s.saveLocked()
 		if err != nil {
 			s.progress.Stage = "failed"
 			s.progress.UpdatedAt = time.Now()
@@ -1079,8 +1084,9 @@ func (s *peerSupervisor) saveLocked() {
 		return
 	}
 	state := peersState{
-		Seed:    append([]string(nil), s.seed...),
-		Managed: append([]string(nil), s.managed...),
+		Seed:      append([]string(nil), s.seed...),
+		Managed:   append([]string(nil), s.managed...),
+		LastProbe: s.lastProbe,
 	}
 	if err := writePeersState(s.statePath, state); err != nil {
 		s.log.warn("could not save %s: %v", s.statePath, err)

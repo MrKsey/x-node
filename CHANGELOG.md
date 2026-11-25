@@ -4,6 +4,12 @@ All notable changes to X-Node are documented here. The format is based on [Keep 
 
 The release workflow publishes the section of the tag as the GitHub release body, so every release has a short human-readable summary of what changed. Keep each bullet on a single line: GitHub turns every newline in a release body into a hard break, so a wrapped bullet would render as a narrow column instead of using the full width.
 
+## [1.7.29] — 2026-11-26
+
+### Fixed
+
+- **The first peer search runs on a fresh install.** A complete list at startup used to postpone the catalogue search for the six-hour refresh interval, so the three seed peers were never replaced by faster ones and the log had no replacement line; the search time is now stored in the state file, a fresh install probes at startup, and the pool is ready for automatic replacement.
+
 ## [1.7.28] — 2026-11-25
 
 ### Changed
