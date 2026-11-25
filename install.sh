@@ -123,6 +123,10 @@ NGINX_LINK="/etc/nginx/sites-enabled/x-node.conf"
 NGINX_HTTP_SITE="/etc/nginx/sites-available/x-node-http.conf"
 NGINX_HTTP_LINK="/etc/nginx/sites-enabled/x-node-http.conf"
 STUB_DIR="/var/www/x-node"
+# The daemon fills the timestamp and the request id of the landing page on every
+# request, so nginx only proxies to it and keeps a static fallback for the case
+# when the daemon is down.
+STUB_PORT=18084
 # The web interface. Empty WEB_BIND/WEB_TLS mean "decide after the peering
 # settings are known": loopback behind nginx, otherwise every address with a
 # self-signed certificate.
@@ -1336,14 +1340,14 @@ if [ "$YGG_PROTO" = "wss" ] && [ "$YGG_PORT" -gt 0 ]; then
     # deliberately configured server, not like a fresh nginx installation.
     [ -f "$SCRIPT_DIR/deploy/www/index.html" ] || die "missing $SCRIPT_DIR/deploy/www/index.html"
     install -d -m 0755 "$STUB_DIR"
-    # Every installation gets its own status page: the palette, the layout, the
-    # host name, the node id and the counters are generated here, so two X-Node
-    # hosts do not serve byte-identical pages. The template holds the layout
-    # only; the live numbers are drawn by a small script, because a page whose
-    # counters never move looks like a mock-up rather than a server.
-    python3 - "$SCRIPT_DIR/deploy/www/index.html" "$STUB_DIR/index.html" <<'PY'
+    # Every installation gets its own page: the palette, the fonts, the
+    # alignment and the host name are drawn here, so two X-Node hosts do not
+    # serve byte-identical pages. The template holds the layout only; the
+    # timestamp and the request id are left in place for the daemon, which
+    # fills them on every request.
+    python3 - "$SCRIPT_DIR/deploy/www/index.html" "$STUB_DIR/index.html" \
+        "$STUB_DIR/stub-fallback.html" <<'PY'
 import datetime
-import json
 import random
 import sys
 
@@ -1391,51 +1395,22 @@ KERNELS = [
     "linux 5.15.0-122-generic",
     "linux 6.6.31-lts",
 ]
-SERVICES = ["web", "api", "static", "cache", "queue", "worker", "storage", "proxy"]
 
 dark = rnd.random() < 0.6
 bg, panel, border, fg, muted, accent, ok = rnd.choice(DARK if dark else LIGHT)
-accent_soft = rgba(accent, 0.10 if not dark else 0.14)
-accent_line = rgba(accent, 0.30 if not dark else 0.38)
-ok_soft = rgba(ok, 0.10 if not dark else 0.14)
-ok_line = rgba(ok, 0.30 if not dark else 0.38)
-grid = "rgba(255,255,255,0.07)" if dark else "rgba(15,23,42,0.07)"
-
-rps = rnd.randint(90, 460)
-cache = rnd.uniform(78.0, 96.5)
-p50 = rnd.randint(3, 19)
-p95 = int(p50 * rnd.uniform(2.0, 3.2)) + rnd.randint(1, 5)
-p99 = int(p95 * rnd.uniform(1.3, 1.9))
-uptime_sec = (
-    rnd.randint(2, 260) * 86400
-    + rnd.randint(0, 23) * 3600
-    + rnd.randint(0, 59) * 60
-)
-booted = (datetime.datetime.now() - datetime.timedelta(seconds=uptime_sec)).strftime(
-    "%Y-%m-%d"
-)
-mbit = max(0.6, rps * rnd.uniform(0.004, 0.012))
-load = min(3.4, max(0.08, rps / rnd.uniform(150.0, 320.0)))
-mem = rnd.uniform(24.0, 71.0)
-conns = rnd.randint(35, 280)
+accent_soft = rgba(accent, 0.14 if dark else 0.10)
+accent_line = rgba(accent, 0.38 if dark else 0.30)
+grid = "rgba(255,255,255,0.06)" if dark else "rgba(15,23,42,0.06)"
+code_bg = rgba("#000000", 0.22) if dark else rgba("#0f172a", 0.04)
+shadow = rgba("#000000", 0.45) if dark else rgba("#0f172a", 0.12)
 host = rnd.choice(["srv", "node", "edge", "host", "vm"]) + "-" + hexs(rnd.choice([4, 5]))
-
-names = rnd.sample(SERVICES, rnd.randint(3, 5))
-rows = []
-for name in names:
-    uptime_pct = rnd.uniform(99.86, 100.0)
-    latency = rnd.randint(1, 12)
-    rows.append(
-        '<tr><td class="name">%s</td><td><span class="tag">up</span></td>'
-        '<td class="num">%.2f%%</td><td class="num">%d ms</td></tr>'
-        % (name, uptime_pct, latency)
-    )
 
 values = {
     "host": host,
     "mark": host[0:2].upper(),
     "subtitle": rnd.choice(KERNELS),
-    "body_class": rnd.choice(["v-wide", "v-compact"]),
+    "theme": "dark" if dark else "light",
+    "body_class": rnd.choice(["v-center", "v-left"]),
     "font": rnd.choice(FONTS),
     "mono": rnd.choice(MONOS),
     "bg": bg,
@@ -1447,67 +1422,38 @@ values = {
     "accent_soft": accent_soft,
     "accent_line": accent_line,
     "ok": ok,
-    "ok_soft": ok_soft,
-    "ok_line": ok_line,
     "grid": grid,
+    "code_bg": code_bg,
+    "shadow": shadow,
     "node": hexs(12),
     "build": hexs(7),
     "deployed": (
         datetime.date.today() - datetime.timedelta(days=rnd.randint(1, 60))
     ).strftime("%Y-%m-%d"),
-    "cert_days": str(rnd.randint(38, 340)),
-    "rps": str(rps),
-    "rps_delta": "%+.1f%%" % rnd.uniform(-9.0, 13.0),
-    "conns": str(conns),
-    "keepalive": str(int(conns * 0.72)),
-    "load": "%.2f %.2f %.2f"
-    % (load, load * 0.82 + 0.04, load * 0.61 + 0.02),
-    "workers": str(rnd.choice([4, 8, 12, 16, 24, 32])),
-    "mem": "%.1f" % mem,
-    "mem_total": str(rnd.choice([2, 4, 8, 16])),
-    "peak": str(int(rps * rnd.uniform(1.15, 1.6))),
-    "p50": str(p50),
-    "p95": str(p95),
-    "p99": str(p99),
-    "cache": "%.1f" % cache,
-    "miss": str(int(rps * (100 - cache) / 100)),
-    "mbit": "%.1f" % mbit,
-    "mbit_out": "%.1f" % (mbit * 0.63),
-    "mbit_in": "%.1f" % (mbit * 0.37),
-    "uptime": "%dd %dh %02dm"
-    % (uptime_sec // 86400, uptime_sec % 86400 // 3600, uptime_sec % 3600 // 60),
-    "booted": booted,
-    "services": "".join(rows),
-    "seed": json.dumps(
-        {
-            "rps": rps,
-            "conns": conns,
-            "load": round(load, 2),
-            "mem": round(mem, 1),
-            "cache": round(cache, 1),
-            "p50": p50,
-            "p95": p95,
-            "mbit": round(mbit, 1),
-            "uptime": uptime_sec,
-            "accent": accent,
-            "accentSoft": accent_soft,
-            "grid": grid,
-        },
-        separators=(",", ":"),
-    ),
 }
 
 with open(sys.argv[1], "r", encoding="utf-8") as handle:
     page = handle.read()
 for key, value in values.items():
     page = page.replace("{{%s}}" % key, value)
-if "{{" in page:
+# The timestamp and the request id stay in the file on purpose: the daemon
+# fills them on every request, so a reload never shows the same pair.
+for dynamic in ("{{timestamp}}", "{{request_id}}"):
+    if dynamic not in page:
+        sys.exit("the status page template lost " + dynamic)
+leftover = page.replace("{{timestamp}}", "").replace("{{request_id}}", "")
+if "{{" in leftover:
     sys.exit("the status page template has an unfilled placeholder")
 with open(sys.argv[2], "w", encoding="utf-8") as handle:
     handle.write(page)
+# The same page with dashes is served by nginx when the daemon is down: the
+# error page must not depend on the service it reports as missing.
+fallback = page.replace("{{timestamp}}", "-").replace("{{request_id}}", "-")
+with open(sys.argv[3], "w", encoding="utf-8") as handle:
+    handle.write(fallback)
 PY
-    chown root:root "$STUB_DIR/index.html"
-    chmod 0644 "$STUB_DIR/index.html"
+    chown root:root "$STUB_DIR/index.html" "$STUB_DIR/stub-fallback.html"
+    chmod 0644 "$STUB_DIR/index.html" "$STUB_DIR/stub-fallback.html"
     if [ ! -s "$TLS_CERT" ] || [ ! -s "$TLS_KEY" ]; then
         cert_cn="${PUBLIC_HOST:-$(hostname -f 2>/dev/null || hostname)}"
         # Yggdrasil pins the node key and does not verify the CA chain, so a
@@ -1578,7 +1524,18 @@ server {
     index index.html;
 ${WEB_NGINX_LOCATION}
     location / {
-        try_files \$uri \$uri/ =404;
+        proxy_pass http://127.0.0.1:${STUB_PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_buffering off;
+        error_page 502 503 504 = /stub-fallback.html;
+    }
+
+    location = /stub-fallback.html {
+        root ${STUB_DIR};
+        internal;
     }
 
     location /ygg {
@@ -1609,7 +1566,18 @@ server {
     index index.html;
 
     location / {
-        try_files \$uri \$uri/ =404;
+        proxy_pass http://127.0.0.1:${STUB_PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_buffering off;
+        error_page 502 503 504 = /stub-fallback.html;
+    }
+
+    location = /stub-fallback.html {
+        root ${STUB_DIR};
+        internal;
     }
 }
 EOF

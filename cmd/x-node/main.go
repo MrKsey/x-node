@@ -168,6 +168,7 @@ func cmdServe(args []string) error {
 	socks.udp.live = live
 	socks.dialer = newOutboundDialer(cfg, func() string { return live.get().ipv6Mode() }, family)
 	supervisor := newPeerSupervisor(cfg, path, log)
+	stub := newStubServer(log)
 
 	var web *webServer
 	if cfg.Web.Enabled {
@@ -179,9 +180,10 @@ func cmdServe(args []string) error {
 		web.conns = socks.conns
 	}
 
-	errs := make(chan error, 3)
+	errs := make(chan error, 4)
 	go func() { errs <- api.listenAndServe(ctx) }()
 	go func() { errs <- socks.listenAndServe(ctx) }()
+	go func() { errs <- stub.listenAndServe(ctx) }()
 	if web != nil {
 		go func() { errs <- web.listenAndServe(ctx) }()
 		go web.history.run(ctx)

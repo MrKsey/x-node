@@ -4,6 +4,14 @@ All notable changes to X-Node are documented here. The format is based on [Keep 
 
 The release workflow publishes the section of the tag as the GitHub release body, so every release has a short human-readable summary of what changed. Keep each bullet on a single line: GitHub turns every newline in a release body into a hard break, so a wrapped bullet would render as a narrow column instead of using the full width.
 
+## [1.7.28] — 2026-11-25
+
+### Changed
+
+- **The landing page answers like an API and is built on the server.** The script with the moving counters is gone: a visit now returns a card with the JSON body of an unauthorised request, and the daemon fills the timestamp and the request id on every request, so a reload always shows a fresh pair while the status is a real 401 with no-store.
+- **nginx proxies the landing page to the daemon and keeps a static fallback.** A node whose daemon is down still answers with the same card, with dashes instead of the timestamp, instead of a 502 page.
+- **The installer renders the design only.** The palette, the fonts, the alignment and the host name are still drawn per installation, and the renderer stops the installation when a placeholder other than the two dynamic ones is left unfilled.
+
 ## [1.7.27] — 2026-11-25
 
 ### Changed
