@@ -654,7 +654,7 @@ function dashboardHtml() {
         <table class="facts">
           <tr><th>Service</th><td class="right"><span class="pill ok">running</span> · ${duration(status.uptimeSeconds || 0)}</td></tr>
           <tr><th>SOCKS5</th><td class="right">
-            <input class="scroll-field mono right" readonly value="${escapeHtml(bracketHostPort((status.address || "") + ":" + (status.socksPort || "")))}" title="${escapeHtml(bracketHostPort((status.address || "") + ":" + (status.socksPort || "")))}" data-copy-value="${escapeHtml((status.address || "") + ":" + (status.socksPort || ""))}">
+            <input class="scroll-field mono right" readonly value="${escapeHtml(bracketHostPort((status.address || "") + ":" + (status.socksPort || "")))}" title="${escapeHtml(bracketHostPort((status.address || "") + ":" + (status.socksPort || "")))}" data-copy-value="${escapeHtml(bracketHostPort((status.address || "") + ":" + (status.socksPort || "")))}">
           </td></tr>
           <tr><th>API</th><td class="right mono">${apiShared ? "shared with SOCKS5" : "port " + (status.apiPort || "")} · auth ${escapeHtml(status.apiAuth || "")}</td></tr>
           <tr><th>Registration</th><td class="right">${status.registration ? "enabled" : "disabled"}</td></tr>
@@ -664,7 +664,7 @@ function dashboardHtml() {
           <tr><th>UDP relay</th><td class="right">${status.udpEnabled ? "enabled · " + (status.maxUdpAssociations || 0) + " association(s)" : "disabled"}</td></tr>
           <tr><th>IPv6 outbound</th><td class="right">${ipv6StatePill(status)}</td></tr>
           ${status.ipv6Source ? `<tr><th>IPv6 source</th><td class="right">
-            <input class="scroll-field mono right" readonly value="${escapeHtml(bracketIPv6(status.ipv6Source))}" title="${escapeHtml(bracketIPv6(status.ipv6Source))}" data-copy-value="${escapeHtml(status.ipv6Source)}">
+            <input class="scroll-field mono right" readonly value="${escapeHtml(bracketIPv6(status.ipv6Source))}" title="${escapeHtml(bracketIPv6(status.ipv6Source))}" data-copy-value="${escapeHtml(bracketIPv6(status.ipv6Source))}">
           </td></tr>` : ""}
           <tr><th>Domain names</th><td class="right">${status.domainResolution ? "resolved on the exit" : "client resolves"}</td></tr>
           <tr><th>Log level</th><td class="right">${escapeHtml(status.logLevel || "")}</td></tr>
@@ -681,10 +681,10 @@ function dashboardHtml() {
             <tr><th>Version</th><td class="right">${escapeHtml(self.build_version || "—")}</td></tr>
             <tr><th>Project</th><td class="right"><a class="link-wrap" href="https://github.com/yggdrasil-network/yggdrasil-go" title="yggdrasil-network/yggdrasil-go" target="_blank" rel="noopener noreferrer">yggdrasil-go</a></td></tr>
             <tr><th>Address</th><td class="right">
-              <input class="scroll-field mono right" readonly value="${escapeHtml(bracketIPv6(self.address || status.address || "—"))}" title="${escapeHtml(bracketIPv6(self.address || status.address || ""))}" data-copy-value="${escapeHtml(self.address || status.address || "")}">
+              <input class="scroll-field mono right" readonly value="${escapeHtml(bracketIPv6(self.address || status.address || "—"))}" title="${escapeHtml(bracketIPv6(self.address || status.address || ""))}" data-copy-value="${escapeHtml(bracketIPv6(self.address || status.address || ""))}">
             </td></tr>
             <tr><th>Subnet</th><td class="right">
-              <input class="scroll-field mono right" readonly value="${escapeHtml(bracketIPv6(self.subnet || "—"))}" title="${escapeHtml(bracketIPv6(self.subnet || ""))}" data-copy-value="${escapeHtml(self.subnet || "")}">
+              <input class="scroll-field mono right" readonly value="${escapeHtml(bracketIPv6(self.subnet || "—"))}" title="${escapeHtml(bracketIPv6(self.subnet || ""))}" data-copy-value="${escapeHtml(bracketIPv6(self.subnet || ""))}">
             </td></tr>
             <tr><th>Peers</th><td class="right">${peers.up || 0} up · ${peers.managed || 0} automatic · ${peers.manualPeers ? peers.manualPeers.length : 0} manual · ${peers.inbound || 0} inbound</td></tr>
             <tr><th>Auto replace</th><td class="right">${peers.autoReplace ? "on" : "off"} · ${peers.peerCount || 0} wanted</td></tr>
@@ -820,7 +820,7 @@ function dnsCardHtml(dns) {
       <tr><th>Service</th><td class="right">${statePill}</td></tr>
       ${syncing && dns.syncHeight > 0 ? `<tr><th>Sync</th><td class="right mono">${dns.syncHave || 0} / ${dns.syncHeight} blocks</td></tr>` : ""}
       <tr><th>Listen</th><td class="right">
-        <input class="scroll-field mono right" readonly value="${escapeHtml(bracketHostPort(listen || "—"))}" title="Click to copy" data-copy-value="${escapeHtml(listen)}">
+        <input class="scroll-field mono right" readonly value="${escapeHtml(bracketHostPort(listen || "—"))}" title="Click to copy" data-copy-value="${escapeHtml(bracketHostPort(listen))}">
       </td></tr>
       ${enabled && dns.password ? `<tr><th>Web password</th><td class="right">
         <input class="scroll-field mono right" readonly value="${escapeHtml(dns.password)}" title="Click to copy" data-copy-value="${escapeHtml(dns.password)}">
@@ -2189,7 +2189,7 @@ function settingsHtml() {
       <label class="switch"><input type="checkbox" id="s-dns" ${dns.enabled ? "checked" : ""}><span>Run the Alfis DNS server for Yggdrasil clients</span></label>
       <div class="form-grid">
         <label class="field"><span>Listen</span>
-          <input class="scroll-field mono" value="${escapeHtml(bracketHostPort(dns.listen || ""))}" readonly title="Click to copy" data-copy-value="${escapeHtml(dns.listen || "")}">
+          <input class="scroll-field mono" value="${escapeHtml(bracketHostPort(dns.listen || ""))}" readonly title="Click to copy" data-copy-value="${escapeHtml(bracketHostPort(dns.listen || ""))}">
         </label>
         <label class="field"><span>Alfis web password</span>
           <div class="copy-line">

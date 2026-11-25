@@ -72,7 +72,8 @@ Examples:
 
 Without a local copy of this script, the same uninstaller runs as a single
 command (the script is piped into bash, so bash receives the options after
-"-s --"):
+"-s --"); the questions are read from the terminal, and a run without a
+terminal needs --yes:
   curl -fsSL https://raw.githubusercontent.com/MrKsey/x-node/main/uninstall.sh | sudo bash -s -- [options]
 EOF
 }
@@ -135,9 +136,30 @@ if [ "$PURGE" -eq 1 ]; then
 fi
 
 if [ "$ASSUME_YES" -eq 0 ]; then
-    [ -t 0 ] || die "stdin is not a terminal; pass --yes for non-interactive mode"
+    # With "curl ... | sudo bash" the standard input is the script itself, so
+    # the questions would read the script instead of the keyboard. The terminal
+    # is attached on fd 3 when it exists: a tty device node can exist without a
+    # controlling terminal, so opening it is the real check. fd 0 stays on the
+    # pipe, because bash keeps reading the rest of the script from it.
+    ANSWER_FD=0
+    if [ ! -t 0 ]; then
+        if [ -c /dev/tty ] && (exec 3</dev/tty) 2>/dev/null; then
+            exec 3</dev/tty
+            ANSWER_FD=3
+        else
+            die "stdin is not a terminal; pass --yes for non-interactive mode"
+        fi
+    fi
+    # The prompt is printed here instead of through "read -p": the question may
+    # come from fd 3, and an explicit prompt shows on every bash version.
+    ask() {
+        local prompt="$1" reply=""
+        printf '%s' "$prompt" >&2
+        read -r reply <&"$ANSWER_FD" || reply=""
+        printf '%s' "$reply"
+    }
     if [ "$PURGE" -eq 0 ] && [ "$KEEP_STATE_SET" -eq 0 ]; then
-        read -r -p "Delete the allowlist and invites in $STATE_DIR? [y/N] " answer
+        answer="$(ask "Delete the allowlist and invites in $STATE_DIR? [y/N] ")"
         case "$answer" in
             y|Y|yes|YES) KEEP_STATE=0 ;;
             *) KEEP_STATE=1 ;;
@@ -146,7 +168,7 @@ if [ "$ASSUME_YES" -eq 0 ]; then
     if [ "$PURGE" -eq 0 ] && [ "$KEEP_YGGDRASIL_SET" -eq 0 ]; then
         if [ "$WAS_INSTALLED" = "1" ]; then
             # Yggdrasil existed before the installer: keep it by default.
-            read -r -p "Remove the Yggdrasil package that was already installed? [y/N] " answer
+            answer="$(ask "Remove the Yggdrasil package that was already installed? [y/N] ")"
             case "$answer" in
                 y|Y|yes|YES) KEEP_YGGDRASIL=0 ;;
                 *) KEEP_YGGDRASIL=1 ;;
@@ -154,14 +176,14 @@ if [ "$ASSUME_YES" -eq 0 ]; then
         else
             # The installer added Yggdrasil itself. Keeping it is still the
             # safe default; --purge removes it without asking.
-            read -r -p "Remove the Yggdrasil package installed by this installer? [y/N] " answer
+            answer="$(ask "Remove the Yggdrasil package installed by this installer? [y/N] ")"
             case "$answer" in
                 y|Y|yes|YES) KEEP_YGGDRASIL=0 ;;
                 *) KEEP_YGGDRASIL=1 ;;
             esac
         fi
     fi
-    read -r -p "Continue? [y/N] " answer
+    answer="$(ask "Continue? [y/N] ")"
     case "$answer" in
         y|Y|yes|YES) ;;
         *) echo "Aborted."; exit 1 ;;

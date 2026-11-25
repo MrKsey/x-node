@@ -4,6 +4,13 @@ All notable changes to X-Node are documented here. The format is based on [Keep 
 
 The release workflow publishes the section of the tag as the GitHub release body, so every release has a short human-readable summary of what changed. Keep each bullet on a single line: GitHub turns every newline in a release body into a hard break, so a wrapped bullet would render as a narrow column instead of using the full width.
 
+## [1.7.25] — 2026-11-25
+
+### Fixed
+
+- **Removal runs as a single command again.** With `curl … | sudo bash` the standard input is the script itself, and the uninstaller took that for a missing terminal and stopped with "stdin is not a terminal; pass --yes". The questions now come from `/dev/tty` while bash keeps reading the script from the pipe, so the one-liner stays interactive; a run with no terminal at all still needs `--yes`.
+- **Click-to-copy fields in the dashboard copy the value as it is written**, with the square brackets around IPv6 addresses: the SOCKS5 `[address]:port`, the IPv6 source, the Yggdrasil address and subnet, and the DNS listen address. The brackets were added for the display only, so the clipboard got a bare address that is not a valid host in a URL or a host:port pair.
+
 ## [1.7.24] — 2026-11-22
 
 ### Changed
